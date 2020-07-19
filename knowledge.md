@@ -1,0 +1,1 @@
+- LT has a schema for grammar.xml in https://github.com/languagetool-org/languagetool/blob/master/languagetool-core/src/main/resources/org/languagetool/rules/rules.xsd
