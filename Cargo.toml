@@ -8,6 +8,5 @@ edition = "2018"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde-xml-rs = "0.4.0"
-serde-value = "0.7.0"
-xml-rs = "0.8.0"
+serde-xml-rs = { git = "https://github.com/01d55/serde-xml-rs/", branch = "arrlaari/ignore_whitespace_event" }
+xml-rs = "0.6.0"
