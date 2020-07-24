@@ -1,21 +1,21 @@
 use serde::de::Deserialize;
 use serde_value::Value;
 
-pub struct KeyMatcher<'a, 'de, T: Deserialize<'de>> {
-    matcher: Box<dyn Match<'de, T>>,
+pub struct KeyMatcher<'a, T> {
+    matcher: Box<dyn Match<T>>,
     key: Vec<Accessor<'a>>,
 }
 
-impl<'a, 'de, T: Deserialize<'de>> Match<'de, Value> for KeyMatcher<'a, 'de, T> {
+impl<'a, 'de, T: Deserialize<'de>> Match<Value> for KeyMatcher<'a, T> {
     fn is_match(&self, other: &Value) -> bool {
         self.matcher.is_match(&access(other, &self.key))
     }
 }
 
-pub trait Match<'de, T: Deserialize<'de>> {
+pub trait Match<T> {
     fn is_match(&self, other: &T) -> bool;
 
-    fn with_key<'a>(self, key: Vec<Accessor<'a>>) -> KeyMatcher<'a, 'de, T>
+    fn with_key<'a>(self, key: Vec<Accessor<'a>>) -> KeyMatcher<'a, T>
     where
         Self: 'static + Sized,
     {
@@ -26,7 +26,7 @@ pub trait Match<'de, T: Deserialize<'de>> {
     }
 }
 
-impl<'de, T: Deserialize<'de> + PartialEq> Match<'de, T> for T {
+impl<T: PartialEq> Match<T> for T {
     fn is_match(&self, other: &T) -> bool {
         other == self
     }
@@ -74,12 +74,12 @@ impl Quantifier {
     }
 }
 
-pub struct Rule<'de, T> {
-    atoms: Vec<(Box<dyn Match<'de, T>>, Quantifier)>,
+pub struct Rule<T> {
+    atoms: Vec<(Box<dyn Match<T>>, Quantifier)>,
 }
 
-impl<'de, T: Deserialize<'de>> Rule<'de, T> {
-    pub fn new(atoms: Vec<(Box<dyn Match<'de, T>>, Quantifier)>) -> Self {
+impl<T> Rule<T> {
+    pub fn new(atoms: Vec<(Box<dyn Match<T>>, Quantifier)>) -> Self {
         Rule { atoms }
     }
 
@@ -135,11 +135,11 @@ impl<'de, T: Deserialize<'de>> Rule<'de, T> {
     }
 }
 
-pub struct RuleSet<'de, T> {
-    rules: Vec<Rule<'de, T>>,
+pub struct RuleSet<T> {
+    rules: Vec<Rule<T>>,
 }
 
-impl<'de, T: Deserialize<'de>> RuleSet<'de, T> {
+impl<T> RuleSet<T> {
     pub fn apply(&self, sequence: &[T]) {
         for rule in &self.rules {
             rule.apply(sequence);
