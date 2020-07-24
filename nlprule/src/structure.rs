@@ -205,7 +205,7 @@ pub struct Pattern {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Rule {
+pub struct RuleStructure {
     pattern: Pattern,
     message: Message,
     #[serde(rename = "example")]
@@ -215,14 +215,17 @@ pub struct Rule {
     short: Option<XMLString>,
 }
 
-fn main() {
+pub fn read_rules<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Vec<Result<RuleStructure, serde_xml_rs::Error>> {
     let ids: Option<&[&str]> = None;
-    let file = File::open("data/grammar.canonic.xml").unwrap();
+    let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
     let sanitized = preprocess::sanitize(file);
     let rules = preprocess::extract_rules(sanitized.as_bytes());
-    let rules = rules
+
+    rules
         .iter()
         .filter(|x| {
             if let Some(ids) = ids {
@@ -236,15 +239,9 @@ fn main() {
             }
         })
         .map(|x| {
-            Rule::deserialize(&mut serde_xml_rs::Deserializer::new(EventReader::new(
+            RuleStructure::deserialize(&mut serde_xml_rs::Deserializer::new(EventReader::new(
                 x.0.as_bytes(),
             )))
         })
-        .filter_map(|x| match x {
-            Ok(rule) => Some(rule),
-            Err(_) => None,
-        })
-        .collect::<Vec<_>>();
-
-    println!("{:#?}", rules);
+        .collect()
 }
