@@ -141,7 +141,7 @@ pub struct Suggestion {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
-enum MessagePart {
+pub enum MessagePart {
     Suggestion(Suggestion),
     Text(String),
 }
@@ -150,18 +150,18 @@ enum MessagePart {
 #[serde(deny_unknown_fields)]
 pub struct Message {
     #[serde(rename = "$value")]
-    parts: Vec<MessagePart>,
+    pub parts: Vec<MessagePart>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExampleMarker {
-    text: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
-enum ExamplePart {
+pub enum ExamplePart {
     Marker(ExampleMarker),
     Text(String),
 }
@@ -169,22 +169,22 @@ enum ExamplePart {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Example {
-    correction: Option<String>,
+    pub correction: Option<String>,
     #[serde(rename = "$value")]
-    parts: Vec<ExamplePart>,
+    pub parts: Vec<ExamplePart>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Token {
-    text: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternMarker {
     #[serde(rename = "token")]
-    tokens: Vec<Token>,
+    pub tokens: Vec<Token>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,24 +200,22 @@ pub enum PatternPart {
 pub struct Pattern {
     // case_sensitive: Option<String>,
     #[serde(rename = "$value")]
-    parts: Vec<PatternPart>,
+    pub parts: Vec<PatternPart>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RuleStructure {
-    pattern: Pattern,
-    message: Message,
+pub struct Rule {
+    pub pattern: Pattern,
+    pub message: Message,
     #[serde(rename = "example")]
-    examples: Vec<Example>,
-    id: Option<String>,
-    name: String,
-    short: Option<XMLString>,
+    pub examples: Vec<Example>,
+    pub id: Option<String>,
+    pub name: String,
+    pub short: Option<XMLString>,
 }
 
-pub fn read_rules<P: AsRef<std::path::Path>>(
-    path: P,
-) -> Vec<Result<RuleStructure, serde_xml_rs::Error>> {
+pub fn read_rules<P: AsRef<std::path::Path>>(path: P) -> Vec<Result<Rule, serde_xml_rs::Error>> {
     let ids: Option<&[&str]> = None;
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
@@ -239,7 +237,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
             }
         })
         .map(|x| {
-            RuleStructure::deserialize(&mut serde_xml_rs::Deserializer::new(EventReader::new(
+            Rule::deserialize(&mut serde_xml_rs::Deserializer::new(EventReader::new(
                 x.0.as_bytes(),
             )))
         })

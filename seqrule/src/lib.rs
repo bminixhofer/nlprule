@@ -74,12 +74,26 @@ impl Quantifier {
     }
 }
 
+pub struct Atom<T> {
+    pub matcher: Box<dyn Match<T>>,
+    pub quantifier: Quantifier,
+}
+
+impl<T> Atom<T> {
+    pub fn new(matcher: Box<dyn Match<T>>, quantifier: Quantifier) -> Self {
+        Atom {
+            matcher,
+            quantifier,
+        }
+    }
+}
+
 pub struct Rule<T> {
-    atoms: Vec<(Box<dyn Match<T>>, Quantifier)>,
+    atoms: Vec<Atom<T>>,
 }
 
 impl<T> Rule<T> {
-    pub fn new(atoms: Vec<(Box<dyn Match<T>>, Quantifier)>) -> Self {
+    pub fn new(atoms: Vec<Atom<T>>) -> Self {
         Rule { atoms }
     }
 
@@ -88,8 +102,11 @@ impl<T> Rule<T> {
             return true;
         }
 
-        match self.atoms[index + 1..].iter().position(|x| x.1.min > 0) {
-            Some(position) => self.atoms[index + 1 + position].0.is_match(item),
+        match self.atoms[index + 1..]
+            .iter()
+            .position(|x| x.quantifier.min > 0)
+        {
+            Some(position) => self.atoms[index + 1 + position].matcher.is_match(item),
             None => true,
         }
     }
@@ -105,10 +122,9 @@ impl<T> Rule<T> {
                 break true;
             }
 
-            let matcher = &self.atoms[cur_atom_idx].0;
-            let quantifier = &self.atoms[cur_atom_idx].1;
+            let atom = &self.atoms[cur_atom_idx];
 
-            if cur_count >= quantifier.max {
+            if cur_count >= atom.quantifier.max {
                 cur_atom_idx += 1;
                 cur_count = 0;
                 if cur_atom_idx >= self.atoms.len() {
@@ -121,11 +137,12 @@ impl<T> Rule<T> {
                 break false;
             }
 
-            if cur_count >= quantifier.min && self.next_can_match(&sequence[position], cur_atom_idx)
+            if cur_count >= atom.quantifier.min
+                && self.next_can_match(&sequence[position], cur_atom_idx)
             {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if matcher.is_match(&sequence[position]) {
+            } else if atom.matcher.is_match(&sequence[position]) {
                 position += 1;
                 cur_count += 1;
             } else {

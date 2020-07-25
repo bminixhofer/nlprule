@@ -10,3 +10,5 @@ edition = "2018"
 serde = { version = "1.0", features = ["derive"] }
 serde-xml-rs = { git = "https://github.com/01d55/serde-xml-rs/", branch = "arrlaari/ignore_whitespace_event" }
 xml-rs = "0.6.0"
+seqrule = { path = "../seqrule" }
+serde-value = "0.7.0"
