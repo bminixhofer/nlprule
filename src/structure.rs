@@ -3,14 +3,15 @@ use std::fs::File;
 use std::io::BufReader;
 use xml::reader::EventReader;
 
+#[derive(Debug, Clone)]
+pub struct ExtraInfo {
+    pub id: String,
+}
+
 mod preprocess {
+    use super::ExtraInfo;
     use xml::reader::EventReader;
     use xml::writer::EmitterConfig;
-
-    #[derive(Debug, Clone)]
-    pub struct ExtraInfo {
-        pub id: Option<String>,
-    }
 
     pub fn sanitize(input: impl std::io::Read) -> String {
         let mut sanitized = Vec::new();
@@ -61,6 +62,7 @@ mod preprocess {
         let parser = EventReader::new(xml);
 
         let mut current = Vec::new();
+        let mut current_id = (String::new(), -1);
         let mut extra_info = None;
 
         for event in parser {
@@ -71,17 +73,31 @@ mod preprocess {
                 xml::reader::XmlEvent::StartElement {
                     name, attributes, ..
                 } => {
-                    if name.to_string() == "rule" {
-                        while current.len() > 1 {
-                            current.remove(0);
-                        }
+                    let name = name.to_string();
+                    let name = name.as_str();
 
+                    if name == "rulegroup" || name == "rule" {
                         let id = attributes
                             .iter()
                             .find(|x| x.name.local_name == "id")
                             .map(|x| x.value.clone());
 
-                        extra_info = Some(ExtraInfo { id })
+                        match (name, id) {
+                            ("rule", Some(id)) => current_id = (id, 0),
+                            ("rule", None) => current_id.1 += 1,
+                            ("rulegroup", Some(id)) => current_id = (id, 0),
+                            _ => {}
+                        }
+                    }
+
+                    if name == "rule" {
+                        while current.len() > 1 {
+                            current.remove(0);
+                        }
+
+                        extra_info = Some(ExtraInfo {
+                            id: format!("{}.{}", current_id.0, current_id.1),
+                        })
                     }
                 }
                 xml::reader::XmlEvent::EndElement { name, .. } => {
@@ -215,7 +231,9 @@ pub struct Rule {
     pub short: Option<XMLString>,
 }
 
-pub fn read_rules<P: AsRef<std::path::Path>>(path: P) -> Vec<Result<Rule, serde_xml_rs::Error>> {
+pub fn read_rules<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Vec<Result<(Rule, ExtraInfo), serde_xml_rs::Error>> {
     let ids: Option<&[&str]> = None;
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
@@ -224,14 +242,10 @@ pub fn read_rules<P: AsRef<std::path::Path>>(path: P) -> Vec<Result<Rule, serde_
     let rules = preprocess::extract_rules(sanitized.as_bytes());
 
     rules
-        .iter()
+        .into_iter()
         .filter(|x| {
             if let Some(ids) = ids {
-                if let Some(current_id) = &x.1.id {
-                    ids.contains(&current_id.as_str())
-                } else {
-                    false
-                }
+                ids.contains(&x.1.id.as_str())
             } else {
                 true
             }
@@ -240,6 +254,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(path: P) -> Vec<Result<Rule, serde_
             Rule::deserialize(&mut serde_xml_rs::Deserializer::new(EventReader::new(
                 x.0.as_bytes(),
             )))
+            .map(|rule| (rule, x.1))
         })
         .collect()
 }

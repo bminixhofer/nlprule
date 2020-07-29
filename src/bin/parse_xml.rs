@@ -26,6 +26,7 @@ pub struct Test {
 }
 
 pub struct Rule {
+    id: String,
     composition: Composition,
     tests: Vec<Test>,
     suggestions: Vec<String>,
@@ -80,8 +81,8 @@ impl Rule {
 
             if !pass {
                 warn!(
-                    "Test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
-                    test.text, test.correction, corrections
+                    "Rule {}: test \"{}\" of failed. Expected: {:#?}. Found: {:#?}.",
+                    self.id, test.text, test.correction, corrections
                 );
             }
 
@@ -104,14 +105,15 @@ mod structure_to_rule {
         (Box::new(atom), Quantifier::new(1, 1))
     }
 
-    impl From<structure::Rule> for super::Rule {
-        fn from(structure: structure::Rule) -> super::Rule {
+    impl From<(structure::Rule, structure::ExtraInfo)> for super::Rule {
+        fn from(data: (structure::Rule, structure::ExtraInfo)) -> super::Rule {
+            let id = data.1.id;
             let mut start = None;
             let mut end = None;
 
             let mut atoms = Vec::new();
 
-            for part in &structure.pattern.parts {
+            for part in &data.0.pattern.parts {
                 match part {
                     structure::PatternPart::Token(token) => atoms.push(atom_from_token(token)),
                     structure::PatternPart::Marker(marker) => {
@@ -129,7 +131,8 @@ mod structure_to_rule {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or_else(|| atoms.len());
 
-            let suggestions = structure
+            let suggestions = data
+                .0
                 .message
                 .parts
                 .iter()
@@ -142,7 +145,7 @@ mod structure_to_rule {
                 .collect::<Vec<_>>();
 
             let mut tests = Vec::new();
-            for example in &structure.examples {
+            for example in &data.0.examples {
                 let mut texts = Vec::new();
                 let mut char_length = 0;
                 let mut correction: Option<super::Correction> = None;
@@ -162,15 +165,17 @@ mod structure_to_rule {
                             texts.push(marker.text.as_str());
                             let length = marker.text.chars().count();
 
-                            correction = Some(super::Correction {
-                                start: char_length,
-                                end: char_length + length,
-                                text: example
-                                    .correction
-                                    .clone()
-                                    .map(|x| x.split('|').map(|x| x.to_string()).collect())
-                                    .expect("example must have correction if it has marker"),
-                            });
+                            if let Some(correction_text) = &example.correction {
+                                correction = Some(super::Correction {
+                                    start: char_length,
+                                    end: char_length + length,
+                                    text: correction_text
+                                        .split('|')
+                                        .map(|x| x.to_string())
+                                        .collect(),
+                                });
+                            }
+
                             char_length += marker.text.chars().count();
                         }
                     }
@@ -190,6 +195,7 @@ mod structure_to_rule {
                 suggestions,
                 start,
                 end,
+                id,
             }
         }
     }
@@ -200,7 +206,7 @@ fn main() {
     let rules = nlprule::structure::read_rules("data/grammar.canonic.xml");
     let mut errors: HashMap<String, usize> = HashMap::new();
 
-    let mut rules = rules
+    let rules = rules
         .into_iter()
         .filter_map(|x| match x {
             Ok(rule) => Some(rule),
@@ -218,8 +224,13 @@ fn main() {
     errors.sort_by_key(|x| -(x.1 as i32));
 
     println!("Top errors: {:#?}", &errors[..5]);
-    println!("{:#?}", rules[1]);
-    let rule = Rule::from(rules.remove(1));
+    println!("Parsed rules: {}", rules.len());
 
-    println!("{:#?}", rule.test());
+    let rules: Vec<_> = rules.into_iter().map(Rule::from).collect();
+    println!(
+        "Rules passing tests: {}",
+        rules
+            .iter()
+            .fold(0, |count, rule| count + rule.test() as usize)
+    );
 }
