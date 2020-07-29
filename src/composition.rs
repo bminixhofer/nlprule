@@ -84,15 +84,17 @@ impl Composition {
         }
     }
 
-    pub fn apply(&self, sequence: &[Token]) -> bool {
+    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<Vec<Vec<&'a Token<'a>>>> {
         let mut position = 0;
 
         let mut cur_count = 0;
         let mut cur_atom_idx = 0;
 
+        let mut groups = self.atoms.iter().map(|_| Vec::new()).collect::<Vec<_>>();
+
         loop {
             if cur_atom_idx >= self.atoms.len() {
-                break true;
+                break Some(groups);
             }
 
             let atom = &self.atoms[cur_atom_idx];
@@ -101,23 +103,24 @@ impl Composition {
                 cur_atom_idx += 1;
                 cur_count = 0;
                 if cur_atom_idx >= self.atoms.len() {
-                    break true;
+                    break Some(groups);
                 }
                 continue;
             }
 
-            if position >= sequence.len() {
-                break false;
+            if position >= tokens.len() {
+                break None;
             }
 
-            if cur_count >= atom.1.min && self.next_can_match(&sequence[position], cur_atom_idx) {
+            if cur_count >= atom.1.min && self.next_can_match(&tokens[position], cur_atom_idx) {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if atom.0.is_match(&sequence[position]) {
+            } else if atom.0.is_match(tokens[position]) {
+                groups[cur_atom_idx].push(tokens[position]);
                 position += 1;
                 cur_count += 1;
             } else {
-                break false;
+                break None;
             }
         }
     }

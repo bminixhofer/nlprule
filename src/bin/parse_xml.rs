@@ -1,16 +1,26 @@
+use log::warn;
 use nlprule::composition::Composition;
 use nlprule::Token;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
-struct Correction {
+pub struct Correction {
     pub start: usize,
     pub end: usize,
-    pub text: String,
+    pub text: Vec<String>,
+}
+
+impl std::cmp::PartialEq for Correction {
+    fn eq(&self, other: &Correction) -> bool {
+        let a: HashSet<&String> = self.text.iter().collect();
+        let b: HashSet<&String> = other.text.iter().collect();
+
+        a.intersection(&b).count() > 0 && other.start == self.start && other.end == self.end
+    }
 }
 
 #[derive(Debug)]
-struct Test {
+pub struct Test {
     text: String,
     correction: Option<Correction>,
 }
@@ -24,17 +34,61 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn apply<'a>(&self, tokens: &[Token<'a>]) {
+    pub fn apply<'a>(&self, tokens: &[Token<'a>]) -> Vec<Correction> {
+        let refs: Vec<&Token> = tokens.iter().collect();
+        let mut corrections = Vec::new();
+
         for i in 0..tokens.len() {
-            self.composition.apply(&tokens[i..]);
+            if let Some(groups) = self.composition.apply(&refs[i..]) {
+                let start_group = &groups[self.start];
+                let end_group = &groups[self.end - 1];
+
+                assert!(
+                    !start_group.is_empty() && !end_group.is_empty(),
+                    "groups must not be empty"
+                );
+
+                let start = start_group[0].char_span.0;
+                let end = end_group[end_group.len() - 1].char_span.1;
+                corrections.push(Correction {
+                    start,
+                    end,
+                    text: self.suggestions.to_vec(),
+                })
+            }
         }
+
+        corrections
     }
 
-    pub fn test(&self) {
+    pub fn test(&self) -> bool {
+        let mut passes = Vec::new();
+
         for test in &self.tests {
             let tokens = Token::str_to_tokens(&test.text);
-            self.apply(&tokens);
+            let corrections = self.apply(&tokens);
+
+            assert!(
+                corrections.len() < 2,
+                "test texts must have one or zero corrections"
+            );
+
+            let pass = match &test.correction {
+                Some(correction) => corrections.len() == 1 && correction == &corrections[0],
+                None => corrections.is_empty(),
+            };
+
+            if !pass {
+                warn!(
+                    "Test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
+                    test.text, test.correction, corrections
+                );
+            }
+
+            passes.push(pass);
         }
+
+        passes.iter().all(|x| *x)
     }
 }
 
@@ -43,7 +97,9 @@ mod structure_to_rule {
     use nlprule::structure;
 
     fn atom_from_token(token: &structure::Token) -> (Box<dyn Atom>, Quantifier) {
-        let atom = MatchAtom::new(StringMatcher::new(token.text.clone()), |token| token.text);
+        let atom = MatchAtom::new(StringMatcher::new(token.text.clone()), |token| {
+            token.lower.as_str()
+        });
 
         (Box::new(atom), Quantifier::new(1, 1))
     }
@@ -112,12 +168,7 @@ mod structure_to_rule {
                                 text: example
                                     .correction
                                     .clone()
-                                    .map(|x| {
-                                        x.split('|')
-                                            .next()
-                                            .expect("correction must not be empty")
-                                            .to_string()
-                                    })
+                                    .map(|x| x.split('|').map(|x| x.to_string()).collect())
                                     .expect("example must have correction if it has marker"),
                             });
                             char_length += marker.text.chars().count();
@@ -145,6 +196,7 @@ mod structure_to_rule {
 }
 
 fn main() {
+    env_logger::init();
     let rules = nlprule::structure::read_rules("data/grammar.canonic.xml");
     let mut errors: HashMap<String, usize> = HashMap::new();
 
@@ -166,8 +218,8 @@ fn main() {
     errors.sort_by_key(|x| -(x.1 as i32));
 
     println!("Top errors: {:#?}", &errors[..5]);
-    println!("{:#?}", rules[0]);
-    let rule = Rule::from(rules.remove(0));
+    println!("{:#?}", rules[1]);
+    let rule = Rule::from(rules.remove(1));
 
     println!("{:#?}", rule.test());
 }
