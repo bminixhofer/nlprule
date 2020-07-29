@@ -1,4 +1,5 @@
-use serde_value::Value;
+use nlprule::composition::Composition;
+use nlprule::Token;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -14,27 +15,43 @@ struct Test {
     correction: Option<Correction>,
 }
 
-struct Rule {
-    rule: seqrule::Rule<Value>,
+pub struct Rule {
+    composition: Composition,
     tests: Vec<Test>,
+    suggestions: Vec<String>,
+    start: usize,
+    end: usize,
+}
+
+impl Rule {
+    pub fn apply<'a>(&self, tokens: &[Token<'a>]) {
+        for i in 0..tokens.len() {
+            self.composition.apply(&tokens[i..]);
+        }
+    }
+
+    pub fn test(&self) {
+        for test in &self.tests {
+            let tokens = Token::str_to_tokens(&test.text);
+            self.apply(&tokens);
+        }
+    }
 }
 
 mod structure_to_rule {
+    use nlprule::composition::{Atom, Composition, MatchAtom, Quantifier, StringMatcher};
     use nlprule::structure;
-    use seqrule::{Atom, Match, Quantifier, Rule};
-    use serde_value::Value;
 
-    fn atom_from_token(token: &structure::Token) -> Atom<Value> {
-        Atom::new(
-            Box::new(token.text.clone().with_key(Vec::new())),
-            Quantifier::new(1, 1),
-        )
+    fn atom_from_token(token: &structure::Token) -> (Box<dyn Atom>, Quantifier) {
+        let atom = MatchAtom::new(StringMatcher::new(token.text.clone()), |token| token.text);
+
+        (Box::new(atom), Quantifier::new(1, 1))
     }
 
     impl From<structure::Rule> for super::Rule {
         fn from(structure: structure::Rule) -> super::Rule {
-            let mut start = 0;
-            let mut end = 0;
+            let mut start = None;
+            let mut end = None;
 
             let mut atoms = Vec::new();
 
@@ -42,16 +59,31 @@ mod structure_to_rule {
                 match part {
                     structure::PatternPart::Token(token) => atoms.push(atom_from_token(token)),
                     structure::PatternPart::Marker(marker) => {
-                        start = atoms.len();
+                        start = Some(atoms.len());
 
                         for token in &marker.tokens {
                             atoms.push(atom_from_token(token));
                         }
 
-                        end = atoms.len();
+                        end = Some(atoms.len());
                     }
                 }
             }
+
+            let start = start.unwrap_or(0);
+            let end = end.unwrap_or_else(|| atoms.len());
+
+            let suggestions = structure
+                .message
+                .parts
+                .iter()
+                .filter_map(|x| match x {
+                    structure::MessagePart::Suggestion(suggestion) => {
+                        Some(suggestion.text.to_string())
+                    }
+                    structure::MessagePart::Text(_) => None,
+                })
+                .collect::<Vec<_>>();
 
             let mut tests = Vec::new();
             for example in &structure.examples {
@@ -99,9 +131,15 @@ mod structure_to_rule {
                 });
             }
 
-            let rule = Rule::new(atoms);
+            let composition = Composition::new(atoms);
 
-            super::Rule { rule, tests }
+            super::Rule {
+                composition,
+                tests,
+                suggestions,
+                start,
+                end,
+            }
         }
     }
 }
@@ -129,5 +167,7 @@ fn main() {
 
     println!("Top errors: {:#?}", &errors[..5]);
     println!("{:#?}", rules[0]);
-    println!("{:#?}", Rule::from(rules.remove(0)).tests);
+    let rule = Rule::from(rules.remove(0));
+
+    println!("{:#?}", rule.test());
 }

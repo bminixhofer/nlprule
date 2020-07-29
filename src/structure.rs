@@ -136,7 +136,7 @@ impl std::convert::Into<String> for XMLString {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Suggestion {
-    text: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
