@@ -25,11 +25,48 @@ pub struct Test {
     correction: Option<Correction>,
 }
 
+#[derive(Debug)]
+struct Match {
+    index: usize,
+}
+
+impl Match {
+    fn apply(&self, groups: &[Vec<&Token>]) -> String {
+        groups[self.index][0].text.to_string()
+    }
+}
+
+#[derive(Debug)]
+enum SuggesterPart {
+    Text(String),
+    Match(Match),
+}
+
+#[derive(Debug)]
+pub struct Suggester {
+    parts: Vec<SuggesterPart>,
+}
+
+impl Suggester {
+    fn apply(&self, groups: &[Vec<&Token>]) -> String {
+        let mut output = Vec::new();
+
+        for part in &self.parts {
+            match part {
+                SuggesterPart::Text(t) => output.push(t.clone()),
+                SuggesterPart::Match(m) => output.push(m.apply(groups)),
+            }
+        }
+
+        output.join("")
+    }
+}
+
 pub struct Rule {
     id: String,
     composition: Composition,
     tests: Vec<Test>,
-    suggestions: Vec<String>,
+    suggesters: Vec<Suggester>,
     start: usize,
     end: usize,
 }
@@ -54,7 +91,7 @@ impl Rule {
                 corrections.push(Correction {
                     start,
                     end,
-                    text: self.suggestions.to_vec(),
+                    text: self.suggesters.iter().map(|x| x.apply(&groups)).collect(),
                 })
             }
         }
@@ -81,7 +118,7 @@ impl Rule {
 
             if !pass {
                 warn!(
-                    "Rule {}: test \"{}\" of failed. Expected: {:#?}. Found: {:#?}.",
+                    "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
                     self.id, test.text, test.correction, corrections
                 );
             }
@@ -94,15 +131,61 @@ impl Rule {
 }
 
 mod structure_to_rule {
+    use lazy_static::lazy_static;
     use nlprule::composition::{Atom, Composition, MatchAtom, Quantifier, StringMatcher};
     use nlprule::structure;
+    use regex::Regex;
 
     fn atom_from_token(token: &structure::Token) -> (Box<dyn Atom>, Quantifier) {
-        let atom = MatchAtom::new(StringMatcher::new(token.text.clone()), |token| {
+        let atom = MatchAtom::new(StringMatcher::new(token.text.to_lowercase()), |token| {
             token.lower.as_str()
         });
 
         (Box::new(atom), Quantifier::new(1, 1))
+    }
+
+    impl From<Vec<structure::SuggestionPart>> for super::Suggester {
+        fn from(data: Vec<structure::SuggestionPart>) -> super::Suggester {
+            let mut parts = Vec::new();
+
+            lazy_static! {
+                static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
+            }
+
+            for part in data {
+                match part {
+                    structure::SuggestionPart::Text(text) => {
+                        let mut end_index = 0;
+
+                        for capture in MATCH_REGEX.captures_iter(&text) {
+                            let mat = capture.get(0).unwrap();
+                            if end_index != mat.start() {
+                                parts.push(super::SuggesterPart::Text(
+                                    (&text[end_index..mat.start()]).to_string(),
+                                ))
+                            }
+
+                            let index = capture
+                                .get(1)
+                                .unwrap()
+                                .as_str()
+                                .parse::<usize>()
+                                .expect("match regex capture must be parsable as usize.")
+                                - 1;
+
+                            parts.push(super::SuggesterPart::Match(super::Match { index }));
+                            end_index = mat.end();
+                        }
+
+                        if end_index < text.len() {
+                            parts.push(super::SuggesterPart::Text((&text[end_index..]).to_string()))
+                        }
+                    }
+                }
+            }
+
+            super::Suggester { parts }
+        }
     }
 
     impl From<(structure::Rule, structure::ExtraInfo)> for super::Rule {
@@ -131,18 +214,16 @@ mod structure_to_rule {
             let start = start.unwrap_or(0);
             let end = end.unwrap_or_else(|| atoms.len());
 
-            let suggestions = data
+            let suggesters = data
                 .0
                 .message
                 .parts
-                .iter()
+                .into_iter()
                 .filter_map(|x| match x {
-                    structure::MessagePart::Suggestion(suggestion) => {
-                        Some(suggestion.text.to_string())
-                    }
+                    structure::MessagePart::Suggestion(suggestion) => Some(suggestion.parts.into()),
                     structure::MessagePart::Text(_) => None,
                 })
-                .collect::<Vec<_>>();
+                .collect::<Vec<super::Suggester>>();
 
             let mut tests = Vec::new();
             for example in &data.0.examples {
@@ -192,7 +273,7 @@ mod structure_to_rule {
             super::Rule {
                 composition,
                 tests,
-                suggestions,
+                suggesters,
                 start,
                 end,
                 id,
@@ -223,7 +304,10 @@ fn main() {
     let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
     errors.sort_by_key(|x| -(x.1 as i32));
 
-    println!("Top errors: {:#?}", &errors[..5]);
+    println!(
+        "Top errors: {:#?}",
+        &errors[..std::cmp::min(5, errors.len())]
+    );
     println!("Parsed rules: {}", rules.len());
 
     let rules: Vec<_> = rules.into_iter().map(Rule::from).collect();

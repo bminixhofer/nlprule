@@ -150,9 +150,16 @@ impl std::convert::Into<String> for XMLString {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub enum SuggestionPart {
+    Text(String),
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Suggestion {
-    pub text: String,
+    #[serde(rename = "$value")]
+    pub parts: Vec<SuggestionPart>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,7 +241,7 @@ pub struct Rule {
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Vec<Result<(Rule, ExtraInfo), serde_xml_rs::Error>> {
-    let ids: Option<&[&str]> = None;
+    let ids: Option<&[&str]> = None; //Some(&["IN_ZWISCHEN.0"]);
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
