@@ -1,6 +1,6 @@
 use log::warn;
 use nlprule::composition::Composition;
-use nlprule::Token;
+use nlprule::{utils, Token};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -91,7 +91,27 @@ impl Rule {
                 corrections.push(Correction {
                     start,
                     end,
-                    text: self.suggesters.iter().map(|x| x.apply(&groups)).collect(),
+                    text: self
+                        .suggesters
+                        .iter()
+                        .map(|x| {
+                            let suggestion = x.apply(&groups);
+
+                            // adjust case
+                            if start_group[0].is_sentence_start
+                                || start_group[0]
+                                    .text
+                                    .chars()
+                                    .next()
+                                    .expect("token must have at least one char")
+                                    .is_uppercase()
+                            {
+                                utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
+                            } else {
+                                suggestion
+                            }
+                        })
+                        .collect(),
                 })
             }
         }
@@ -323,7 +343,7 @@ fn main() {
 
     println!(
         "Top errors: {:#?}",
-        &errors[..std::cmp::min(5, errors.len())]
+        &errors[..std::cmp::min(10, errors.len())]
     );
     println!("Parsed rules: {}", rules.len());
 

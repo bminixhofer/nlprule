@@ -235,7 +235,7 @@ pub struct Rule {
     #[serde(rename = "example")]
     pub examples: Vec<Example>,
     pub id: Option<String>,
-    pub name: String,
+    pub name: Option<String>,
     pub short: Option<XMLString>,
 }
 

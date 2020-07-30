@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 pub mod composition;
 pub mod structure;
 pub mod utils;
@@ -33,28 +35,42 @@ pub struct Token<'a> {
     pub lower: String,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
+    pub is_sentence_start: bool,
+    pub is_sentence_end: bool,
 }
 
 impl<'a> Token<'a> {
     pub fn str_to_tokens(input: &'a str) -> Vec<Token<'a>> {
         let mut current_char = 0usize;
 
-        split(input, is_word_boundary)
-            .into_iter()
-            .map(|x| {
-                let char_start = current_char;
-                current_char += x.chars().count();
+        input
+            .unicode_sentences()
+            .map(|sentence| {
+                let splits = split(sentence, is_word_boundary);
+                let split_len = splits.len();
 
-                let byte_start = x.as_ptr() as usize - input.as_ptr() as usize;
+                splits
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, x)| {
+                        let char_start = current_char;
+                        current_char += x.chars().count();
 
-                Token {
-                    text: x.trim(),
-                    lower: x.trim().to_lowercase(),
-                    char_span: (char_start, current_char),
-                    byte_span: (byte_start, byte_start + x.len()),
-                }
+                        let byte_start = x.as_ptr() as usize - input.as_ptr() as usize;
+
+                        Token {
+                            text: x.trim(),
+                            lower: x.trim().to_lowercase(),
+                            char_span: (char_start, current_char),
+                            byte_span: (byte_start, byte_start + x.len()),
+                            is_sentence_start: index == 0,
+                            is_sentence_end: index == split_len - 1,
+                        }
+                    })
+                    .filter(|token| !token.text.is_empty())
+                    .collect::<Vec<_>>()
             })
-            .filter(|token| !token.text.is_empty())
+            .flatten()
             .collect()
     }
 }
