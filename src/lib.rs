@@ -1,5 +1,6 @@
 pub mod composition;
 pub mod structure;
+pub mod utils;
 
 fn is_word_boundary(input: char) -> bool {
     !(input.is_alphanumeric() || input == '-')

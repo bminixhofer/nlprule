@@ -1,7 +1,30 @@
 use crate::Token;
+use regex::Regex;
 
 pub trait Match<T: ?Sized> {
     fn is_match(&self, input: &T) -> bool;
+}
+
+pub struct RegexMatcher {
+    regex: Regex,
+}
+
+impl Match<[&str]> for RegexMatcher {
+    fn is_match(&self, input: &[&str]) -> bool {
+        input.iter().any(|x| self.regex.is_match(x))
+    }
+}
+
+impl Match<str> for RegexMatcher {
+    fn is_match(&self, input: &str) -> bool {
+        self.regex.is_match(input)
+    }
+}
+
+impl RegexMatcher {
+    pub fn new(regex: Regex) -> Self {
+        RegexMatcher { regex }
+    }
 }
 
 pub struct StringMatcher {

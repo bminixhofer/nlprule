@@ -132,16 +132,33 @@ impl Rule {
 
 mod structure_to_rule {
     use lazy_static::lazy_static;
-    use nlprule::composition::{Atom, Composition, MatchAtom, Quantifier, StringMatcher};
-    use nlprule::structure;
-    use regex::Regex;
+    use nlprule::composition::{
+        Atom, Composition, MatchAtom, Quantifier, RegexMatcher, StringMatcher,
+    };
+    use nlprule::{structure, utils};
+    use regex::{Regex, RegexBuilder};
 
     fn atom_from_token(token: &structure::Token) -> (Box<dyn Atom>, Quantifier) {
-        let atom = MatchAtom::new(StringMatcher::new(token.text.to_lowercase()), |token| {
-            token.lower.as_str()
-        });
+        let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
 
-        (Box::new(atom), Quantifier::new(1, 1))
+        let atom = if is_regex {
+            let regex = utils::fix_regex(&token.text);
+            let regex = RegexBuilder::new(&regex)
+                .case_insensitive(true)
+                .build()
+                .expect("invalid regex");
+
+            Box::new(MatchAtom::new(RegexMatcher::new(regex), |token| {
+                token.lower.as_str()
+            })) as Box<dyn Atom>
+        } else {
+            Box::new(MatchAtom::new(
+                StringMatcher::new(token.text.to_lowercase()),
+                |token| token.lower.as_str(),
+            )) as Box<dyn Atom>
+        };
+
+        (atom, Quantifier::new(1, 1))
     }
 
     impl From<Vec<structure::SuggestionPart>> for super::Suggester {

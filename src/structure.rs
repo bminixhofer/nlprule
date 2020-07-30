@@ -200,6 +200,7 @@ pub struct Example {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Token {
+    pub regexp: Option<String>,
     pub text: String,
 }
 
@@ -241,7 +242,7 @@ pub struct Rule {
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Vec<Result<(Rule, ExtraInfo), serde_xml_rs::Error>> {
-    let ids: Option<&[&str]> = None; //Some(&["IN_ZWISCHEN.0"]);
+    let ids: Option<&[&str]> = None; //Some(&["AUS_AN_DEREN.0"]);
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
