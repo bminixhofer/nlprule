@@ -4,14 +4,14 @@ use nlprule::{utils, Token};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
-pub struct Correction {
+pub struct Suggestion {
     pub start: usize,
     pub end: usize,
     pub text: Vec<String>,
 }
 
-impl std::cmp::PartialEq for Correction {
-    fn eq(&self, other: &Correction) -> bool {
+impl std::cmp::PartialEq for Suggestion {
+    fn eq(&self, other: &Suggestion) -> bool {
         let a: HashSet<&String> = self.text.iter().collect();
         let b: HashSet<&String> = other.text.iter().collect();
 
@@ -22,7 +22,7 @@ impl std::cmp::PartialEq for Correction {
 #[derive(Debug)]
 pub struct Test {
     text: String,
-    correction: Option<Correction>,
+    suggestion: Option<Suggestion>,
 }
 
 #[derive(Debug)]
@@ -72,9 +72,9 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn apply<'a>(&self, tokens: &[Token<'a>]) -> Vec<Correction> {
+    pub fn apply<'a>(&self, tokens: &[Token<'a>]) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
-        let mut corrections = Vec::new();
+        let mut suggestions = Vec::new();
 
         for i in 0..tokens.len() {
             if let Some(groups) = self.composition.apply(&refs[i..]) {
@@ -88,7 +88,7 @@ impl Rule {
 
                 let start = start_group[0].char_span.0;
                 let end = end_group[end_group.len() - 1].char_span.1;
-                corrections.push(Correction {
+                suggestions.push(Suggestion {
                     start,
                     end,
                     text: self
@@ -116,7 +116,7 @@ impl Rule {
             }
         }
 
-        corrections
+        suggestions
     }
 
     pub fn test(&self) -> bool {
@@ -124,25 +124,27 @@ impl Rule {
 
         for test in &self.tests {
             let tokens = Token::str_to_tokens(&test.text);
-            let corrections = self.apply(&tokens);
+            let suggestions = self.apply(&tokens);
 
             assert!(
-                corrections.len() < 2,
+                suggestions.len() < 2,
                 format!(
                     "{} test texts must have one or zero corrections {:?}",
-                    self.id, corrections
+                    self.id, suggestions
                 )
             );
 
-            let pass = match &test.correction {
-                Some(correction) => corrections.len() == 1 && correction == &corrections[0],
-                None => corrections.is_empty(),
+            let pass = match &test.suggestion {
+                Some(correct_suggestion) => {
+                    suggestions.len() == 1 && correct_suggestion == &suggestions[0]
+                }
+                None => suggestions.is_empty(),
             };
 
             if !pass {
                 warn!(
                     "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
-                    self.id, test.text, test.correction, corrections
+                    self.id, test.text, test.suggestion, suggestions
                 );
             }
 
@@ -269,7 +271,7 @@ mod structure_to_rule {
             for example in &data.0.examples {
                 let mut texts = Vec::new();
                 let mut char_length = 0;
-                let mut correction: Option<super::Correction> = None;
+                let mut suggestion: Option<super::Suggestion> = None;
 
                 for part in &example.parts {
                     match part {
@@ -279,7 +281,7 @@ mod structure_to_rule {
                         }
                         structure::ExamplePart::Marker(marker) => {
                             assert!(
-                                correction.is_none(),
+                                suggestion.is_none(),
                                 "example must have one or zero markers"
                             );
 
@@ -287,7 +289,7 @@ mod structure_to_rule {
                             let length = marker.text.chars().count();
 
                             if let Some(correction_text) = &example.correction {
-                                correction = Some(super::Correction {
+                                suggestion = Some(super::Suggestion {
                                     start: char_length,
                                     end: char_length + length,
                                     text: correction_text
@@ -304,7 +306,7 @@ mod structure_to_rule {
 
                 tests.push(super::Test {
                     text: texts.join(""),
-                    correction,
+                    suggestion,
                 });
             }
 
