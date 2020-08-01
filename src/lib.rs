@@ -1,8 +1,17 @@
+use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod composition;
 pub mod structure;
 pub mod utils;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("unexpected condition: {0}")]
+    Unexpected(String),
+    #[error("feature not implemented: {0}")]
+    Unimplemented(String),
+}
 
 fn is_word_boundary(input: char) -> bool {
     !(input.is_alphanumeric() || input == '-')

@@ -2,6 +2,7 @@ use log::warn;
 use nlprule::composition::Composition;
 use nlprule::{utils, Token};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct Suggestion {
@@ -160,8 +161,9 @@ mod structure_to_rule {
     use nlprule::composition::{
         Atom, Composition, MatchAtom, Quantifier, RegexMatcher, StringMatcher,
     };
-    use nlprule::{structure, utils};
+    use nlprule::{structure, utils, Error};
     use regex::{Regex, RegexBuilder};
+    use std::convert::TryFrom;
 
     fn atom_from_token(token: &structure::Token) -> (Box<dyn Atom>, Quantifier) {
         let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
@@ -230,8 +232,12 @@ mod structure_to_rule {
         }
     }
 
-    impl From<(structure::Rule, structure::ExtraInfo)> for super::Rule {
-        fn from(data: (structure::Rule, structure::ExtraInfo)) -> super::Rule {
+    impl TryFrom<(structure::Rule, structure::ExtraInfo)> for super::Rule {
+        type Error = Error;
+
+        fn try_from(
+            data: (structure::Rule, structure::ExtraInfo),
+        ) -> Result<super::Rule, Self::Error> {
             let id = data.1.id;
             let mut start = None;
             let mut end = None;
@@ -267,6 +273,10 @@ mod structure_to_rule {
                 })
                 .collect::<Vec<super::Suggester>>();
 
+            if suggesters.is_empty() {
+                return Err(Error::Unimplemented("rule with no suggestion".into()));
+            }
+
             let mut tests = Vec::new();
             for example in &data.0.examples {
                 let mut texts = Vec::new();
@@ -280,10 +290,11 @@ mod structure_to_rule {
                             char_length += text.chars().count();
                         }
                         structure::ExamplePart::Marker(marker) => {
-                            assert!(
-                                suggestion.is_none(),
-                                "example must have one or zero markers"
-                            );
+                            if suggestion.is_some() {
+                                return Err(Error::Unexpected(
+                                    "example must have one or zero markers".into(),
+                                ));
+                            }
 
                             texts.push(marker.text.as_str());
                             let length = marker.text.chars().count();
@@ -312,14 +323,14 @@ mod structure_to_rule {
 
             let composition = Composition::new(atoms);
 
-            super::Rule {
+            Ok(super::Rule {
                 composition,
                 tests,
                 suggesters,
                 start,
                 end,
                 id,
-            }
+            })
         }
     }
 }
@@ -352,7 +363,15 @@ fn main() {
     );
     println!("Parsed rules: {}", rules.len());
 
-    let rules: Vec<_> = rules.into_iter().map(Rule::from).collect();
+    let rules: Vec<_> = rules
+        .into_iter()
+        .filter_map(|x| match Rule::try_from(x) {
+            Ok(rule) => Some(rule),
+            Err(_) => None,
+        })
+        .collect();
+
+    println!("Runnable rules: {}", rules.len());
     println!(
         "Rules passing tests: {}",
         rules
