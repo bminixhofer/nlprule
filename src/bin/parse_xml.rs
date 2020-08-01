@@ -128,7 +128,10 @@ impl Rule {
 
             assert!(
                 corrections.len() < 2,
-                "test texts must have one or zero corrections"
+                format!(
+                    "{} test texts must have one or zero corrections {:?}",
+                    self.id, corrections
+                )
             );
 
             let pass = match &test.correction {
