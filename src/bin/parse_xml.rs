@@ -1,6 +1,7 @@
 use log::warn;
 use nlprule::composition::Composition;
-use nlprule::{utils, Token};
+use nlprule::tokenizer::{tokenize, Token};
+use nlprule::utils;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
@@ -124,7 +125,7 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in &self.tests {
-            let tokens = Token::str_to_tokens(&test.text);
+            let tokens = tokenize(&test.text);
             let suggestions = self.apply(&tokens);
 
             assert!(

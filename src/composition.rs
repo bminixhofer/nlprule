@@ -1,4 +1,4 @@
-use crate::Token;
+use crate::tokenizer::Token;
 use regex::Regex;
 
 pub trait Match<T: ?Sized> {
