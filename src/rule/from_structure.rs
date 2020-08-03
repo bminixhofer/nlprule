@@ -7,6 +7,11 @@ use regex::{Regex, RegexBuilder};
 use std::convert::TryFrom;
 
 fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn Atom>, Quantifier) {
+    let case_sensitive = match &token.case_sensitive {
+        Some(string) => string == "yes",
+        None => case_sensitive,
+    };
+
     let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
     let accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
         Box::new(|token: &Token| token.text)

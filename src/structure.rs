@@ -211,6 +211,7 @@ pub struct Example {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Token {
+    pub case_sensitive: Option<String>,
     pub regexp: Option<String>,
     pub text: String,
 }
