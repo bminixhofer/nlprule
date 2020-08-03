@@ -101,10 +101,14 @@ impl Composition {
             return true;
         }
 
-        match self.atoms[index + 1..].iter().position(|x| x.1.min > 0) {
-            Some(position) => self.atoms[index + 1 + position].0.is_match(item),
-            None => true,
-        }
+        let next_required_pos = match self.atoms[index + 1..].iter().position(|x| x.1.min > 0) {
+            Some(pos) => index + 1 + pos + 1,
+            None => self.atoms.len(),
+        };
+
+        self.atoms[index + 1..next_required_pos]
+            .iter()
+            .any(|x| x.0.is_match(item))
     }
 
     pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<Vec<Vec<&'a Token<'a>>>> {

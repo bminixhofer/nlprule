@@ -86,7 +86,7 @@ impl Rule {
 
                 assert!(
                     !start_group.is_empty() && !end_group.is_empty(),
-                    "groups must not be empty"
+                    format!("{}: groups must not be empty", self.id)
                 );
 
                 let start = start_group[0].char_span.0;

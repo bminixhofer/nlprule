@@ -11,6 +11,16 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
         Some(string) => string == "yes",
         None => case_sensitive,
     };
+    let min = token
+        .min
+        .clone()
+        .map(|x| x.parse().expect("can't parse min as usize"))
+        .unwrap_or(1usize);
+    let max = token
+        .max
+        .clone()
+        .map(|x| x.parse().expect("can't parse max as usize"))
+        .unwrap_or(1usize);
 
     let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
     let accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
@@ -37,7 +47,7 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
         Box::new(MatchAtom::new(StringMatcher::new(text), accessor)) as Box<dyn Atom>
     };
 
-    (atom, Quantifier::new(1, 1))
+    (atom, Quantifier::new(min, max))
 }
 
 impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
