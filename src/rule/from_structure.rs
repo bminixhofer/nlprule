@@ -20,14 +20,16 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
             .case_insensitive(!case_sensitive)
             .build()
             .expect("invalid regex");
-
         let matcher = RegexMatcher::new(regex);
         Box::new(MatchAtom::new(matcher, accessor)) as Box<dyn Atom>
     } else {
-        Box::new(MatchAtom::new(
-            StringMatcher::new(token.text.to_lowercase()),
-            accessor,
-        )) as Box<dyn Atom>
+        let text = if case_sensitive {
+            token.text.clone()
+        } else {
+            token.text.to_lowercase()
+        };
+
+        Box::new(MatchAtom::new(StringMatcher::new(text), accessor)) as Box<dyn Atom>
     };
 
     (atom, Quantifier::new(1, 1))

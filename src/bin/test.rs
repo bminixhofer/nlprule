@@ -1,10 +1,30 @@
+use clap::Clap;
 use nlprule::rule::Rule;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+#[derive(Clap)]
+#[clap(
+    version = "1.0",
+    author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
+)]
+struct Opts {
+    ids: Vec<String>,
+}
+
 fn main() {
     env_logger::init();
-    let rules = nlprule::structure::read_rules("data/grammar.canonic.xml");
+    let opts = Opts::parse();
+    let ids = opts.ids.iter().map(|x| x.as_str()).collect::<Vec<_>>();
+
+    let rules = nlprule::structure::read_rules(
+        "data/grammar.canonic.xml",
+        if opts.ids.is_empty() {
+            None
+        } else {
+            Some(&ids)
+        },
+    );
     let mut errors: HashMap<String, usize> = HashMap::new();
 
     let rules = rules

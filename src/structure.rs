@@ -271,8 +271,8 @@ pub enum RuleContainer {
 
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
+    ids: Option<&[&str]>,
 ) -> Vec<Result<(Rule, ExtraInfo), serde_xml_rs::Error>> {
-    let ids: Option<&[&str]> = None; //Some(&["AUS_AN_DEREN.0"]);
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 

@@ -1,7 +1,7 @@
 use crate::composition::Composition;
 use crate::tokenizer::{tokenize, Token};
 use crate::utils;
-use log::warn;
+use log::{info, warn};
 use std::collections::HashSet;
 
 pub mod from_structure;
@@ -127,6 +127,7 @@ impl Rule {
 
         for test in &self.tests {
             let tokens = tokenize(&test.text);
+            info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
 
             assert!(
