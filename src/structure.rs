@@ -233,7 +233,7 @@ pub enum PatternPart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pattern {
-    // case_sensitive: Option<String>,
+    pub case_sensitive: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Vec<PatternPart>,
 }
