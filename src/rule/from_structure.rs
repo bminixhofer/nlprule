@@ -1,4 +1,6 @@
-use crate::composition::{Atom, Composition, MatchAtom, Quantifier, RegexMatcher, StringMatcher};
+use crate::composition::{
+    Atom, Composition, MatchAtom, Quantifier, RegexMatcher, StringMatcher, TrueAtom,
+};
 use crate::rule;
 use crate::tokenizer::Token;
 use crate::{structure, utils, Error};
@@ -6,7 +8,12 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use std::convert::TryFrom;
 
-fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn Atom>, Quantifier) {
+fn atoms_from_token(
+    token: &structure::Token,
+    case_sensitive: bool,
+) -> Vec<(Box<dyn Atom>, Quantifier)> {
+    let mut atoms = Vec::new();
+
     let case_sensitive = match &token.case_sensitive {
         Some(string) => string == "yes",
         None => case_sensitive,
@@ -22,6 +29,8 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
         .map(|x| x.parse().expect("can't parse max as usize"))
         .unwrap_or(1usize);
 
+    let quantifier = Quantifier::new(min, max);
+
     let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
     let accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
         Box::new(|token: &Token| token.text)
@@ -29,14 +38,17 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
         Box::new(|token: &Token| token.lower.as_str())
     };
 
-    let atom = if is_regex {
+    if is_regex {
         let regex = utils::fix_regex(&token.text);
         let regex = RegexBuilder::new(&regex)
             .case_insensitive(!case_sensitive)
             .build()
             .expect("invalid regex");
         let matcher = RegexMatcher::new(regex);
-        Box::new(MatchAtom::new(matcher, accessor)) as Box<dyn Atom>
+        atoms.push((
+            Box::new(MatchAtom::new(matcher, accessor)) as Box<dyn Atom>,
+            quantifier,
+        ));
     } else {
         let text = if case_sensitive {
             token.text.clone()
@@ -44,10 +56,22 @@ fn atom_from_token(token: &structure::Token, case_sensitive: bool) -> (Box<dyn A
             token.text.to_lowercase()
         };
 
-        Box::new(MatchAtom::new(StringMatcher::new(text), accessor)) as Box<dyn Atom>
+        atoms.push((
+            Box::new(MatchAtom::new(StringMatcher::new(text), accessor)) as Box<dyn Atom>,
+            quantifier,
+        ));
     };
 
-    (atom, Quantifier::new(min, max))
+    if let Some(to_skip) = token.skip.clone() {
+        let to_skip = if to_skip == "-1" {
+            20 // TODO: should be an option in config OR restricted to one sentence
+        } else {
+            to_skip.parse().expect("can't parse skip as usize or -1")
+        };
+        atoms.push((Box::new(TrueAtom::new()), Quantifier::new(0, to_skip)));
+    }
+
+    atoms
 }
 
 impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
@@ -111,16 +135,21 @@ impl TryFrom<(structure::Rule, structure::ExtraInfo)> for rule::Rule {
         for part in &data.0.pattern.parts {
             match part {
                 structure::PatternPart::Token(token) => {
-                    atoms.push(atom_from_token(token, case_sensitive))
+                    atoms.extend(atoms_from_token(token, case_sensitive))
                 }
                 structure::PatternPart::Marker(marker) => {
                     start = Some(atoms.len());
 
+                    let mut last_length = 0;
+
                     for token in &marker.tokens {
-                        atoms.push(atom_from_token(token, case_sensitive));
+                        let atoms_to_add = atoms_from_token(token, case_sensitive);
+                        last_length = atoms_to_add.len();
+                        atoms.extend(atoms_to_add);
                     }
 
-                    end = Some(atoms.len());
+                    // if the last token needs more than one atom, only include the first one (needed for e. g. when using "skip")
+                    end = Some(atoms.len() - (std::cmp::max(last_length - 1, 0)));
                 }
             }
         }

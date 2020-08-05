@@ -213,6 +213,7 @@ pub struct Example {
 pub struct Token {
     pub min: Option<String>,
     pub max: Option<String>,
+    pub skip: Option<String>,
     pub case_sensitive: Option<String>,
     pub regexp: Option<String>,
     pub text: String,
@@ -252,12 +253,14 @@ pub struct Rule {
     pub name: Option<String>,
     pub short: Option<XMLString>,
     pub url: Option<XMLString>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleGroup {
     pub id: Option<String>,
+    pub default: Option<String>,
     pub name: Option<String>,
     pub short: Option<XMLString>,
     pub url: Option<XMLString>,

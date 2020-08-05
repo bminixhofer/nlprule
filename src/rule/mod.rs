@@ -1,4 +1,4 @@
-use crate::composition::Composition;
+use crate::composition::{Composition, MatchGraph};
 use crate::tokenizer::{tokenize, Token};
 use crate::utils;
 use log::{info, warn};
@@ -34,8 +34,8 @@ pub struct Match {
 }
 
 impl Match {
-    fn apply(&self, groups: &[Vec<&Token>]) -> String {
-        groups[self.index][0].text.to_string()
+    fn apply(&self, graph: &MatchGraph) -> String {
+        graph.groups[self.index].tokens[0].text.to_string()
     }
 }
 
@@ -51,7 +51,7 @@ pub struct Suggester {
 }
 
 impl Suggester {
-    fn apply(&self, groups: &[Vec<&Token>]) -> String {
+    fn apply(&self, groups: &MatchGraph) -> String {
         let mut output = Vec::new();
 
         for part in &self.parts {
@@ -80,17 +80,12 @@ impl Rule {
         let mut suggestions = Vec::new();
 
         for i in 0..tokens.len() {
-            if let Some(groups) = self.composition.apply(&refs[i..]) {
-                let start_group = &groups[self.start];
-                let end_group = &groups[self.end - 1];
+            if let Some(graph) = self.composition.apply(&refs[i..]) {
+                let start_group = &graph.groups[self.start];
+                let end_group = &graph.groups[self.end - 1];
 
-                assert!(
-                    !start_group.is_empty() && !end_group.is_empty(),
-                    format!("{}: groups must not be empty", self.id)
-                );
-
-                let start = start_group[0].char_span.0;
-                let end = end_group[end_group.len() - 1].char_span.1;
+                let start = start_group.char_start;
+                let end = end_group.char_end;
                 suggestions.push(Suggestion {
                     start,
                     end,
@@ -98,16 +93,17 @@ impl Rule {
                         .suggesters
                         .iter()
                         .map(|x| {
-                            let suggestion = x.apply(&groups);
+                            let suggestion = x.apply(&graph);
 
                             // adjust case
-                            if start_group[0].is_sentence_start
-                                || start_group[0]
-                                    .text
-                                    .chars()
-                                    .next()
-                                    .expect("token must have at least one char")
-                                    .is_uppercase()
+                            if !start_group.tokens.is_empty()
+                                && (start_group.tokens[0].is_sentence_start
+                                    || start_group.tokens[0]
+                                        .text
+                                        .chars()
+                                        .next()
+                                        .expect("token must have at least one char")
+                                        .is_uppercase())
                             {
                                 utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
                             } else {

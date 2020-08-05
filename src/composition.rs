@@ -65,6 +65,26 @@ pub trait Atom {
     fn is_match<'a>(&self, input: &Token<'a>) -> bool;
 }
 
+pub struct TrueAtom {}
+
+impl Atom for TrueAtom {
+    fn is_match(&self, _input: &Token) -> bool {
+        true
+    }
+}
+
+impl TrueAtom {
+    pub fn new() -> Self {
+        TrueAtom {}
+    }
+}
+
+impl Default for TrueAtom {
+    fn default() -> Self {
+        TrueAtom::new()
+    }
+}
+
 pub struct MatchAtom<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> {
     matcher: M,
     access: A,
@@ -85,6 +105,28 @@ impl<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> MatchAtom<O,
             phantom: std::marker::PhantomData,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Group<'a> {
+    pub char_start: usize,
+    pub char_end: usize,
+    pub tokens: Vec<&'a Token<'a>>,
+}
+
+impl<'a> Group<'a> {
+    fn empty() -> Self {
+        Group {
+            char_start: 0,
+            char_end: 0,
+            tokens: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MatchGraph<'a> {
+    pub groups: Vec<Group<'a>>,
 }
 
 pub struct Composition {
@@ -111,17 +153,23 @@ impl Composition {
             .any(|x| x.0.is_match(item))
     }
 
-    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<Vec<Vec<&'a Token<'a>>>> {
+    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<MatchGraph<'a>> {
         let mut position = 0;
 
         let mut cur_count = 0;
         let mut cur_atom_idx = 0;
 
-        let mut groups = self.atoms.iter().map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut graph = MatchGraph {
+            groups: self
+                .atoms
+                .iter()
+                .map(|_| Group::empty())
+                .collect::<Vec<_>>(),
+        };
 
-        loop {
+        let maybe_graph = loop {
             if cur_atom_idx >= self.atoms.len() {
-                break Some(groups);
+                break Some(graph);
             }
 
             let atom = &self.atoms[cur_atom_idx];
@@ -130,7 +178,7 @@ impl Composition {
                 cur_atom_idx += 1;
                 cur_count = 0;
                 if cur_atom_idx >= self.atoms.len() {
-                    break Some(groups);
+                    break Some(graph);
                 }
                 continue;
             }
@@ -143,12 +191,62 @@ impl Composition {
                 cur_atom_idx += 1;
                 cur_count = 0;
             } else if atom.0.is_match(tokens[position]) {
-                groups[cur_atom_idx].push(tokens[position]);
+                graph.groups[cur_atom_idx].tokens.push(tokens[position]);
+
                 position += 1;
                 cur_count += 1;
             } else {
                 break None;
             }
+        };
+
+        if let Some(mut graph) = maybe_graph {
+            let mut start = graph
+                .groups
+                .iter()
+                .find_map(|x| {
+                    if x.tokens.is_empty() {
+                        None
+                    } else {
+                        Some(x.tokens[0].char_span.0)
+                    }
+                })
+                .expect("graph must contain at least one token");
+
+            for group in &mut graph.groups {
+                if !group.tokens.is_empty() {
+                    group.char_start = group.tokens[0].char_span.0;
+                    start = group.tokens[group.tokens.len() - 1].char_span.1;
+                } else {
+                    group.char_start = start;
+                }
+            }
+
+            let mut end = graph
+                .groups
+                .iter()
+                .rev()
+                .find_map(|x| {
+                    if x.tokens.is_empty() {
+                        None
+                    } else {
+                        Some(x.tokens[0].char_span.1)
+                    }
+                })
+                .expect("graph must contain at least one token");
+
+            for group in &mut graph.groups.iter_mut().rev() {
+                if !group.tokens.is_empty() {
+                    group.char_end = group.tokens[group.tokens.len() - 1].char_span.1;
+                    end = group.tokens[0].char_span.0;
+                } else {
+                    group.char_end = end;
+                }
+            }
+
+            Some(graph)
+        } else {
+            None
         }
     }
 }
