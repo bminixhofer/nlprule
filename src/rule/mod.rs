@@ -1,4 +1,4 @@
-use crate::composition::{Composition, MatchGraph};
+use crate::composition::{Composition, Group, MatchGraph};
 use crate::tokenizer::{tokenize, Token};
 use crate::utils;
 use log::{info, warn};
@@ -68,17 +68,39 @@ pub struct Suggester {
 }
 
 impl Suggester {
-    fn apply(&self, groups: &MatchGraph) -> String {
+    fn apply(&self, groups: &MatchGraph, start_group: &Group, _end_group: &Group) -> String {
         let mut output = Vec::new();
+        let mut only_text = true;
 
         for part in &self.parts {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
-                SuggesterPart::Match(m) => output.push(m.apply(groups)),
+                SuggesterPart::Match(m) => {
+                    only_text = false;
+                    output.push(m.apply(groups));
+                }
             }
         }
 
-        output.join("")
+        let suggestion = output.join("");
+
+        // if the suggestion contains only text, make it title case if:
+        // * at sentence start
+        // * the replaced text is title case
+        if only_text
+            && !start_group.tokens.is_empty()
+            && (start_group.tokens[0].is_sentence_start
+                || start_group.tokens[0]
+                    .text
+                    .chars()
+                    .next()
+                    .expect("token must have at least one char")
+                    .is_uppercase())
+        {
+            utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
+        } else {
+            suggestion
+        }
     }
 }
 
@@ -117,18 +139,7 @@ impl Rule {
                     text: self
                         .suggesters
                         .iter()
-                        .map(|x| {
-                            let suggestion = x.apply(&graph);
-
-                            // adjust case
-                            if !start_group.tokens.is_empty()
-                                && (start_group.tokens[0].is_sentence_start)
-                            {
-                                utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
-                            } else {
-                                suggestion
-                            }
-                        })
+                        .map(|x| x.apply(&graph, start_group, end_group))
                         .collect(),
                 })
             }

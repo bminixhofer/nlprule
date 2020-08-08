@@ -45,10 +45,7 @@ fn main() {
     let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
     errors.sort_by_key(|x| -(x.1 as i32));
 
-    println!(
-        "Top errors: {:#?}",
-        &errors[..std::cmp::min(10, errors.len())]
-    );
+    println!("Errors: {:#?}", &errors);
     println!("Parsed rules: {}", rules.len());
 
     let rules: Vec<_> = rules
