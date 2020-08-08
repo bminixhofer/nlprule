@@ -241,6 +241,7 @@ pub struct Token {
     pub case_sensitive: Option<String>,
     pub regexp: Option<String>,
     pub text: XMLString,
+    pub spacebefore: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

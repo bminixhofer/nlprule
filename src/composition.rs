@@ -50,6 +50,22 @@ impl StringMatcher {
     }
 }
 
+pub struct GenericMatcher<T> {
+    value: T,
+}
+
+impl<T: Eq> Match<T> for GenericMatcher<T> {
+    fn is_match(&self, input: &T) -> bool {
+        input == &self.value
+    }
+}
+
+impl<T> GenericMatcher<T> {
+    pub fn new(value: T) -> Self {
+        GenericMatcher { value }
+    }
+}
+
 pub struct Quantifier {
     min: usize,
     max: usize,
@@ -83,6 +99,38 @@ impl TrueAtom {
 impl Default for TrueAtom {
     fn default() -> Self {
         TrueAtom::new()
+    }
+}
+
+pub struct AndAtom {
+    atoms: Vec<Box<dyn Atom>>,
+}
+
+impl AndAtom {
+    pub fn new(atoms: Vec<Box<dyn Atom>>) -> Self {
+        AndAtom { atoms }
+    }
+}
+
+impl Atom for AndAtom {
+    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
+        self.atoms.iter().all(|x| x.is_match(input))
+    }
+}
+
+pub struct NotAtom {
+    atom: Box<dyn Atom>,
+}
+
+impl NotAtom {
+    pub fn new(atom: Box<dyn Atom>) -> Self {
+        NotAtom { atom }
+    }
+}
+
+impl Atom for NotAtom {
+    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
+        !self.atom.is_match(input)
     }
 }
 

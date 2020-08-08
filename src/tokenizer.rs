@@ -54,6 +54,7 @@ pub struct Token<'a> {
     pub byte_span: (usize, usize),
     pub is_sentence_start: bool,
     pub is_sentence_end: bool,
+    pub has_space_before: bool,
 }
 
 pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
@@ -87,6 +88,7 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
                 byte_span: (byte_start, byte_start + x.len()),
                 is_sentence_start: sentence_indices.0.contains(&ptr),
                 is_sentence_end: sentence_indices.1.contains(&(ptr + x.len())),
+                has_space_before: text[..byte_start].ends_with(char::is_whitespace),
             }
         })
         .filter(|token| !token.text.is_empty())
