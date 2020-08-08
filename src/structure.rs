@@ -179,6 +179,8 @@ impl std::convert::Into<String> for XMLText {
 pub struct Match {
     pub no: String,
     pub case_conversion: Option<String>,
+    pub regexp_match: Option<String>,
+    pub regexp_replace: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

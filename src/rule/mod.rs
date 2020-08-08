@@ -2,6 +2,7 @@ use crate::composition::{Composition, Group, MatchGraph};
 use crate::tokenizer::{tokenize, Token};
 use crate::utils;
 use log::{info, warn};
+use regex::Regex;
 use std::collections::HashSet;
 
 pub mod from_structure;
@@ -31,6 +32,7 @@ pub struct Test {
 pub struct Match {
     index: usize,
     conversion: Box<dyn Fn(&str) -> String>,
+    regex_replacer: Option<(Regex, String)>,
 }
 
 impl std::fmt::Debug for Match {
@@ -42,17 +44,30 @@ impl std::fmt::Debug for Match {
 
 impl Match {
     fn apply(&self, graph: &MatchGraph) -> String {
-        (self.conversion)(
-            graph
-                .by_id(self.index)
-                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.index))
-                .tokens[0]
-                .text,
-        )
+        let text = graph
+            .by_id(self.index)
+            .unwrap_or_else(|| panic!("group must exist in graph: {}", self.index))
+            .tokens[0]
+            .text;
+
+        if let Some((regex, replacement)) = &self.regex_replacer {
+            let replaced = regex.replace_all(text, replacement.as_str());
+            (self.conversion)(replaced.as_ref())
+        } else {
+            (self.conversion)(text)
+        }
     }
 
-    fn new(index: usize, conversion: Box<dyn Fn(&str) -> String>) -> Self {
-        Match { index, conversion }
+    fn new(
+        index: usize,
+        conversion: Box<dyn Fn(&str) -> String>,
+        regex_replacer: Option<(Regex, String)>,
+    ) -> Self {
+        Match {
+            index,
+            conversion,
+            regex_replacer,
+        }
     }
 }
 

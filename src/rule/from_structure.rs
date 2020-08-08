@@ -36,7 +36,7 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
     };
 
     if is_regex {
-        let regex = utils::fix_regex(&token.text);
+        let regex = utils::fix_regex(&token.text, true);
         let regex = RegexBuilder::new(&regex)
             .case_insensitive(!case_sensitive)
             .build()
@@ -109,6 +109,7 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                         parts.push(rule::SuggesterPart::Match(rule::Match::new(
                             index,
                             Box::new(|x| x.to_string()),
+                            None,
                         )));
                         end_index = mat.end();
                     }
@@ -129,6 +130,15 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                         None
                     };
 
+                    let replacer = match (m.regexp_match, m.regexp_replace) {
+                        (Some(regex_match), Some(regex_replace)) => Some((
+                            Regex::new(&utils::fix_regex(&regex_match, false))
+                                .expect("invalid regex_match regex."),
+                            utils::fix_regex_replacement(&regex_replace),
+                        )),
+                        _ => None,
+                    };
+
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
                         index,
                         match case_conversion {
@@ -142,6 +152,7 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                             Some(x) => panic!("case conversion {} not supported.", x),
                             None => Box::new(|x| x.to_string()),
                         },
+                        replacer,
                     )));
                 }
             }
