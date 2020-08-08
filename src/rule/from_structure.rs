@@ -1,5 +1,5 @@
 use crate::composition::{
-    Atom, Composition, MatchAtom, Quantifier, RegexMatcher, StringMatcher, TrueAtom,
+    Atom, Composition, MatchAtom, Part, Quantifier, RegexMatcher, StringMatcher, TrueAtom,
 };
 use crate::rule;
 use crate::tokenizer::Token;
@@ -8,11 +8,8 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use std::convert::TryFrom;
 
-fn atoms_from_token(
-    token: &structure::Token,
-    case_sensitive: bool,
-) -> Vec<(Box<dyn Atom>, Quantifier)> {
-    let mut atoms = Vec::new();
+fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
+    let mut parts = Vec::new();
 
     let case_sensitive = match &token.case_sensitive {
         Some(string) => string == "yes",
@@ -45,9 +42,10 @@ fn atoms_from_token(
             .build()
             .expect("invalid regex");
         let matcher = RegexMatcher::new(regex);
-        atoms.push((
+        parts.push(Part::new(
             Box::new(MatchAtom::new(matcher, accessor)) as Box<dyn Atom>,
             quantifier,
+            true,
         ));
     } else {
         let text = if case_sensitive {
@@ -56,9 +54,10 @@ fn atoms_from_token(
             token.text.to_lowercase()
         };
 
-        atoms.push((
+        parts.push(Part::new(
             Box::new(MatchAtom::new(StringMatcher::new(text), accessor)) as Box<dyn Atom>,
             quantifier,
+            true,
         ));
     };
 
@@ -68,10 +67,14 @@ fn atoms_from_token(
         } else {
             to_skip.parse().expect("can't parse skip as usize or -1")
         };
-        atoms.push((Box::new(TrueAtom::new()), Quantifier::new(0, to_skip)));
+        parts.push(Part::new(
+            Box::new(TrueAtom::new()),
+            Quantifier::new(0, to_skip),
+            false,
+        ));
     }
 
-    atoms
+    parts
 }
 
 impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
@@ -155,7 +158,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
         let mut start = None;
         let mut end = None;
 
-        let mut atoms = Vec::new();
+        let mut composition_parts = Vec::new();
         let case_sensitive = match &data.pattern.case_sensitive {
             Some(string) => string == "yes",
             None => false,
@@ -164,27 +167,31 @@ impl TryFrom<structure::Rule> for rule::Rule {
         for part in &data.pattern.parts {
             match part {
                 structure::PatternPart::Token(token) => {
-                    atoms.extend(atoms_from_token(token, case_sensitive))
+                    composition_parts.extend(parts_from_token(token, case_sensitive))
                 }
                 structure::PatternPart::Marker(marker) => {
-                    start = Some(atoms.len());
-
-                    let mut last_length = 0;
+                    start = Some(
+                        composition_parts
+                            .iter()
+                            .fold(0, |a, x| a + x.visible as usize),
+                    );
 
                     for token in &marker.tokens {
-                        let atoms_to_add = atoms_from_token(token, case_sensitive);
-                        last_length = atoms_to_add.len();
-                        atoms.extend(atoms_to_add);
+                        let atoms_to_add = parts_from_token(token, case_sensitive);
+                        composition_parts.extend(atoms_to_add);
                     }
 
-                    // if the last token needs more than one atom, only include the first one (needed for e. g. when using "skip")
-                    end = Some(atoms.len() - (std::cmp::max(last_length - 1, 0)));
+                    end = Some(
+                        composition_parts
+                            .iter()
+                            .fold(0, |a, x| a + x.visible as usize),
+                    );
                 }
             }
         }
 
         let start = start.unwrap_or(0);
-        let end = end.unwrap_or_else(|| atoms.len());
+        let end = end.unwrap_or_else(|| composition_parts.len());
 
         let suggesters = data
             .message
@@ -241,7 +248,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
             });
         }
 
-        let composition = Composition::new(atoms);
+        let composition = Composition::new(composition_parts);
 
         Ok(rule::Rule {
             composition,

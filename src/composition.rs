@@ -1,5 +1,6 @@
 use crate::tokenizer::Token;
 use regex::Regex;
+use std::collections::HashMap;
 
 pub trait Match<T: ?Sized> {
     fn is_match(&self, input: &T) -> bool;
@@ -126,31 +127,77 @@ impl<'a> Group<'a> {
 
 #[derive(Debug)]
 pub struct MatchGraph<'a> {
-    pub groups: Vec<Group<'a>>,
+    groups: Vec<Group<'a>>,
+    id_to_idx: HashMap<usize, usize>,
+}
+
+impl<'a> MatchGraph<'a> {
+    fn empty_from_parts(parts: &[Part]) -> Self {
+        let mut groups = Vec::new();
+        let mut id_to_idx = HashMap::new();
+        let mut current_id = 0;
+
+        for (i, part) in parts.iter().enumerate() {
+            if part.visible {
+                id_to_idx.insert(current_id, i);
+                current_id += 1;
+            }
+            groups.push(Group::empty());
+        }
+
+        MatchGraph { groups, id_to_idx }
+    }
+
+    pub fn by_index(&self, index: usize) -> &Group<'a> {
+        &self.groups[index]
+    }
+
+    pub fn by_id(&self, id: usize) -> Option<&Group<'a>> {
+        Some(&self.groups[*self.id_to_idx.get(&id)?])
+    }
+}
+
+pub struct Part {
+    pub atom: Box<dyn Atom>,
+    pub quantifier: Quantifier,
+    pub visible: bool,
+}
+
+impl Part {
+    pub fn new(atom: Box<dyn Atom>, quantifier: Quantifier, visible: bool) -> Self {
+        Part {
+            atom,
+            quantifier,
+            visible,
+        }
+    }
 }
 
 pub struct Composition {
-    atoms: Vec<(Box<dyn Atom>, Quantifier)>,
+    parts: Vec<Part>,
 }
 
 impl Composition {
-    pub fn new(atoms: Vec<(Box<dyn Atom>, Quantifier)>) -> Self {
-        Composition { atoms }
+    pub fn new(parts: Vec<Part>) -> Self {
+        Composition { parts }
     }
 
     fn next_can_match(&self, item: &Token, index: usize) -> bool {
-        if index == self.atoms.len() - 1 {
+        if index == self.parts.len() - 1 {
             return true;
         }
 
-        let next_required_pos = match self.atoms[index + 1..].iter().position(|x| x.1.min > 0) {
+        let next_required_pos = match self.parts[index + 1..]
+            .iter()
+            .position(|x| x.quantifier.min > 0)
+        {
             Some(pos) => index + 1 + pos + 1,
-            None => self.atoms.len(),
+            None => self.parts.len(),
         };
 
-        self.atoms[index + 1..next_required_pos]
+        self.parts[index + 1..next_required_pos]
             .iter()
-            .any(|x| x.0.is_match(item))
+            .any(|x| x.atom.is_match(item))
     }
 
     pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<MatchGraph<'a>> {
@@ -159,25 +206,20 @@ impl Composition {
         let mut cur_count = 0;
         let mut cur_atom_idx = 0;
 
-        let mut graph = MatchGraph {
-            groups: self
-                .atoms
-                .iter()
-                .map(|_| Group::empty())
-                .collect::<Vec<_>>(),
-        };
+        // NB: if this impacts performance: could be moved to constructor, then cloned (but maybe lifetime issue)
+        let mut graph = MatchGraph::empty_from_parts(&self.parts);
 
         let maybe_graph = loop {
-            if cur_atom_idx >= self.atoms.len() {
+            if cur_atom_idx >= self.parts.len() {
                 break Some(graph);
             }
 
-            let atom = &self.atoms[cur_atom_idx];
+            let part = &self.parts[cur_atom_idx];
 
-            if cur_count >= atom.1.max {
+            if cur_count >= part.quantifier.max {
                 cur_atom_idx += 1;
                 cur_count = 0;
-                if cur_atom_idx >= self.atoms.len() {
+                if cur_atom_idx >= self.parts.len() {
                     break Some(graph);
                 }
                 continue;
@@ -187,10 +229,12 @@ impl Composition {
                 break None;
             }
 
-            if cur_count >= atom.1.min && self.next_can_match(&tokens[position], cur_atom_idx) {
+            if cur_count >= part.quantifier.min
+                && self.next_can_match(&tokens[position], cur_atom_idx)
+            {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if atom.0.is_match(tokens[position]) {
+            } else if part.atom.is_match(tokens[position]) {
                 graph.groups[cur_atom_idx].tokens.push(tokens[position]);
 
                 position += 1;

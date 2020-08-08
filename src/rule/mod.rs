@@ -42,7 +42,13 @@ impl std::fmt::Debug for Match {
 
 impl Match {
     fn apply(&self, graph: &MatchGraph) -> String {
-        (self.conversion)(graph.groups[self.index].tokens[0].text)
+        (self.conversion)(
+            graph
+                .by_id(self.index)
+                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.index))
+                .tokens[0]
+                .text,
+        )
     }
 
     fn new(index: usize, conversion: Box<dyn Fn(&str) -> String>) -> Self {
@@ -96,8 +102,12 @@ impl Rule {
 
         for i in 0..tokens.len() {
             if let Some(graph) = self.composition.apply(&refs[i..]) {
-                let start_group = &graph.groups[self.start];
-                let end_group = &graph.groups[self.end - 1];
+                let start_group = graph
+                    .by_id(self.start)
+                    .unwrap_or_else(|| panic!("group must exist in graph: {}", self.start));
+                let end_group = graph
+                    .by_id(self.end - 1)
+                    .unwrap_or_else(|| panic!("group must exist in graph: {}", self.end - 1));
 
                 let start = start_group.char_start;
                 let end = end_group.char_end;
