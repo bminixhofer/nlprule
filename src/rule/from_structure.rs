@@ -1,5 +1,5 @@
 use crate::composition::{
-    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, Part, Quantifier, RegexMatcher,
+    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, Part, Quantifier, RegexMatcher,
     StringMatcher, TrueAtom,
 };
 use crate::rule;
@@ -70,7 +70,16 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
         )));
     }
 
-    parts.push(Part::new(Box::new(AndAtom::new(atoms)), quantifier, true));
+    let mut main_atom: Box<dyn Atom> = Box::new(AndAtom::new(atoms));
+
+    if let Some(negate) = &token.negate {
+        match negate.as_str() {
+            "yes" => main_atom = Box::new(NotAtom::new(main_atom)),
+            _ => panic!("unknown negate value {}", negate),
+        }
+    }
+
+    parts.push(Part::new(main_atom, quantifier, true));
 
     if let Some(to_skip) = token.skip.clone() {
         let to_skip = if to_skip == "-1" {

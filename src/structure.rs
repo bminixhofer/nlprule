@@ -242,6 +242,7 @@ pub struct Token {
     pub regexp: Option<String>,
     pub text: XMLString,
     pub spacebefore: Option<String>,
+    pub negate: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
