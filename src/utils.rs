@@ -11,5 +11,12 @@ where
 }
 
 pub fn fix_regex(regex: &str) -> String {
-    format!("^({})$", regex)
+    // TODO: more exhaustive backslash check
+    format!(
+        "^({})$",
+        regex
+            .replace(r"\!", "!")
+            .replace(r"\,", ",")
+            .replace(r"\/", "/")
+    )
 }

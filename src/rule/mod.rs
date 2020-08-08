@@ -28,14 +28,25 @@ pub struct Test {
     suggestion: Option<Suggestion>,
 }
 
-#[derive(Debug)]
 pub struct Match {
     index: usize,
+    conversion: Box<dyn Fn(&str) -> String>,
+}
+
+impl std::fmt::Debug for Match {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "Match {{ index: {:?} }}", self.index)?;
+        Ok(())
+    }
 }
 
 impl Match {
     fn apply(&self, graph: &MatchGraph) -> String {
-        graph.groups[self.index].tokens[0].text.to_string()
+        (self.conversion)(graph.groups[self.index].tokens[0].text)
+    }
+
+    fn new(index: usize, conversion: Box<dyn Fn(&str) -> String>) -> Self {
+        Match { index, conversion }
     }
 }
 
@@ -75,6 +86,10 @@ pub struct Rule {
 }
 
 impl Rule {
+    pub fn set_id(&mut self, id: String) {
+        self.id = id;
+    }
+
     pub fn apply<'a>(&self, tokens: &[Token<'a>]) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
@@ -97,13 +112,7 @@ impl Rule {
 
                             // adjust case
                             if !start_group.tokens.is_empty()
-                                && (start_group.tokens[0].is_sentence_start
-                                    || start_group.tokens[0]
-                                        .text
-                                        .chars()
-                                        .next()
-                                        .expect("token must have at least one char")
-                                        .is_uppercase())
+                                && (start_group.tokens[0].is_sentence_start)
                             {
                                 utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
                             } else {

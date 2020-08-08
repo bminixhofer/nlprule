@@ -17,14 +17,15 @@ fn main() {
     let opts = Opts::parse();
     let ids = opts.ids.iter().map(|x| x.as_str()).collect::<Vec<_>>();
 
-    let rules = nlprule::structure::read_rules(
-        "data/grammar.canonic.xml",
-        if opts.ids.is_empty() {
-            None
-        } else {
-            Some(&ids)
-        },
-    );
+    let rules = nlprule::structure::read_rules("data/grammar.canonic.xml");
+    let rules: Vec<_> = rules
+        .into_iter()
+        .filter(|x| match x {
+            Ok((_, id)) => ids.is_empty() || ids.contains(&id.as_str()),
+            Err(_) => true,
+        })
+        .collect();
+
     let mut errors: HashMap<String, usize> = HashMap::new();
 
     let rules = rules
@@ -52,10 +53,15 @@ fn main() {
 
     let rules: Vec<_> = rules
         .into_iter()
-        .filter_map(|x| match Rule::try_from(x) {
-            Ok(rule) => Some(rule),
-            Err(_) => None,
-        })
+        .filter_map(
+            |(rule_structure, id)| match Rule::try_from(rule_structure) {
+                Ok(mut rule) => {
+                    rule.set_id(id);
+                    Some(rule)
+                }
+                Err(_) => None,
+            },
+        )
         .collect();
 
     println!("Runnable rules: {}", rules.len());

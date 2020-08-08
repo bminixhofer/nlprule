@@ -51,7 +51,7 @@ fn atoms_from_token(
         ));
     } else {
         let text = if case_sensitive {
-            token.text.clone()
+            token.text.to_string()
         } else {
             token.text.to_lowercase()
         };
@@ -103,13 +103,43 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                             .expect("match regex capture must be parsable as usize.")
                             - 1;
 
-                        parts.push(rule::SuggesterPart::Match(rule::Match { index }));
+                        parts.push(rule::SuggesterPart::Match(rule::Match::new(
+                            index,
+                            Box::new(|x| x.to_string()),
+                        )));
                         end_index = mat.end();
                     }
 
                     if end_index < text.len() {
                         parts.push(rule::SuggesterPart::Text((&text[end_index..]).to_string()))
                     }
+                }
+                structure::SuggestionPart::Match(m) => {
+                    let index =
+                        m.no.parse::<usize>()
+                            .expect("no must be parsable as usize.")
+                            - 1;
+
+                    let case_conversion = if let Some(conversion) = &m.case_conversion {
+                        Some(conversion.as_str())
+                    } else {
+                        None
+                    };
+
+                    parts.push(rule::SuggesterPart::Match(rule::Match::new(
+                        index,
+                        match case_conversion {
+                            Some("alllower") => Box::new(|x| x.to_lowercase()),
+                            Some("startlower") => Box::new(|x| {
+                                utils::apply_to_first(x, |c| c.to_lowercase().collect())
+                            }),
+                            Some("startupper") => Box::new(|x| {
+                                utils::apply_to_first(x, |c| c.to_uppercase().collect())
+                            }),
+                            Some(x) => panic!("case conversion {} not supported.", x),
+                            None => Box::new(|x| x.to_string()),
+                        },
+                    )));
                 }
             }
         }
@@ -118,21 +148,20 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
     }
 }
 
-impl TryFrom<(structure::Rule, structure::ExtraInfo)> for rule::Rule {
+impl TryFrom<structure::Rule> for rule::Rule {
     type Error = Error;
 
-    fn try_from(data: (structure::Rule, structure::ExtraInfo)) -> Result<rule::Rule, Self::Error> {
-        let id = data.1.id;
+    fn try_from(data: structure::Rule) -> Result<rule::Rule, Self::Error> {
         let mut start = None;
         let mut end = None;
 
         let mut atoms = Vec::new();
-        let case_sensitive = match &data.0.pattern.case_sensitive {
+        let case_sensitive = match &data.pattern.case_sensitive {
             Some(string) => string == "yes",
             None => false,
         };
 
-        for part in &data.0.pattern.parts {
+        for part in &data.pattern.parts {
             match part {
                 structure::PatternPart::Token(token) => {
                     atoms.extend(atoms_from_token(token, case_sensitive))
@@ -158,7 +187,6 @@ impl TryFrom<(structure::Rule, structure::ExtraInfo)> for rule::Rule {
         let end = end.unwrap_or_else(|| atoms.len());
 
         let suggesters = data
-            .0
             .message
             .parts
             .into_iter()
@@ -173,7 +201,7 @@ impl TryFrom<(structure::Rule, structure::ExtraInfo)> for rule::Rule {
         }
 
         let mut tests = Vec::new();
-        for example in &data.0.examples {
+        for example in &data.examples {
             let mut texts = Vec::new();
             let mut char_length = 0;
             let mut suggestion: Option<rule::Suggestion> = None;
@@ -221,7 +249,7 @@ impl TryFrom<(structure::Rule, structure::ExtraInfo)> for rule::Rule {
             suggesters,
             start,
             end,
-            id,
+            id: String::new(),
         })
     }
 }

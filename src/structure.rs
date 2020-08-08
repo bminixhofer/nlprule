@@ -4,17 +4,29 @@ use std::io::BufReader;
 use xml::reader::EventReader;
 
 #[derive(Debug, Clone)]
-pub struct ExtraInfo {
-    pub id: String,
-    pub rule_group: Option<RuleGroup>,
+pub struct Id {
+    name: String,
+    num: usize,
+}
+
+impl Id {
+    fn new(name: String, num: usize) -> Self {
+        Id { name, num }
+    }
+}
+
+impl std::string::ToString for Id {
+    fn to_string(&self) -> String {
+        format!("{}.{}", self.name, self.num)
+    }
 }
 
 mod preprocess {
-    use super::ExtraInfo;
+    use super::Id;
     use xml::reader::EventReader;
     use xml::writer::EmitterConfig;
 
-    pub fn sanitize(input: impl std::io::Read) -> String {
+    pub fn sanitize(input: impl std::io::Read, whitespace_sensitive_tags: &[&str]) -> String {
         let mut sanitized = Vec::new();
 
         let mut writer = EmitterConfig::new()
@@ -37,13 +49,43 @@ mod preprocess {
             .collect::<Vec<_>>();
 
         let mut out_events: Vec<xml::writer::XmlEvent> = Vec::new();
+        let mut parents = Vec::new();
 
         for event in &events {
-            if let xml::reader::XmlEvent::Characters(chars) = &event {
-                out_events.push(xml::writer::XmlEvent::start_element("text").into());
-                out_events.push(xml::writer::XmlEvent::characters(chars));
-                out_events.push(xml::writer::XmlEvent::end_element().into());
-            } else if let Some(writer_event) = event.as_writer_event() {
+            match event {
+                xml::reader::XmlEvent::StartElement { name, .. } => {
+                    parents.push(name.local_name.as_str());
+                }
+                xml::reader::XmlEvent::EndElement { .. } => {
+                    parents.pop();
+                }
+                xml::reader::XmlEvent::Characters(chars) => {
+                    out_events.push(
+                        xml::writer::XmlEvent::start_element("text")
+                            .attr("text", chars)
+                            .into(),
+                    );
+                    out_events.push(xml::writer::XmlEvent::end_element().into());
+                    continue;
+                }
+                xml::reader::XmlEvent::Whitespace(whitespace) => {
+                    if parents
+                        .iter()
+                        .any(|x| whitespace_sensitive_tags.contains(x))
+                    {
+                        out_events.push(
+                            xml::writer::XmlEvent::start_element("text")
+                                .attr("text", whitespace)
+                                .into(),
+                        );
+                        out_events.push(xml::writer::XmlEvent::end_element().into());
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+
+            if let Some(writer_event) = event.as_writer_event() {
                 out_events.push(writer_event);
             }
         }
@@ -57,87 +99,40 @@ mod preprocess {
             .to_string()
     }
 
-    pub fn extract_rules(xml: impl std::io::Read) -> Vec<(String, ExtraInfo)> {
-        let mut rules = Vec::new();
+    pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, Id)> {
+        let mut string = String::new();
+        xml.read_to_string(&mut string)
+            .expect("error writing to string.");
 
-        let parser = EventReader::new(xml);
+        let document = roxmltree::Document::parse(&string).expect("error parsing XML");
 
-        let mut current = Vec::new();
-        let mut current_id = (String::new(), -1);
-        let mut extra_info = None;
-        let mut in_rule_group = false;
+        document
+            .descendants()
+            .filter(|x| {
+                let name = x.tag_name().name();
 
-        for event in parser {
-            let event = event.expect("error reading XML");
-            current.push(event.clone());
+                name == "rulegroup"
+                    || (name == "rule"
+                        && x.parent_element()
+                            .expect("must have parent")
+                            .tag_name()
+                            .name()
+                            != "rulegroup")
+            })
+            .map(|x| {
+                let xml = string[x.range()].to_string();
+                let id = Id::new(
+                    x.parent_element()
+                        .expect("must have parent")
+                        .attribute("id")
+                        .unwrap_or("")
+                        .to_string(),
+                    0,
+                );
 
-            match event {
-                xml::reader::XmlEvent::StartElement {
-                    name, attributes, ..
-                } => {
-                    let name = name.to_string();
-                    let name = name.as_str();
-
-                    if name == "rulegroup" || name == "rule" {
-                        let id = attributes
-                            .iter()
-                            .find(|x| x.name.local_name == "id")
-                            .map(|x| x.value.clone());
-
-                        match (name, id) {
-                            ("rule", Some(id)) => current_id = (id, 0),
-                            ("rule", None) => current_id.1 += 1,
-                            ("rulegroup", Some(id)) => current_id = (id, 0),
-                            _ => {}
-                        }
-
-                        if !in_rule_group {
-                            while current.len() > 1 {
-                                current.remove(0);
-                            }
-
-                            extra_info = Some(ExtraInfo {
-                                id: format!("{}.{}", current_id.0, current_id.1),
-                                rule_group: None,
-                            })
-                        }
-                    }
-
-                    if name == "rulegroup" {
-                        in_rule_group = true;
-                    }
-                }
-                xml::reader::XmlEvent::EndElement { name, .. } => {
-                    let name = name.to_string();
-
-                    if (!in_rule_group && name == "rule") || (in_rule_group && name == "rulegroup")
-                    {
-                        let mut buffer: Vec<u8> = Vec::new();
-
-                        let mut writer = EmitterConfig::new()
-                            .perform_indent(true)
-                            .create_writer(&mut buffer);
-
-                        for event in &current {
-                            if let Some(writer_event) = event.as_writer_event() {
-                                writer.write(writer_event).expect("error writing XML");
-                            }
-                        }
-
-                        rules.push((
-                            std::str::from_utf8(&buffer)
-                                .expect("invalid UTF-8")
-                                .to_string(),
-                            extra_info.clone().expect("must have ExtraInfo."),
-                        ));
-                        in_rule_group = false;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        rules
+                (xml, id)
+            })
+            .collect()
     }
 }
 
@@ -161,9 +156,36 @@ impl std::convert::Into<String> for XMLString {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct XMLText {
+    text: XMLString,
+}
+
+impl std::ops::Deref for XMLText {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.text
+    }
+}
+
+impl std::convert::Into<String> for XMLText {
+    fn into(self) -> String {
+        self.text.into()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Match {
+    pub no: String,
+    pub case_conversion: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum SuggestionPart {
-    Text(String),
+    Match(Match),
+    Text(XMLString),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -177,7 +199,7 @@ pub struct Suggestion {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum MessagePart {
     Suggestion(Suggestion),
-    Text(String),
+    Text(XMLString),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -190,14 +212,14 @@ pub struct Message {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExampleMarker {
-    pub text: String,
+    pub text: XMLString,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum ExamplePart {
     Marker(ExampleMarker),
-    Text(String),
+    Text(XMLString),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -216,7 +238,7 @@ pub struct Token {
     pub skip: Option<String>,
     pub case_sensitive: Option<String>,
     pub regexp: Option<String>,
-    pub text: String,
+    pub text: XMLString,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -251,19 +273,19 @@ pub struct Rule {
     pub examples: Vec<Example>,
     pub id: Option<String>,
     pub name: Option<String>,
-    pub short: Option<XMLString>,
-    pub url: Option<XMLString>,
+    pub short: Option<XMLText>,
+    pub url: Option<XMLText>,
     pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleGroup {
-    pub id: Option<String>,
+    pub id: String,
     pub default: Option<String>,
     pub name: Option<String>,
-    pub short: Option<XMLString>,
-    pub url: Option<XMLString>,
+    pub short: Option<XMLText>,
+    pub url: Option<XMLText>,
     #[serde(rename = "rule")]
     pub rules: Vec<Rule>,
 }
@@ -278,23 +300,16 @@ pub enum RuleContainer {
 
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
-    ids: Option<&[&str]>,
-) -> Vec<Result<(Rule, ExtraInfo), serde_xml_rs::Error>> {
+) -> Vec<Result<(Rule, String), serde_xml_rs::Error>> {
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
-    let sanitized = preprocess::sanitize(file);
+    let sanitized = preprocess::sanitize(file, &["suggestion"]);
+    std::fs::write("data/grammar.sanitized.xml", sanitized.clone()).unwrap();
     let rules = preprocess::extract_rules(sanitized.as_bytes());
 
     rules
         .into_iter()
-        .filter(|x| {
-            if let Some(ids) = ids {
-                ids.contains(&x.1.id.as_str())
-            } else {
-                true
-            }
-        })
         .map(|x| {
             let mut out = Vec::new();
 
@@ -304,12 +319,24 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
 
             out.extend(match deseralized {
                 Ok(rule_container) => match rule_container {
-                    RuleContainer::Rule(rule) => vec![Ok((rule, x.1))],
-                    RuleContainer::RuleGroup(rule_group) => rule_group
-                        .rules
-                        .into_iter()
-                        .map(|rule| Ok((rule, x.1.clone())))
-                        .collect(),
+                    RuleContainer::Rule(rule) => {
+                        let id = rule.id.clone().unwrap_or_else(String::new);
+                        vec![Ok((rule, id))]
+                    }
+                    RuleContainer::RuleGroup(rule_group) => {
+                        let rule_group_id = rule_group.id.clone();
+
+                        rule_group
+                            .rules
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, rule)| {
+                                let id = Id::new(rule_group_id.clone(), i);
+
+                                Ok((rule, id.to_string()))
+                            })
+                            .collect()
+                    }
                 },
                 Err(err) => vec![Err(err)],
             });
