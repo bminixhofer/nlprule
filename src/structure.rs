@@ -260,7 +260,7 @@ pub struct Token {
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
     #[serde(rename = "$value")]
-    pub parts: Vec<TokenPart>,
+    pub parts: Option<Vec<TokenPart>>,
 }
 
 // NB: needlessly verbose, would be nicer with #[serde(flatten)] but blocked by https://github.com/RReverser/serde-xml-rs/issues/83

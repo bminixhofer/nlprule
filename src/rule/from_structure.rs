@@ -93,10 +93,14 @@ fn parse_match_attribs(
 
 fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
     let mut parts = Vec::new();
-    let text = token.parts.iter().find_map(|x| match x {
-        structure::TokenPart::Text(text) => Some(text.as_str()),
-        _ => None,
-    });
+    let text = if let Some(parts) = &token.parts {
+        parts.iter().find_map(|x| match x {
+            structure::TokenPart::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+    } else {
+        None
+    };
 
     let min = token
         .min
