@@ -9,14 +9,95 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use std::convert::TryFrom;
 
-fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
-    let mut parts = Vec::new();
+fn parse_match_attribs(
+    attribs: impl structure::MatchAttributes,
+    text: Option<&str>,
+    case_sensitive: bool,
+) -> Box<dyn Atom> {
     let mut atoms: Vec<Box<dyn Atom>> = Vec::new();
 
-    let case_sensitive = match &token.case_sensitive {
-        Some(string) => string == "yes",
-        None => case_sensitive,
+    let case_sensitive = if let Some(case_sensitive) = attribs.case_sensitive() {
+        match case_sensitive.as_str() {
+            "yes" => true,
+            "no" => false,
+            x => panic!("unknown case_sensitive value {}", x),
+        }
+    } else {
+        case_sensitive
     };
+
+    let is_regex = if let Some(regexp) = attribs.regexp() {
+        match regexp.as_str() {
+            "yes" => true,
+            x => panic!("unknown regexp value {}", x),
+        }
+    } else {
+        false
+    };
+    let text_accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
+        Box::new(|token: &Token| token.text)
+    } else {
+        Box::new(|token: &Token| token.lower.as_str())
+    };
+
+    if let Some(text) = text {
+        let text_atom: Box<dyn Atom> = if is_regex {
+            let regex = utils::fix_regex(&text, true);
+            let regex = RegexBuilder::new(&regex)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .expect("invalid regex");
+            let matcher = RegexMatcher::new(regex);
+            Box::new(MatchAtom::new(matcher, text_accessor))
+        } else {
+            let text = if case_sensitive {
+                text.to_string()
+            } else {
+                text.to_lowercase()
+            };
+
+            Box::new(MatchAtom::new(StringMatcher::new(text), text_accessor))
+        };
+
+        atoms.push(text_atom);
+    }
+
+    if let Some(space_before) = attribs.spacebefore() {
+        let value = match space_before.as_str() {
+            "yes" => true,
+            "no" => false,
+            _ => panic!("unknown spacebefore value {}", space_before),
+        };
+
+        atoms.push(Box::new(MatchAtom::new(
+            GenericMatcher::new(value),
+            |token| &token.has_space_before,
+        )));
+    }
+
+    if atoms.is_empty() {
+        Box::new(TrueAtom::new())
+    } else {
+        let mut out_atom: Box<dyn Atom> = Box::new(AndAtom::new(atoms));
+
+        if let Some(negate) = attribs.negate() {
+            match negate.as_str() {
+                "yes" => out_atom = Box::new(NotAtom::new(out_atom)),
+                _ => panic!("unknown negate value {}", negate),
+            }
+        }
+
+        out_atom
+    }
+}
+
+fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
+    let mut parts = Vec::new();
+    let text = token.parts.iter().find_map(|x| match x {
+        structure::TokenPart::Text(text) => Some(text.as_str()),
+        _ => None,
+    });
+
     let min = token
         .min
         .clone()
@@ -30,56 +111,8 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
 
     let quantifier = Quantifier::new(min, max);
 
-    let is_regex = token.regexp.clone().map_or(false, |x| x == "yes");
-    let text_accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
-        Box::new(|token: &Token| token.text)
-    } else {
-        Box::new(|token: &Token| token.lower.as_str())
-    };
-
-    let text_atom: Box<dyn Atom> = if is_regex {
-        let regex = utils::fix_regex(&token.text, true);
-        let regex = RegexBuilder::new(&regex)
-            .case_insensitive(!case_sensitive)
-            .build()
-            .expect("invalid regex");
-        let matcher = RegexMatcher::new(regex);
-        Box::new(MatchAtom::new(matcher, text_accessor))
-    } else {
-        let text = if case_sensitive {
-            token.text.to_string()
-        } else {
-            token.text.to_lowercase()
-        };
-
-        Box::new(MatchAtom::new(StringMatcher::new(text), text_accessor))
-    };
-
-    atoms.push(text_atom);
-
-    if let Some(space_before) = &token.spacebefore {
-        let value = match space_before.as_str() {
-            "yes" => true,
-            "no" => false,
-            _ => panic!("unknown spacebefore value {}", space_before),
-        };
-
-        atoms.push(Box::new(MatchAtom::new(
-            GenericMatcher::new(value),
-            |token| &token.has_space_before,
-        )));
-    }
-
-    let mut main_atom: Box<dyn Atom> = Box::new(AndAtom::new(atoms));
-
-    if let Some(negate) = &token.negate {
-        match negate.as_str() {
-            "yes" => main_atom = Box::new(NotAtom::new(main_atom)),
-            _ => panic!("unknown negate value {}", negate),
-        }
-    }
-
-    parts.push(Part::new(main_atom, quantifier, true));
+    let atom = parse_match_attribs(token, text, case_sensitive);
+    parts.push(Part::new(atom, quantifier, true));
 
     if let Some(to_skip) = token.skip.clone() {
         let to_skip = if to_skip == "-1" {

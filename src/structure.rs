@@ -138,7 +138,7 @@ mod preprocess {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct XMLString {
-    text: String,
+    pub text: String,
 }
 
 impl std::ops::Deref for XMLString {
@@ -157,7 +157,7 @@ impl std::convert::Into<String> for XMLString {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct XMLText {
-    text: XMLString,
+    pub text: XMLString,
 }
 
 impl std::ops::Deref for XMLText {
@@ -234,16 +234,67 @@ pub struct Example {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Exception {
+    pub case_sensitive: Option<String>,
+    pub regexp: Option<String>,
+    pub spacebefore: Option<String>,
+    pub negate: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
+pub enum TokenPart {
+    Text(XMLString),
+    Exception(Exception),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Token {
     pub min: Option<String>,
     pub max: Option<String>,
     pub skip: Option<String>,
     pub case_sensitive: Option<String>,
     pub regexp: Option<String>,
-    pub text: XMLString,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
+    #[serde(rename = "$value")]
+    pub parts: Vec<TokenPart>,
 }
+
+// NB: needlessly verbose, would be nicer with #[serde(flatten)] but blocked by https://github.com/RReverser/serde-xml-rs/issues/83
+pub trait MatchAttributes {
+    fn case_sensitive(&self) -> &Option<String>;
+    fn regexp(&self) -> &Option<String>;
+    fn spacebefore(&self) -> &Option<String>;
+    fn negate(&self) -> &Option<String>;
+}
+
+macro_rules! impl_match_attributes {
+    ($e:ty) => {
+        impl MatchAttributes for $e {
+            fn case_sensitive(&self) -> &Option<String> {
+                &self.case_sensitive
+            }
+
+            fn regexp(&self) -> &Option<String> {
+                &self.regexp
+            }
+
+            fn spacebefore(&self) -> &Option<String> {
+                &self.spacebefore
+            }
+
+            fn negate(&self) -> &Option<String> {
+                &self.negate
+            }
+        }
+    };
+}
+
+impl_match_attributes!(&Exception);
+impl_match_attributes!(&Token);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
