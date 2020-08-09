@@ -324,31 +324,11 @@ impl Composition {
             for group in &mut graph.groups {
                 if !group.tokens.is_empty() {
                     group.char_start = group.tokens[0].char_span.0;
+                    group.char_end = group.tokens[group.tokens.len() - 1].char_span.1;
                     start = group.tokens[group.tokens.len() - 1].char_span.1;
                 } else {
                     group.char_start = start;
-                }
-            }
-
-            let mut end = graph
-                .groups
-                .iter()
-                .rev()
-                .find_map(|x| {
-                    if x.tokens.is_empty() {
-                        None
-                    } else {
-                        Some(x.tokens[0].char_span.1)
-                    }
-                })
-                .expect("graph must contain at least one token");
-
-            for group in &mut graph.groups.iter_mut().rev() {
-                if !group.tokens.is_empty() {
-                    group.char_end = group.tokens[group.tokens.len() - 1].char_span.1;
-                    end = group.tokens[0].char_span.0;
-                } else {
-                    group.char_end = end;
+                    group.char_end = start;
                 }
             }
 

@@ -33,6 +33,7 @@ pub struct Match {
     index: usize,
     conversion: Box<dyn Fn(&str) -> String>,
     regex_replacer: Option<(Regex, String)>,
+    has_conversion: bool,
 }
 
 impl std::fmt::Debug for Match {
@@ -47,8 +48,10 @@ impl Match {
         let text = graph
             .by_id(self.index)
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.index))
-            .tokens[0]
-            .text;
+            .tokens
+            .get(0)
+            .map(|x| x.text)
+            .unwrap_or("");
 
         if let Some((regex, replacement)) = &self.regex_replacer {
             let replaced = regex.replace_all(text, replacement.as_str());
@@ -60,14 +63,19 @@ impl Match {
 
     fn new(
         index: usize,
-        conversion: Box<dyn Fn(&str) -> String>,
+        conversion: Option<Box<dyn Fn(&str) -> String>>,
         regex_replacer: Option<(Regex, String)>,
     ) -> Self {
         Match {
             index,
-            conversion,
+            has_conversion: conversion.is_some(),
+            conversion: conversion.unwrap_or_else(|| Box::new(|x: &str| x.to_string())),
             regex_replacer,
         }
+    }
+
+    fn has_conversion(&self) -> bool {
+        self.has_conversion
     }
 }
 
@@ -85,13 +93,15 @@ pub struct Suggester {
 impl Suggester {
     fn apply(&self, groups: &MatchGraph, start_group: &Group, _end_group: &Group) -> String {
         let mut output = Vec::new();
-        let mut only_text = true;
+        let mut matchers_have_conversion = false;
 
         for part in &self.parts {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
                 SuggesterPart::Match(m) => {
-                    only_text = false;
+                    if m.has_conversion() {
+                        matchers_have_conversion = true;
+                    };
                     output.push(m.apply(groups));
                 }
             }
@@ -99,10 +109,10 @@ impl Suggester {
 
         let suggestion = output.join("");
 
-        // if the suggestion contains only text, make it title case if:
+        // if the suggestion contains no case conversion matches, make it title case if:
         // * at sentence start
         // * the replaced text is title case
-        if only_text
+        if !matchers_have_conversion
             && !start_group.tokens.is_empty()
             && (start_group.tokens[0].is_sentence_start
                 || start_group.tokens[0]

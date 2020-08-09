@@ -325,6 +325,8 @@ pub struct Pattern {
 pub struct Rule {
     pub pattern: Pattern,
     pub message: Message,
+    #[serde(rename = "suggestion")]
+    pub suggestions: Option<Vec<Suggestion>>,
     #[serde(rename = "example")]
     pub examples: Vec<Example>,
     pub id: Option<String>,

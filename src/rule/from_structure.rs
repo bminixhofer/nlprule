@@ -188,9 +188,7 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                             - 1;
 
                         parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                            index,
-                            Box::new(|x| x.to_string()),
-                            None,
+                            index, None, None,
                         )));
                         end_index = mat.end();
                     }
@@ -223,15 +221,15 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
                         index,
                         match case_conversion {
-                            Some("alllower") => Box::new(|x| x.to_lowercase()),
-                            Some("startlower") => Box::new(|x| {
+                            Some("alllower") => Some(Box::new(|x| x.to_lowercase())),
+                            Some("startlower") => Some(Box::new(|x| {
                                 utils::apply_to_first(x, |c| c.to_lowercase().collect())
-                            }),
-                            Some("startupper") => Box::new(|x| {
+                            })),
+                            Some("startupper") => Some(Box::new(|x| {
                                 utils::apply_to_first(x, |c| c.to_uppercase().collect())
-                            }),
+                            })),
                             Some(x) => panic!("case conversion {} not supported.", x),
-                            None => Box::new(|x| x.to_string()),
+                            None => None,
                         },
                         replacer,
                     )));
@@ -289,6 +287,12 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 structure::MessagePart::Suggestion(suggestion) => Some(suggestion.parts.into()),
                 structure::MessagePart::Text(_) => None,
             })
+            .chain(
+                data.suggestions
+                    .unwrap_or_else(Vec::new)
+                    .into_iter()
+                    .map(|x| x.parts.into()),
+            )
             .collect::<Vec<rule::Suggester>>();
 
         if suggesters.is_empty() {
