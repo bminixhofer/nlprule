@@ -1,6 +1,6 @@
 use crate::composition::{
-    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, Part, Quantifier, RegexMatcher,
-    StringMatcher, TrueAtom,
+    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, OrAtom, Part, Quantifier,
+    RegexMatcher, StringMatcher, TrueAtom,
 };
 use crate::rule;
 use crate::tokenizer::Token;
@@ -42,7 +42,7 @@ fn parse_match_attribs(
 
     if let Some(text) = text {
         let text_atom: Box<dyn Atom> = if is_regex {
-            let regex = utils::fix_regex(&text, true);
+            let regex = utils::fix_regex(&text.trim(), true);
             let regex = RegexBuilder::new(&regex)
                 .case_insensitive(!case_sensitive)
                 .build()
@@ -56,7 +56,10 @@ fn parse_match_attribs(
                 text.to_lowercase()
             };
 
-            Box::new(MatchAtom::new(StringMatcher::new(text), text_accessor))
+            Box::new(MatchAtom::new(
+                StringMatcher::new(text.trim().to_string()),
+                text_accessor,
+            ))
         };
 
         atoms.push(text_atom);
@@ -114,8 +117,29 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
         .unwrap_or(1usize);
 
     let quantifier = Quantifier::new(min, max);
+    let mut atom = parse_match_attribs(token, text, case_sensitive);
 
-    let atom = parse_match_attribs(token, text, case_sensitive);
+    if let Some(parts) = &token.parts {
+        let exceptions = parts
+            .iter()
+            .filter_map(|x| match x {
+                structure::TokenPart::Exception(x) => Some(x),
+                _ => None,
+            })
+            .map(|x| {
+                let exception_text = Some(x.text.as_str());
+                parse_match_attribs(x, exception_text, case_sensitive)
+            })
+            .collect::<Vec<_>>();
+
+        if !exceptions.is_empty() {
+            atom = Box::new(AndAtom::new(vec![
+                atom,
+                Box::new(NotAtom::new(Box::new(OrAtom::new(exceptions)))),
+            ]));
+        }
+    }
+
     parts.push(Part::new(atom, quantifier, true));
 
     if let Some(to_skip) = token.skip.clone() {

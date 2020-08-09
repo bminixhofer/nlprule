@@ -118,6 +118,22 @@ impl Atom for AndAtom {
     }
 }
 
+pub struct OrAtom {
+    atoms: Vec<Box<dyn Atom>>,
+}
+
+impl OrAtom {
+    pub fn new(atoms: Vec<Box<dyn Atom>>) -> Self {
+        OrAtom { atoms }
+    }
+}
+
+impl Atom for OrAtom {
+    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
+        self.atoms.iter().any(|x| x.is_match(input))
+    }
+}
+
 pub struct NotAtom {
     atom: Box<dyn Atom>,
 }
