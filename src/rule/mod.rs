@@ -139,12 +139,12 @@ impl Rule {
 
         for i in 0..tokens.len() {
             if let Some(graph) = self.composition.apply(&refs[i..]) {
-                let start_group = graph
-                    .by_id(self.start)
-                    .unwrap_or_else(|| panic!("group must exist in graph: {}", self.start));
-                let end_group = graph
-                    .by_id(self.end - 1)
-                    .unwrap_or_else(|| panic!("group must exist in graph: {}", self.end - 1));
+                let start_group = graph.by_id(self.start).unwrap_or_else(|| {
+                    panic!("{} group must exist in graph: {}", self.id, self.start)
+                });
+                let end_group = graph.by_id(self.end - 1).unwrap_or_else(|| {
+                    panic!("{} group must exist in graph: {}", self.id, self.end - 1)
+                });
 
                 let start = start_group.char_start;
                 let end = end_group.char_end;
@@ -171,19 +171,15 @@ impl Rule {
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
 
-            assert!(
-                suggestions.len() < 2,
-                format!(
-                    "{} test texts must have one or zero corrections {:?}",
-                    self.id, suggestions
-                )
-            );
-
-            let pass = match &test.suggestion {
-                Some(correct_suggestion) => {
-                    suggestions.len() == 1 && correct_suggestion == &suggestions[0]
+            let pass = if suggestions.len() > 1 {
+                false
+            } else {
+                match &test.suggestion {
+                    Some(correct_suggestion) => {
+                        suggestions.len() == 1 && correct_suggestion == &suggestions[0]
+                    }
+                    None => suggestions.is_empty(),
                 }
-                None => suggestions.is_empty(),
             };
 
             if !pass {

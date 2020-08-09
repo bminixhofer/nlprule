@@ -219,6 +219,10 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
     }
 }
 
+fn get_last_id(parts: &[Part]) -> usize {
+    parts.iter().fold(0, |a, x| a + x.visible as usize)
+}
+
 impl TryFrom<structure::Rule> for rule::Rule {
     type Error = Error;
 
@@ -238,28 +242,20 @@ impl TryFrom<structure::Rule> for rule::Rule {
                     composition_parts.extend(parts_from_token(token, case_sensitive))
                 }
                 structure::PatternPart::Marker(marker) => {
-                    start = Some(
-                        composition_parts
-                            .iter()
-                            .fold(0, |a, x| a + x.visible as usize),
-                    );
+                    start = Some(get_last_id(&composition_parts));
 
                     for token in &marker.tokens {
                         let atoms_to_add = parts_from_token(token, case_sensitive);
                         composition_parts.extend(atoms_to_add);
                     }
 
-                    end = Some(
-                        composition_parts
-                            .iter()
-                            .fold(0, |a, x| a + x.visible as usize),
-                    );
+                    end = Some(get_last_id(&composition_parts));
                 }
             }
         }
 
         let start = start.unwrap_or(0);
-        let end = end.unwrap_or_else(|| composition_parts.len());
+        let end = end.unwrap_or_else(|| get_last_id(&composition_parts));
 
         let suggesters = data
             .message
