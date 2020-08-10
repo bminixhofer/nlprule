@@ -52,13 +52,23 @@ pub struct Token<'a> {
     pub lower: String,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
-    pub is_sentence_start: bool,
-    pub is_sentence_end: bool,
     pub has_space_before: bool,
 }
 
+impl<'a> Token<'a> {
+    fn sent_start() -> Token<'static> {
+        Token {
+            text: "",
+            lower: String::new(),
+            char_span: (0, 0),
+            byte_span: (0, 0),
+            has_space_before: false,
+        }
+    }
+}
+
 pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
-    let sentence_indices = text
+    let _sentence_indices = text
         .unicode_sentences()
         .map(|sentence| {
             let ptr = sentence.as_ptr() as usize;
@@ -72,25 +82,28 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
 
     let mut current_char = 0;
 
-    get_token_strs(text)
-        .into_iter()
-        .map(|x| {
-            let char_start = current_char;
-            let ptr = x.as_ptr() as usize;
-            current_char += x.chars().count();
+    let mut tokens = vec![Token::sent_start()];
 
-            let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
+    tokens.extend(
+        get_token_strs(text)
+            .into_iter()
+            .map(|x| {
+                let char_start = current_char;
+                let _ptr = x.as_ptr() as usize;
+                current_char += x.chars().count();
 
-            Token {
-                text: x.trim(),
-                lower: x.trim().to_lowercase(),
-                char_span: (char_start, current_char),
-                byte_span: (byte_start, byte_start + x.len()),
-                is_sentence_start: sentence_indices.0.contains(&ptr),
-                is_sentence_end: sentence_indices.1.contains(&(ptr + x.len())),
-                has_space_before: text[..byte_start].ends_with(char::is_whitespace),
-            }
-        })
-        .filter(|token| !token.text.is_empty())
-        .collect::<Vec<_>>()
+                let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
+
+                Token {
+                    text: x.trim(),
+                    lower: x.trim().to_lowercase(),
+                    char_span: (char_start, current_char),
+                    byte_span: (byte_start, byte_start + x.len()),
+                    has_space_before: text[..byte_start].ends_with(char::is_whitespace),
+                }
+            })
+            .filter(|token| !token.text.is_empty()),
+    );
+
+    tokens
 }
