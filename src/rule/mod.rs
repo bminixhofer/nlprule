@@ -114,13 +114,12 @@ impl Suggester {
         // * the replaced text is title case
         if !matchers_have_conversion
             && !start_group.tokens.is_empty()
-            && (start_group.tokens[0].is_sentence_start
-                || start_group.tokens[0]
-                    .text
-                    .chars()
-                    .next()
-                    .expect("token must have at least one char")
-                    .is_uppercase())
+            && (start_group.tokens[0]
+                .text
+                .chars()
+                .next()
+                .expect("token must have at least one char")
+                .is_uppercase())
         {
             utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
         } else {
@@ -147,6 +146,14 @@ impl Rule {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
+        let mut range_mask: Vec<_> = vec![
+            false;
+            tokens
+                .get(tokens.len() - 1)
+                .map(|x| x.char_span.1)
+                .unwrap_or(0)
+        ];
+
         for i in 0..tokens.len() {
             if let Some(graph) = self.composition.apply(&refs[i..]) {
                 let start_group = graph.by_id(self.start).unwrap_or_else(|| {
@@ -158,15 +165,21 @@ impl Rule {
 
                 let start = start_group.char_start;
                 let end = end_group.char_end;
-                suggestions.push(Suggestion {
-                    start,
-                    end,
-                    text: self
-                        .suggesters
-                        .iter()
-                        .map(|x| x.apply(&graph, start_group, end_group))
-                        .collect(),
-                })
+
+                // only add the suggestion if we don't have any yet from this rule in its range
+                if !range_mask[start..end].iter().any(|x| *x) {
+                    range_mask[start..end].iter_mut().for_each(|x| *x = true);
+
+                    suggestions.push(Suggestion {
+                        start,
+                        end,
+                        text: self
+                            .suggesters
+                            .iter()
+                            .map(|x| x.apply(&graph, start_group, end_group))
+                            .collect(),
+                    })
+                }
             }
         }
 

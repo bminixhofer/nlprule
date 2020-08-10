@@ -248,7 +248,7 @@ impl Composition {
 
     fn next_can_match(&self, item: &Token, index: usize) -> bool {
         if index == self.parts.len() - 1 {
-            return true;
+            return false;
         }
 
         let next_required_pos = match self.parts[index + 1..]
@@ -273,9 +273,9 @@ impl Composition {
         // NB: if this impacts performance: could be moved to constructor, then cloned (but maybe lifetime issue)
         let mut graph = MatchGraph::empty_from_parts(&self.parts);
 
-        let maybe_graph = loop {
+        let mut is_match = loop {
             if cur_atom_idx >= self.parts.len() {
-                break Some(graph);
+                break true;
             }
 
             let part = &self.parts[cur_atom_idx];
@@ -284,13 +284,13 @@ impl Composition {
                 cur_atom_idx += 1;
                 cur_count = 0;
                 if cur_atom_idx >= self.parts.len() {
-                    break Some(graph);
+                    break false;
                 }
                 continue;
             }
 
             if position >= tokens.len() {
-                break None;
+                break false;
             }
 
             if cur_count >= part.quantifier.min
@@ -304,11 +304,17 @@ impl Composition {
                 position += 1;
                 cur_count += 1;
             } else {
-                break None;
+                break false;
             }
         };
 
-        if let Some(mut graph) = maybe_graph {
+        // NB: maybe better way to solve this (probably more logically well-defined matching)
+        is_match = is_match
+            || self.parts[cur_atom_idx..]
+                .iter()
+                .all(|x| x.quantifier.min == 0);
+
+        if is_match {
             let mut start = graph
                 .groups
                 .iter()
