@@ -131,6 +131,7 @@ impl Suggester {
 pub struct Rule {
     id: String,
     composition: Composition,
+    antipatterns: Vec<Composition>,
     tests: Vec<Test>,
     suggesters: Vec<Suggester>,
     start: usize,
@@ -168,17 +169,42 @@ impl Rule {
 
                 // only add the suggestion if we don't have any yet from this rule in its range
                 if !range_mask[start..end].iter().any(|x| *x) {
-                    range_mask[start..end].iter_mut().for_each(|x| *x = true);
+                    let mut blocked = false;
 
-                    suggestions.push(Suggestion {
-                        start,
-                        end,
-                        text: self
-                            .suggesters
-                            .iter()
-                            .map(|x| x.apply(&graph, start_group, end_group))
-                            .collect(),
-                    })
+                    // TODO: cache / move to outer loop
+                    for i in 0..tokens.len() {
+                        for antipattern in &self.antipatterns {
+                            if let Some(anti_graph) = antipattern.apply(&refs, i) {
+                                let anti_start = anti_graph.by_index(0).char_start;
+                                let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
+
+                                let rule_start = graph.by_index(0).char_start;
+                                let rule_end = graph.by_index(graph.len() - 1).char_end;
+
+                                if anti_start <= rule_end && rule_start <= anti_end {
+                                    blocked = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if blocked {
+                            break;
+                        }
+                    }
+
+                    if !blocked {
+                        range_mask[start..end].iter_mut().for_each(|x| *x = true);
+
+                        suggestions.push(Suggestion {
+                            start,
+                            end,
+                            text: self
+                                .suggesters
+                                .iter()
+                                .map(|x| x.apply(&graph, start_group, end_group))
+                                .collect(),
+                        });
+                    }
                 }
             }
         }

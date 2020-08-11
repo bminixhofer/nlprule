@@ -266,39 +266,56 @@ fn get_last_id(parts: &[Part]) -> usize {
     parts.iter().fold(0, |a, x| a + x.visible as usize)
 }
 
+fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
+    let mut start = None;
+    let mut end = None;
+
+    let mut composition_parts = Vec::new();
+    let case_sensitive = match &pattern.case_sensitive {
+        Some(string) => string == "yes",
+        None => false,
+    };
+
+    for part in &pattern.parts {
+        match part {
+            structure::PatternPart::Token(token) => {
+                composition_parts.extend(parts_from_token(token, case_sensitive))
+            }
+            structure::PatternPart::Marker(marker) => {
+                start = Some(get_last_id(&composition_parts));
+
+                for token in &marker.tokens {
+                    let atoms_to_add = parts_from_token(token, case_sensitive);
+                    composition_parts.extend(atoms_to_add);
+                }
+
+                end = Some(get_last_id(&composition_parts));
+            }
+        }
+    }
+
+    let start = start.unwrap_or(0);
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts));
+
+    let composition = Composition::new(composition_parts);
+
+    (composition, start, end)
+}
+
 impl TryFrom<structure::Rule> for rule::Rule {
     type Error = Error;
 
     fn try_from(data: structure::Rule) -> Result<rule::Rule, Self::Error> {
-        let mut start = None;
-        let mut end = None;
+        let (composition, start, end) = parse_pattern(data.pattern);
 
-        let mut composition_parts = Vec::new();
-        let case_sensitive = match &data.pattern.case_sensitive {
-            Some(string) => string == "yes",
-            None => false,
+        let antipatterns = if let Some(antipatterns) = data.antipatterns {
+            antipatterns
+                .into_iter()
+                .map(|x| parse_pattern(x).0)
+                .collect()
+        } else {
+            Vec::new()
         };
-
-        for part in &data.pattern.parts {
-            match part {
-                structure::PatternPart::Token(token) => {
-                    composition_parts.extend(parts_from_token(token, case_sensitive))
-                }
-                structure::PatternPart::Marker(marker) => {
-                    start = Some(get_last_id(&composition_parts));
-
-                    for token in &marker.tokens {
-                        let atoms_to_add = parts_from_token(token, case_sensitive);
-                        composition_parts.extend(atoms_to_add);
-                    }
-
-                    end = Some(get_last_id(&composition_parts));
-                }
-            }
-        }
-
-        let start = start.unwrap_or(0);
-        let end = end.unwrap_or_else(|| get_last_id(&composition_parts));
 
         let suggesters = data
             .message
@@ -361,10 +378,9 @@ impl TryFrom<structure::Rule> for rule::Rule {
             });
         }
 
-        let composition = Composition::new(composition_parts);
-
         Ok(rule::Rule {
             composition,
+            antipatterns,
             tests,
             suggesters,
             start,

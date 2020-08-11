@@ -325,6 +325,8 @@ pub struct Pattern {
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub pattern: Pattern,
+    #[serde(rename = "antipattern")]
+    pub antipatterns: Option<Vec<Pattern>>,
     pub message: Message,
     #[serde(rename = "suggestion")]
     pub suggestions: Option<Vec<Suggestion>>,

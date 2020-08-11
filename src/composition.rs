@@ -242,6 +242,14 @@ impl<'a> MatchGraph<'a> {
     pub fn by_id(&self, id: usize) -> Option<&Group<'a>> {
         Some(&self.groups[*self.id_to_idx.get(&id)?])
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.groups.len()
+    }
 }
 
 pub struct Part {
