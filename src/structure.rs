@@ -239,7 +239,8 @@ pub struct Exception {
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
-    pub text: XMLString,
+    pub scope: Option<String>,
+    pub text: Option<XMLString>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

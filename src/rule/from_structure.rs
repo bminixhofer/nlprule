@@ -1,6 +1,6 @@
 use crate::composition::{
-    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, OrAtom, Part, Quantifier,
-    RegexMatcher, StringMatcher, TrueAtom,
+    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, OffsetAtom, OrAtom, Part,
+    Quantifier, RegexMatcher, StringMatcher, TrueAtom,
 };
 use crate::rule;
 use crate::tokenizer::Token;
@@ -127,8 +127,28 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
                 _ => None,
             })
             .map(|x| {
-                let exception_text = Some(x.text.as_str());
-                parse_match_attribs(x, exception_text, case_sensitive)
+                let exception_text = if let Some(exception_text) = &x.text {
+                    Some(exception_text.as_str())
+                } else {
+                    None
+                };
+                let mut atom = parse_match_attribs(x, exception_text, case_sensitive);
+
+                let offset = if let Some(scope) = &x.scope {
+                    match scope.as_str() {
+                        "next" => 1,
+                        "previous" => -1,
+                        _ => panic!("unknown scope value {}", scope),
+                    }
+                } else {
+                    0
+                };
+
+                if offset != 0 {
+                    atom = Box::new(OffsetAtom::new(atom, offset));
+                }
+
+                atom
             })
             .collect::<Vec<_>>();
 
@@ -228,6 +248,7 @@ impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
                             Some("startupper") => Some(Box::new(|x| {
                                 utils::apply_to_first(x, |c| c.to_uppercase().collect())
                             })),
+                            Some("allupper") => Some(Box::new(|x| x.to_uppercase())),
                             Some(x) => panic!("case conversion {} not supported.", x),
                             None => None,
                         },

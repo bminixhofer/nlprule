@@ -79,13 +79,13 @@ impl Quantifier {
 }
 
 pub trait Atom {
-    fn is_match<'a>(&self, input: &Token<'a>) -> bool;
+    fn is_match(&self, input: &[&Token], position: usize) -> bool;
 }
 
 pub struct TrueAtom {}
 
 impl Atom for TrueAtom {
-    fn is_match(&self, _input: &Token) -> bool {
+    fn is_match(&self, _input: &[&Token], _position: usize) -> bool {
         true
     }
 }
@@ -113,8 +113,8 @@ impl AndAtom {
 }
 
 impl Atom for AndAtom {
-    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
-        self.atoms.iter().all(|x| x.is_match(input))
+    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+        self.atoms.iter().all(|x| x.is_match(input, position))
     }
 }
 
@@ -129,8 +129,8 @@ impl OrAtom {
 }
 
 impl Atom for OrAtom {
-    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
-        self.atoms.iter().any(|x| x.is_match(input))
+    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+        self.atoms.iter().any(|x| x.is_match(input, position))
     }
 }
 
@@ -145,8 +145,31 @@ impl NotAtom {
 }
 
 impl Atom for NotAtom {
-    fn is_match<'a>(&self, input: &Token<'a>) -> bool {
-        !self.atom.is_match(input)
+    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+        !self.atom.is_match(input, position)
+    }
+}
+
+pub struct OffsetAtom {
+    atom: Box<dyn Atom>,
+    offset: isize,
+}
+
+impl Atom for OffsetAtom {
+    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+        let new_position = position as isize + self.offset;
+
+        if new_position < 0 || (new_position as usize) >= input.len() {
+            false
+        } else {
+            self.atom.is_match(input, new_position as usize)
+        }
+    }
+}
+
+impl OffsetAtom {
+    pub fn new(atom: Box<dyn Atom>, offset: isize) -> Self {
+        OffsetAtom { atom, offset }
     }
 }
 
@@ -157,8 +180,8 @@ pub struct MatchAtom<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a
 }
 
 impl<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> Atom for MatchAtom<O, M, A> {
-    fn is_match(&self, input: &Token) -> bool {
-        self.matcher.is_match((self.access)(input))
+    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+        self.matcher.is_match((self.access)(input[position]))
     }
 }
 
@@ -246,7 +269,7 @@ impl Composition {
         Composition { parts }
     }
 
-    fn next_can_match(&self, item: &Token, index: usize) -> bool {
+    fn next_can_match(&self, tokens: &[&Token], position: usize, index: usize) -> bool {
         if index == self.parts.len() - 1 {
             return false;
         }
@@ -261,11 +284,11 @@ impl Composition {
 
         self.parts[index + 1..next_required_pos]
             .iter()
-            .any(|x| x.atom.is_match(item))
+            .any(|x| x.atom.is_match(tokens, position))
     }
 
-    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>]) -> Option<MatchGraph<'a>> {
-        let mut position = 0;
+    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>], start: usize) -> Option<MatchGraph<'a>> {
+        let mut position = start;
 
         let mut cur_count = 0;
         let mut cur_atom_idx = 0;
@@ -294,11 +317,11 @@ impl Composition {
             }
 
             if cur_count >= part.quantifier.min
-                && self.next_can_match(&tokens[position], cur_atom_idx)
+                && self.next_can_match(&tokens, position, cur_atom_idx)
             {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if part.atom.is_match(tokens[position]) {
+            } else if part.atom.is_match(tokens, position) {
                 graph.groups[cur_atom_idx].tokens.push(tokens[position]);
 
                 position += 1;

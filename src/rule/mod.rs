@@ -155,7 +155,7 @@ impl Rule {
         ];
 
         for i in 0..tokens.len() {
-            if let Some(graph) = self.composition.apply(&refs[i..]) {
+            if let Some(graph) = self.composition.apply(&refs, i) {
                 let start_group = graph.by_id(self.start).unwrap_or_else(|| {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
                 });
