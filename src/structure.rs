@@ -202,6 +202,7 @@ pub struct Suggestion {
 pub enum MessagePart {
     Suggestion(Suggestion),
     Text(XMLString),
+    Match(Match),
 }
 
 #[derive(Debug, Clone, Deserialize)]

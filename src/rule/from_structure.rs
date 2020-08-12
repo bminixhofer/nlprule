@@ -331,7 +331,8 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 structure::MessagePart::Suggestion(suggestion) => {
                     Some(parse_suggestion(suggestion.parts, &composition))
                 }
-                structure::MessagePart::Text(_) => None,
+                structure::MessagePart::Text(_) => None, // the actual message is ignored at the moment
+                structure::MessagePart::Match(_) => None,
             })
             .chain(
                 data.suggestions
