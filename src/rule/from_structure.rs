@@ -94,7 +94,7 @@ fn parse_match_attribs(
     }
 }
 
-fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
+fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
     let mut parts = Vec::new();
     let text = if let Some(parts) = &token.parts {
         parts.iter().find_map(|x| match x {
@@ -178,92 +178,98 @@ fn parts_from_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part>
     parts
 }
 
-impl From<Vec<structure::SuggestionPart>> for rule::Suggester {
-    fn from(data: Vec<structure::SuggestionPart>) -> rule::Suggester {
-        let mut parts = Vec::new();
+fn parse_suggestion(
+    data: Vec<structure::SuggestionPart>,
+    composition: &Composition,
+) -> rule::Suggester {
+    let mut parts = Vec::new();
 
-        lazy_static! {
-            static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
-        }
+    lazy_static! {
+        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
+    }
 
-        for part in data {
-            match part {
-                structure::SuggestionPart::Text(text) => {
-                    let mut end_index = 0;
+    for part in data {
+        match part {
+            structure::SuggestionPart::Text(text) => {
+                let mut end_index = 0;
 
-                    for capture in MATCH_REGEX.captures_iter(&text) {
-                        let mat = capture.get(0).unwrap();
-                        if end_index != mat.start() {
-                            parts.push(rule::SuggesterPart::Text(
-                                (&text[end_index..mat.start()]).to_string(),
-                            ))
-                        }
-
-                        let index = capture
-                            .get(1)
-                            .unwrap()
-                            .as_str()
-                            .parse::<usize>()
-                            .expect("match regex capture must be parsable as usize.")
-                            - 1;
-
-                        parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                            index, None, None,
-                        )));
-                        end_index = mat.end();
+                for capture in MATCH_REGEX.captures_iter(&text) {
+                    let mat = capture.get(0).unwrap();
+                    if end_index != mat.start() {
+                        parts.push(rule::SuggesterPart::Text(
+                            (&text[end_index..mat.start()]).to_string(),
+                        ))
                     }
 
-                    if end_index < text.len() {
-                        parts.push(rule::SuggesterPart::Text((&text[end_index..]).to_string()))
-                    }
-                }
-                structure::SuggestionPart::Match(m) => {
-                    let index =
-                        m.no.parse::<usize>()
-                            .expect("no must be parsable as usize.")
-                            - 1;
-
-                    let case_conversion = if let Some(conversion) = &m.case_conversion {
-                        Some(conversion.as_str())
-                    } else {
-                        None
-                    };
-
-                    let replacer = match (m.regexp_match, m.regexp_replace) {
-                        (Some(regex_match), Some(regex_replace)) => Some((
-                            Regex::new(&utils::fix_regex(&regex_match, false))
-                                .expect("invalid regex_match regex."),
-                            utils::fix_regex_replacement(&regex_replace),
-                        )),
-                        _ => None,
-                    };
+                    let index = capture
+                        .get(1)
+                        .unwrap()
+                        .as_str()
+                        .parse::<usize>()
+                        .expect("match regex capture must be parsable as usize.")
+                        - 1;
 
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                        index,
-                        match case_conversion {
-                            Some("alllower") => Some(Box::new(|x| x.to_lowercase())),
-                            Some("startlower") => Some(Box::new(|x| {
-                                utils::apply_to_first(x, |c| c.to_lowercase().collect())
-                            })),
-                            Some("startupper") => Some(Box::new(|x| {
-                                utils::apply_to_first(x, |c| c.to_uppercase().collect())
-                            })),
-                            Some("allupper") => Some(Box::new(|x| x.to_uppercase())),
-                            Some(x) => panic!("case conversion {} not supported.", x),
-                            None => None,
-                        },
-                        replacer,
+                        index, None, None,
                     )));
+                    end_index = mat.end();
+                }
+
+                if end_index < text.len() {
+                    parts.push(rule::SuggesterPart::Text((&text[end_index..]).to_string()))
                 }
             }
-        }
+            structure::SuggestionPart::Match(m) => {
+                let last_id = get_last_id(&composition.parts);
+                let mut id =
+                    m.no.parse::<usize>()
+                        .expect("no must be parsable as usize.")
+                        - 1;
 
-        rule::Suggester { parts }
+                if id > last_id {
+                    id = last_id;
+                }
+
+                let case_conversion = if let Some(conversion) = &m.case_conversion {
+                    Some(conversion.as_str())
+                } else {
+                    None
+                };
+
+                let replacer = match (m.regexp_match, m.regexp_replace) {
+                    (Some(regex_match), Some(regex_replace)) => Some((
+                        Regex::new(&utils::fix_regex(&regex_match, false))
+                            .expect("invalid regex_match regex."),
+                        utils::fix_regex_replacement(&regex_replace),
+                    )),
+                    _ => None,
+                };
+
+                parts.push(rule::SuggesterPart::Match(rule::Match::new(
+                    id,
+                    match case_conversion {
+                        Some("alllower") => Some(Box::new(|x| x.to_lowercase())),
+                        Some("startlower") => Some(Box::new(|x| {
+                            utils::apply_to_first(x, |c| c.to_lowercase().collect())
+                        })),
+                        Some("startupper") => Some(Box::new(|x| {
+                            utils::apply_to_first(x, |c| c.to_uppercase().collect())
+                        })),
+                        Some("allupper") => Some(Box::new(|x| x.to_uppercase())),
+                        Some(x) => panic!("case conversion {} not supported.", x),
+                        None => None,
+                    },
+                    replacer,
+                )));
+            }
+        }
     }
+
+    rule::Suggester { parts }
 }
 
 fn get_last_id(parts: &[Part]) -> usize {
-    parts.iter().fold(0, |a, x| a + x.visible as usize)
+    parts.iter().fold(0, |a, x| a + x.visible as usize) - 1
 }
 
 fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
@@ -279,23 +285,23 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
     for part in &pattern.parts {
         match part {
             structure::PatternPart::Token(token) => {
-                composition_parts.extend(parts_from_token(token, case_sensitive))
+                composition_parts.extend(parse_token(token, case_sensitive))
             }
             structure::PatternPart::Marker(marker) => {
-                start = Some(get_last_id(&composition_parts));
+                start = Some(get_last_id(&composition_parts) + 1);
 
                 for token in &marker.tokens {
-                    let atoms_to_add = parts_from_token(token, case_sensitive);
+                    let atoms_to_add = parse_token(token, case_sensitive);
                     composition_parts.extend(atoms_to_add);
                 }
 
-                end = Some(get_last_id(&composition_parts));
+                end = Some(get_last_id(&composition_parts) + 1);
             }
         }
     }
 
     let start = start.unwrap_or(0);
-    let end = end.unwrap_or_else(|| get_last_id(&composition_parts));
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts) + 1);
 
     let composition = Composition::new(composition_parts);
 
@@ -322,14 +328,16 @@ impl TryFrom<structure::Rule> for rule::Rule {
             .parts
             .into_iter()
             .filter_map(|x| match x {
-                structure::MessagePart::Suggestion(suggestion) => Some(suggestion.parts.into()),
+                structure::MessagePart::Suggestion(suggestion) => {
+                    Some(parse_suggestion(suggestion.parts, &composition))
+                }
                 structure::MessagePart::Text(_) => None,
             })
             .chain(
                 data.suggestions
                     .unwrap_or_else(Vec::new)
                     .into_iter()
-                    .map(|x| x.parts.into()),
+                    .map(|x| parse_suggestion(x.parts, &composition)),
             )
             .collect::<Vec<rule::Suggester>>();
 

@@ -269,7 +269,7 @@ impl Part {
 }
 
 pub struct Composition {
-    parts: Vec<Part>,
+    pub parts: Vec<Part>,
 }
 
 impl Composition {

@@ -343,6 +343,8 @@ pub struct Rule {
 #[serde(deny_unknown_fields)]
 pub struct RuleGroup {
     pub id: String,
+    #[serde(rename = "antipattern")]
+    pub antipatterns: Option<Vec<Pattern>>,
     pub default: Option<String>,
     pub name: Option<String>,
     pub short: Option<XMLText>,
@@ -386,13 +388,24 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
                     }
                     RuleContainer::RuleGroup(rule_group) => {
                         let rule_group_id = rule_group.id.clone();
+                        let group_antipatterns = if let Some(antipatterns) = rule_group.antipatterns
+                        {
+                            antipatterns
+                        } else {
+                            Vec::new()
+                        };
 
                         rule_group
                             .rules
                             .into_iter()
                             .enumerate()
-                            .map(|(i, rule)| {
+                            .map(|(i, mut rule)| {
                                 let id = Id::new(rule_group_id.clone(), i);
+                                if let Some(antipatterns) = &mut rule.antipatterns {
+                                    antipatterns.extend(group_antipatterns.clone());
+                                } else {
+                                    rule.antipatterns = Some(group_antipatterns.clone());
+                                }
 
                                 Ok((rule, id.to_string()))
                             })

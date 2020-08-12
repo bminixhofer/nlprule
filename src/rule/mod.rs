@@ -30,7 +30,7 @@ pub struct Test {
 }
 
 pub struct Match {
-    index: usize,
+    id: usize,
     conversion: Box<dyn Fn(&str) -> String>,
     regex_replacer: Option<(Regex, String)>,
     has_conversion: bool,
@@ -38,7 +38,7 @@ pub struct Match {
 
 impl std::fmt::Debug for Match {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "Match {{ index: {:?} }}", self.index)?;
+        write!(fmt, "Match {{ index: {:?} }}", self.id)?;
         Ok(())
     }
 }
@@ -46,8 +46,8 @@ impl std::fmt::Debug for Match {
 impl Match {
     fn apply(&self, graph: &MatchGraph) -> String {
         let text = graph
-            .by_id(self.index)
-            .unwrap_or_else(|| panic!("group must exist in graph: {}", self.index))
+            .by_id(self.id)
+            .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
             .tokens
             .get(0)
             .map(|x| x.text)
@@ -62,12 +62,12 @@ impl Match {
     }
 
     fn new(
-        index: usize,
+        id: usize,
         conversion: Option<Box<dyn Fn(&str) -> String>>,
         regex_replacer: Option<(Regex, String)>,
     ) -> Self {
         Match {
-            index,
+            id,
             has_conversion: conversion.is_some(),
             conversion: conversion.unwrap_or_else(|| Box::new(|x: &str| x.to_string())),
             regex_replacer,
