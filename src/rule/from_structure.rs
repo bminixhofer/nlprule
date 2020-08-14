@@ -26,6 +26,16 @@ fn parse_match_attribs(
         case_sensitive
     };
 
+    let inflected = if let Some(inflected) = attribs.inflected() {
+        match inflected.as_str() {
+            "yes" => true,
+            "no" => false,
+            x => panic!("unknown inflected value {}", x),
+        }
+    } else {
+        false
+    };
+
     let is_regex = if let Some(regexp) = attribs.regexp() {
         match regexp.as_str() {
             "yes" => true,
@@ -34,11 +44,24 @@ fn parse_match_attribs(
     } else {
         false
     };
-    let text_accessor: Box<dyn for<'a> Fn(&'a Token) -> &'a str> = if case_sensitive {
-        Box::new(|token: &Token| token.text)
-    } else {
-        Box::new(|token: &Token| token.lower.as_str())
-    };
+
+    macro_rules! make_atom {
+        ($matcher:expr) => {
+            if case_sensitive && inflected {
+                Box::new(MatchAtom::new($matcher, |token: &Token| token.inflections))
+            } else if case_sensitive {
+                Box::new(MatchAtom::new($matcher, |token: &Token| token.text))
+            } else if inflected {
+                Box::new(MatchAtom::new($matcher, |token: &Token| {
+                    token.lower_inflections
+                }))
+            } else {
+                Box::new(MatchAtom::new($matcher, |token: &Token| {
+                    token.lower.as_str()
+                }))
+            }
+        };
+    }
 
     if let Some(text) = text {
         let text_atom: Box<dyn Atom> = if is_regex {
@@ -48,7 +71,8 @@ fn parse_match_attribs(
                 .build()
                 .expect("invalid regex");
             let matcher = RegexMatcher::new(regex);
-            Box::new(MatchAtom::new(matcher, text_accessor))
+
+            make_atom!(matcher)
         } else {
             let text = if case_sensitive {
                 text.to_string()
@@ -56,10 +80,9 @@ fn parse_match_attribs(
                 text.to_lowercase()
             };
 
-            Box::new(MatchAtom::new(
-                StringMatcher::new(text.trim().to_string()),
-                text_accessor,
-            ))
+            let matcher = StringMatcher::new(text.trim().to_string());
+
+            make_atom!(matcher)
         };
 
         atoms.push(text_atom);

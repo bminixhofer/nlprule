@@ -10,8 +10,8 @@ pub struct RegexMatcher {
     regex: Regex,
 }
 
-impl Match<[&str]> for RegexMatcher {
-    fn is_match(&self, input: &[&str]) -> bool {
+impl Match<[String]> for RegexMatcher {
+    fn is_match(&self, input: &[String]) -> bool {
         input.iter().any(|x| self.regex.is_match(x))
     }
 }
@@ -32,8 +32,9 @@ pub struct StringMatcher {
     string: String,
 }
 
-impl Match<[&str]> for StringMatcher {
-    fn is_match(&self, input: &[&str]) -> bool {
+impl Match<[String]> for StringMatcher {
+    fn is_match(&self, input: &[String]) -> bool {
+        println!("{:#?} {}", input, self.string);
         input.iter().any(|x| *x == self.string)
     }
 }

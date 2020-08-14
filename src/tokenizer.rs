@@ -3,6 +3,14 @@ use regex::Regex;
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod inflect;
+
+use inflect::Inflecter;
+
+lazy_static! {
+    static ref INFLECTER: Inflecter = Inflecter::from_dumps("data/dumps/de").unwrap();
+}
+
 // see https://stackoverflow.com/a/40296745
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
 where
@@ -49,6 +57,8 @@ fn get_token_strs(text: &str) -> Vec<&str> {
 #[derive(Debug)]
 pub struct Token<'a> {
     pub text: &'a str,
+    pub inflections: &'a [String],
+    pub lower_inflections: &'a [String],
     pub lower: String,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
@@ -59,6 +69,8 @@ impl<'a> Token<'a> {
     fn sent_start() -> Token<'static> {
         Token {
             text: "",
+            inflections: &[],
+            lower_inflections: &[],
             lower: String::new(),
             char_span: (0, 0),
             byte_span: (0, 0),
@@ -93,10 +105,15 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
                 current_char += x.chars().count();
 
                 let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
+                let trimmed = x.trim();
+
+                let (inflections, lower_inflections) = INFLECTER.get_inflections(trimmed);
 
                 Token {
-                    text: x.trim(),
-                    lower: x.trim().to_lowercase(),
+                    text: trimmed,
+                    lower: trimmed.to_lowercase(),
+                    inflections,
+                    lower_inflections,
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
