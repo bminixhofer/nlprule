@@ -4,8 +4,10 @@ use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod inflect;
+mod language_specific;
 
 use inflect::Inflecter;
+use language_specific::adapt_tokens;
 
 lazy_static! {
     static ref INFLECTER: Inflecter = Inflecter::from_dumps(format!(
@@ -126,5 +128,5 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
             .filter(|token| !token.text.is_empty()),
     );
 
-    tokens
+    adapt_tokens(tokens)
 }
