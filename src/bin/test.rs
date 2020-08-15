@@ -17,7 +17,10 @@ fn main() {
     let opts = Opts::parse();
     let ids = opts.ids.iter().map(|x| x.as_str()).collect::<Vec<_>>();
 
-    let rules = nlprule::structure::read_rules("data/grammar.canonic.xml");
+    let rules = nlprule::structure::read_rules(format!(
+        "data/grammar.{}.canonic.xml",
+        std::env::var("RULE_LANG").unwrap()
+    ));
     let rules: Vec<_> = rules
         .into_iter()
         .filter(|x| match x {

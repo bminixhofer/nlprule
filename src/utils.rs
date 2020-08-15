@@ -13,6 +13,15 @@ where
     }
 }
 
+// remove duplicate whitespaces
+pub fn normalize_whitespace(string: &str) -> String {
+    lazy_static! {
+        static ref REGEX: Regex = Regex::new(r"(\s)\s+").unwrap();
+    }
+
+    REGEX.replace_all(string, r"$1").to_string()
+}
+
 pub fn fix_regex_replacement(replacement: &str) -> String {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"\$(\d)").unwrap();

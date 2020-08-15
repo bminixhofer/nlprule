@@ -41,24 +41,30 @@ impl Inflecter {
 
         for group in inflect_groups.values() {
             for entry in group {
-                inflections.insert(
-                    entry.to_string(),
-                    (
-                        group.iter().cloned().collect(),
-                        group.iter().map(|x| x.to_lowercase()).collect(),
-                    ),
-                );
+                let existing = inflections
+                    .entry(entry.to_lowercase())
+                    .or_insert_with(|| (Vec::new(), Vec::new()));
+                existing.0.extend(group.iter().cloned());
+                existing.1.extend(group.iter().map(|x| x.to_lowercase()));
             }
         }
 
         Ok(Inflecter { inflections })
     }
 
-    pub fn get_inflections(&self, word: &str) -> (&[String], &[String]) {
-        if let Some(inflections) = self.inflections.get(word) {
-            (&inflections.0, &inflections.1)
+    pub fn get_inflections(&self, word: &str) -> (Vec<String>, Vec<String>) {
+        let lower = word.to_lowercase();
+
+        if let Some(inflections) = self.inflections.get(&lower) {
+            let mut group = inflections.0.clone();
+            let mut lower_group = inflections.1.clone();
+
+            group.push(word.to_string());
+            lower_group.push(lower);
+
+            (group, lower_group)
         } else {
-            (&[], &[])
+            (vec![word.to_string()], vec![lower])
         }
     }
 }

@@ -34,7 +34,6 @@ pub struct StringMatcher {
 
 impl Match<[String]> for StringMatcher {
     fn is_match(&self, input: &[String]) -> bool {
-        println!("{:#?} {}", input, self.string);
         input.iter().any(|x| *x == self.string)
     }
 }

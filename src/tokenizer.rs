@@ -8,7 +8,11 @@ mod inflect;
 use inflect::Inflecter;
 
 lazy_static! {
-    static ref INFLECTER: Inflecter = Inflecter::from_dumps("data/dumps/de").unwrap();
+    static ref INFLECTER: Inflecter = Inflecter::from_dumps(format!(
+        "data/dumps/{}",
+        std::env::var("RULE_LANG").unwrap()
+    ))
+    .unwrap();
 }
 
 // see https://stackoverflow.com/a/40296745
@@ -41,7 +45,7 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     }
 
     let mut prev = 0;
-    let split_func = |c: char| c.is_whitespace() || r##"'’`´‘],.:!?/\()<=>„“”"+#…"##.contains(c);
+    let split_func = |c: char| c.is_whitespace() || r##"'’`´‘],.:!?/\()<=>„“”"+#…*"##.contains(c);
 
     for m in URL_REGEX.find_iter(text) {
         tokens.extend(split(&text[prev..m.start()], split_func));
@@ -57,8 +61,8 @@ fn get_token_strs(text: &str) -> Vec<&str> {
 #[derive(Debug)]
 pub struct Token<'a> {
     pub text: &'a str,
-    pub inflections: &'a [String],
-    pub lower_inflections: &'a [String],
+    pub inflections: Vec<String>,
+    pub lower_inflections: Vec<String>,
     pub lower: String,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
@@ -69,8 +73,8 @@ impl<'a> Token<'a> {
     fn sent_start() -> Token<'static> {
         Token {
             text: "",
-            inflections: &[],
-            lower_inflections: &[],
+            inflections: Vec::new(),
+            lower_inflections: Vec::new(),
             lower: String::new(),
             char_span: (0, 0),
             byte_span: (0, 0),

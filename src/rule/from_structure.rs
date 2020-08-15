@@ -48,12 +48,14 @@ fn parse_match_attribs(
     macro_rules! make_atom {
         ($matcher:expr) => {
             if case_sensitive && inflected {
-                Box::new(MatchAtom::new($matcher, |token: &Token| token.inflections))
+                Box::new(MatchAtom::new($matcher, |token: &Token| {
+                    &token.inflections[..]
+                }))
             } else if case_sensitive {
                 Box::new(MatchAtom::new($matcher, |token: &Token| token.text))
             } else if inflected {
                 Box::new(MatchAtom::new($matcher, |token: &Token| {
-                    token.lower_inflections
+                    &token.lower_inflections[..]
                 }))
             } else {
                 Box::new(MatchAtom::new($matcher, |token: &Token| {

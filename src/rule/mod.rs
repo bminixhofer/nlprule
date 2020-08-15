@@ -107,7 +107,7 @@ impl Suggester {
             }
         }
 
-        let suggestion = output.join("");
+        let suggestion = utils::normalize_whitespace(&output.join(""));
 
         // if the suggestion contains no case conversion matches, make it title case if:
         // * at sentence start
