@@ -9,6 +9,11 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use std::convert::TryFrom;
 
+// TODO: should be an option in config OR restricted to one sentence
+fn max_matches() -> usize {
+    20
+}
+
 fn parse_match_attribs(
     attribs: impl structure::MatchAttributes,
     text: Option<&str>,
@@ -90,6 +95,14 @@ fn parse_match_attribs(
         atoms.push(text_atom);
     }
 
+    if let Some(postag) = attribs.postag() {
+        let tag_atom = MatchAtom::new(StringMatcher::new(postag.trim().to_string()), |token| {
+            &token.postags[..]
+        });
+
+        atoms.push(Box::new(tag_atom));
+    }
+
     if let Some(space_before) = attribs.spacebefore() {
         let value = match space_before.as_str() {
             "yes" => true,
@@ -133,12 +146,24 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
     let min = token
         .min
         .clone()
-        .map(|x| x.parse().expect("can't parse min as usize"))
+        .map(|x| {
+            if x == "-1" {
+                max_matches()
+            } else {
+                x.parse().expect("can't parse min as usize")
+            }
+        })
         .unwrap_or(1usize);
     let max = token
         .max
         .clone()
-        .map(|x| x.parse().expect("can't parse max as usize"))
+        .map(|x| {
+            if x == "-1" {
+                max_matches()
+            } else {
+                x.parse().expect("can't parse max as usize")
+            }
+        })
         .unwrap_or(1usize);
 
     let quantifier = Quantifier::new(min, max);
@@ -162,6 +187,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
                         "next" => 1,
+                        "current" => 0,
                         "previous" => -1,
                         _ => panic!("unknown scope value {}", scope),
                     }
@@ -189,7 +215,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
 
     if let Some(to_skip) = token.skip.clone() {
         let to_skip = if to_skip == "-1" {
-            20 // TODO: should be an option in config OR restricted to one sentence
+            max_matches()
         } else {
             to_skip.parse().expect("can't parse skip as usize or -1")
         };

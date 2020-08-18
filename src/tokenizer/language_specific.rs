@@ -1,6 +1,7 @@
 use super::{Token, INFLECTER};
 
 pub fn adapt_tokens_en(mut tokens: Vec<Token>) -> Vec<Token> {
+    // fix contraction inflections
     for i in 0..tokens.len() {
         if tokens.get(i - 1).map(|x| x.text == "'").unwrap_or(false) {
             let to_inflect = match tokens[i].text {
@@ -27,6 +28,13 @@ pub fn adapt_tokens_en(mut tokens: Vec<Token>) -> Vec<Token> {
                 tokens[i].inflections = inflections;
                 tokens[i].lower_inflections = lower_inflections;
             }
+        }
+    }
+
+    // fix number tags
+    for token in tokens.iter_mut() {
+        if token.text.parse::<isize>().is_ok() {
+            token.postags = vec!["CD".to_string()];
         }
     }
 

@@ -38,6 +38,12 @@ impl Match<[String]> for StringMatcher {
     }
 }
 
+impl Match<[&str]> for StringMatcher {
+    fn is_match(&self, input: &[&str]) -> bool {
+        input.iter().any(|x| *x == self.string)
+    }
+}
+
 impl Match<str> for StringMatcher {
     fn is_match(&self, input: &str) -> bool {
         input == self.string

@@ -238,6 +238,7 @@ pub struct Example {
 pub struct Exception {
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
+    pub postag: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -261,6 +262,7 @@ pub struct Token {
     pub skip: Option<String>,
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
+    pub postag: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -272,6 +274,7 @@ pub struct Token {
 pub trait MatchAttributes {
     fn case_sensitive(&self) -> &Option<String>;
     fn inflected(&self) -> &Option<String>;
+    fn postag(&self) -> &Option<String>;
     fn regexp(&self) -> &Option<String>;
     fn spacebefore(&self) -> &Option<String>;
     fn negate(&self) -> &Option<String>;
@@ -286,6 +289,10 @@ macro_rules! impl_match_attributes {
 
             fn inflected(&self) -> &Option<String> {
                 &self.inflected
+            }
+
+            fn postag(&self) -> &Option<String> {
+                &self.postag
             }
 
             fn regexp(&self) -> &Option<String> {

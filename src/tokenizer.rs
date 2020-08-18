@@ -5,12 +5,22 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod inflect;
 mod language_specific;
+mod tag;
 
 use inflect::Inflecter;
 use language_specific::adapt_tokens;
+use tag::Tagger;
 
 lazy_static! {
     static ref INFLECTER: Inflecter = Inflecter::from_dumps(format!(
+        "data/dumps/{}",
+        std::env::var("RULE_LANG").unwrap()
+    ))
+    .unwrap();
+}
+
+lazy_static! {
+    static ref TAGGER: Tagger = Tagger::from_dumps(format!(
         "data/dumps/{}",
         std::env::var("RULE_LANG").unwrap()
     ))
@@ -63,9 +73,10 @@ fn get_token_strs(text: &str) -> Vec<&str> {
 #[derive(Debug)]
 pub struct Token<'a> {
     pub text: &'a str,
+    pub lower: String,
     pub inflections: Vec<String>,
     pub lower_inflections: Vec<String>,
-    pub lower: String,
+    pub postags: Vec<String>,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
@@ -78,6 +89,7 @@ impl<'a> Token<'a> {
             inflections: Vec::new(),
             lower_inflections: Vec::new(),
             lower: String::new(),
+            postags: vec!["SENT_START".to_string()],
             char_span: (0, 0),
             byte_span: (0, 0),
             has_space_before: false,
@@ -120,6 +132,11 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
                     lower: trimmed.to_lowercase(),
                     inflections,
                     lower_inflections,
+                    postags: TAGGER
+                        .get_tags(trimmed)
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect(),
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
