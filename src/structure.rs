@@ -376,6 +376,82 @@ pub enum RuleContainer {
     RuleGroup(RuleGroup),
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisambiguationExample {
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    #[serde(rename = "$value")]
+    pub parts: Vec<ExamplePart>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Disambiguation {
+    postag: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisambiguationRule {
+    pub pattern: Pattern,
+    #[serde(rename = "antipattern")]
+    pub antipatterns: Option<Vec<Pattern>>,
+    #[serde(rename = "suggestion")]
+    pub suggestions: Option<Vec<Suggestion>>,
+    pub disambig: Disambiguation,
+    #[serde(rename = "example")]
+    pub examples: Vec<DisambiguationExample>,
+    pub id: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisambiguationRuleGroup {
+    pub id: String,
+    #[serde(rename = "antipattern")]
+    pub antipatterns: Option<Vec<Pattern>>,
+    pub name: Option<String>,
+    #[serde(rename = "rule")]
+    pub rules: Vec<DisambiguationRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
+pub enum DisambiguationRuleContainer {
+    Rule(DisambiguationRule),
+    RuleGroup(DisambiguationRuleGroup),
+}
+
+macro_rules! flatten_group {
+    ($group:expr) => {{
+        let rule_group_id = $group.id.clone();
+        let group_antipatterns = if let Some(antipatterns) = $group.antipatterns {
+            antipatterns
+        } else {
+            Vec::new()
+        };
+
+        $group
+            .rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut rule)| {
+                let id = Id::new(rule_group_id.clone(), i);
+                if let Some(antipatterns) = &mut rule.antipatterns {
+                    antipatterns.extend(group_antipatterns.clone());
+                } else {
+                    rule.antipatterns = Some(group_antipatterns.clone());
+                }
+
+                (rule, id.to_string())
+            })
+            .collect::<Vec<_>>()
+    }};
+}
+
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Vec<Result<(Rule, String), serde_xml_rs::Error>> {
@@ -383,7 +459,6 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
     let file = BufReader::new(file);
 
     let sanitized = preprocess::sanitize(file, &["suggestion"]);
-    std::fs::write("data/grammar.sanitized.xml", sanitized.clone()).unwrap();
     let rules = preprocess::extract_rules(sanitized.as_bytes());
 
     rules
@@ -402,29 +477,43 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
                         vec![Ok((rule, id))]
                     }
                     RuleContainer::RuleGroup(rule_group) => {
-                        let rule_group_id = rule_group.id.clone();
-                        let group_antipatterns = if let Some(antipatterns) = rule_group.antipatterns
-                        {
-                            antipatterns
-                        } else {
-                            Vec::new()
-                        };
+                        flatten_group!(rule_group).into_iter().map(Ok).collect()
+                    }
+                },
+                Err(err) => vec![Err(err)],
+            });
+            out
+        })
+        .flatten()
+        .collect()
+}
 
-                        rule_group
-                            .rules
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, mut rule)| {
-                                let id = Id::new(rule_group_id.clone(), i);
-                                if let Some(antipatterns) = &mut rule.antipatterns {
-                                    antipatterns.extend(group_antipatterns.clone());
-                                } else {
-                                    rule.antipatterns = Some(group_antipatterns.clone());
-                                }
+pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Vec<Result<(DisambiguationRule, String), serde_xml_rs::Error>> {
+    let file = File::open(path).unwrap();
+    let file = BufReader::new(file);
 
-                                Ok((rule, id.to_string()))
-                            })
-                            .collect()
+    let sanitized = preprocess::sanitize(file, &[]);
+    let rules = preprocess::extract_rules(sanitized.as_bytes());
+
+    rules
+        .into_iter()
+        .map(|x| {
+            let mut out = Vec::new();
+
+            let deseralized = DisambiguationRuleContainer::deserialize(
+                &mut serde_xml_rs::Deserializer::new(EventReader::new(x.0.as_bytes())),
+            );
+
+            out.extend(match deseralized {
+                Ok(rule_container) => match rule_container {
+                    DisambiguationRuleContainer::Rule(rule) => {
+                        let id = rule.id.clone().unwrap_or_else(String::new);
+                        vec![Ok((rule, id))]
+                    }
+                    DisambiguationRuleContainer::RuleGroup(rule_group) => {
+                        flatten_group!(rule_group).into_iter().map(Ok).collect()
                     }
                 },
                 Err(err) => vec![Err(err)],

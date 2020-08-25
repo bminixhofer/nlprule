@@ -449,3 +449,30 @@ impl TryFrom<structure::Rule> for rule::Rule {
         })
     }
 }
+
+impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
+    type Error = Error;
+
+    fn try_from(
+        data: structure::DisambiguationRule,
+    ) -> Result<rule::DisambiguationRule, Self::Error> {
+        let (composition, start, end) = parse_pattern(data.pattern);
+
+        let antipatterns = if let Some(antipatterns) = data.antipatterns {
+            antipatterns
+                .into_iter()
+                .map(|x| parse_pattern(x).0)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(rule::DisambiguationRule {
+            composition,
+            antipatterns,
+            start,
+            end,
+            id: String::new(),
+        })
+    }
+}

@@ -3,13 +3,24 @@ use regex::Regex;
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod disambiguate;
 mod inflect;
 mod language_specific;
 mod tag;
 
+use disambiguate::Disambiguator;
 use inflect::Inflecter;
 use language_specific::adapt_tokens;
 use tag::Tagger;
+
+lazy_static! {
+    static ref DISAMBIGUATOR: Disambiguator = {
+        Disambiguator::from_xml(format!(
+            "data/disambiguation.{}.canonic.xml",
+            std::env::var("RULE_LANG").unwrap()
+        ))
+    };
+}
 
 lazy_static! {
     static ref INFLECTER: Inflecter = Inflecter::from_dumps(format!(
@@ -145,5 +156,6 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
             .filter(|token| !token.text.is_empty()),
     );
 
-    adapt_tokens(tokens)
+    let tokens = adapt_tokens(tokens);
+    DISAMBIGUATOR.apply(tokens)
 }

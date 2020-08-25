@@ -2,7 +2,7 @@ use crate::tokenizer::Token;
 use regex::Regex;
 use std::collections::HashMap;
 
-pub trait Match<T: ?Sized> {
+pub trait Match<T: ?Sized>: Send + Sync {
     fn is_match(&self, input: &T) -> bool;
 }
 
@@ -60,7 +60,7 @@ pub struct GenericMatcher<T> {
     value: T,
 }
 
-impl<T: Eq> Match<T> for GenericMatcher<T> {
+impl<T: Eq + Send + Sync> Match<T> for GenericMatcher<T> {
     fn is_match(&self, input: &T) -> bool {
         input == &self.value
     }
@@ -84,7 +84,7 @@ impl Quantifier {
     }
 }
 
-pub trait Atom {
+pub trait Atom: Send + Sync {
     fn is_match(&self, input: &[&Token], position: usize) -> bool;
 }
 
@@ -179,19 +179,23 @@ impl OffsetAtom {
     }
 }
 
-pub struct MatchAtom<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> {
+pub struct MatchAtom<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> {
     matcher: M,
     access: A,
     phantom: std::marker::PhantomData<O>,
 }
 
-impl<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> Atom for MatchAtom<O, M, A> {
+impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O + Sync + Send> Atom
+    for MatchAtom<O, M, A>
+{
     fn is_match(&self, input: &[&Token], position: usize) -> bool {
         self.matcher.is_match((self.access)(input[position]))
     }
 }
 
-impl<O: ?Sized, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> MatchAtom<O, M, A> {
+impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O>
+    MatchAtom<O, M, A>
+{
     pub fn new(matcher: M, access: A) -> Self {
         MatchAtom {
             matcher,

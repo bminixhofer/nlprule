@@ -128,8 +128,124 @@ impl Suggester {
     }
 }
 
+trait RuleMatch {
+    fn composition(&self) -> &Composition;
+    fn antipatterns(&self) -> &Vec<Composition>;
+    fn id(&self) -> &str;
+    fn start(&self) -> usize;
+    fn end(&self) -> usize;
+
+    fn get_match<'a>(
+        &self,
+        tokens: &'a [&Token<'a>],
+        i: usize,
+        mask: &mut Vec<bool>,
+    ) -> Option<MatchGraph<'a>> {
+        if let Some(graph) = self.composition().apply(tokens, i) {
+            let start_group = graph.by_id(self.start()).unwrap_or_else(|| {
+                panic!("{} group must exist in graph: {}", self.id(), self.start())
+            });
+            let end_group = graph.by_id(self.end() - 1).unwrap_or_else(|| {
+                panic!(
+                    "{} group must exist in graph: {}",
+                    self.id(),
+                    self.end() - 1
+                )
+            });
+
+            let start = start_group.char_start;
+            let end = end_group.char_end;
+
+            // only add the suggestion if we don't have any yet from this rule in its range
+            if !mask[start..end].iter().any(|x| *x) {
+                let mut blocked = false;
+
+                // TODO: cache / move to outer loop
+                for i in 0..tokens.len() {
+                    for antipattern in self.antipatterns() {
+                        if let Some(anti_graph) = antipattern.apply(tokens, i) {
+                            let anti_start = anti_graph.by_index(0).char_start;
+                            let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
+
+                            let rule_start = graph.by_index(0).char_start;
+                            let rule_end = graph.by_index(graph.len() - 1).char_end;
+
+                            if anti_start <= rule_end && rule_start <= anti_end {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                    }
+                    if blocked {
+                        break;
+                    }
+                }
+
+                if !blocked {
+                    mask[start..end].iter_mut().for_each(|x| *x = true);
+
+                    return Some(graph);
+                }
+            }
+        }
+
+        None
+    }
+}
+
+macro_rules! impl_rule_match {
+    ($e:ty) => {
+        impl RuleMatch for $e {
+            fn antipatterns(&self) -> &Vec<Composition> {
+                &self.antipatterns
+            }
+
+            fn composition(&self) -> &Composition {
+                &self.composition
+            }
+
+            fn start(&self) -> usize {
+                self.start
+            }
+
+            fn end(&self) -> usize {
+                self.end
+            }
+
+            fn id(&self) -> &str {
+                self.id.as_str()
+            }
+        }
+    };
+}
+
+impl_rule_match!(Rule);
+impl_rule_match!(DisambiguationRule);
+
+pub struct DisambiguationRule {
+    pub id: String,
+    composition: Composition,
+    antipatterns: Vec<Composition>,
+    start: usize,
+    end: usize,
+}
+
+impl DisambiguationRule {
+    pub fn set_id(&mut self, id: String) {
+        self.id = id;
+    }
+
+    pub fn apply<'a>(&self, tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+        tokens
+    }
+
+    pub fn test(&self) -> bool {
+        false
+    }
+}
+
 pub struct Rule {
-    id: String,
+    pub id: String,
     composition: Composition,
     antipatterns: Vec<Composition>,
     tests: Vec<Test>,
@@ -147,7 +263,7 @@ impl Rule {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
-        let mut range_mask: Vec<_> = vec![
+        let mut mask: Vec<_> = vec![
             false;
             tokens
                 .get(tokens.len() - 1)
@@ -156,7 +272,7 @@ impl Rule {
         ];
 
         for i in 0..tokens.len() {
-            if let Some(graph) = self.composition.apply(&refs, i) {
+            if let Some(graph) = self.get_match(&refs, i, &mut mask) {
                 let start_group = graph.by_id(self.start).unwrap_or_else(|| {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
                 });
@@ -167,45 +283,15 @@ impl Rule {
                 let start = start_group.char_start;
                 let end = end_group.char_end;
 
-                // only add the suggestion if we don't have any yet from this rule in its range
-                if !range_mask[start..end].iter().any(|x| *x) {
-                    let mut blocked = false;
-
-                    // TODO: cache / move to outer loop
-                    for i in 0..tokens.len() {
-                        for antipattern in &self.antipatterns {
-                            if let Some(anti_graph) = antipattern.apply(&refs, i) {
-                                let anti_start = anti_graph.by_index(0).char_start;
-                                let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
-
-                                let rule_start = graph.by_index(0).char_start;
-                                let rule_end = graph.by_index(graph.len() - 1).char_end;
-
-                                if anti_start <= rule_end && rule_start <= anti_end {
-                                    blocked = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if blocked {
-                            break;
-                        }
-                    }
-
-                    if !blocked {
-                        range_mask[start..end].iter_mut().for_each(|x| *x = true);
-
-                        suggestions.push(Suggestion {
-                            start,
-                            end,
-                            text: self
-                                .suggesters
-                                .iter()
-                                .map(|x| x.apply(&graph, start_group, end_group))
-                                .collect(),
-                        });
-                    }
-                }
+                suggestions.push(Suggestion {
+                    start,
+                    end,
+                    text: self
+                        .suggesters
+                        .iter()
+                        .map(|x| x.apply(&graph, start_group, end_group))
+                        .collect(),
+                });
             }
         }
 
