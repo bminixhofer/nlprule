@@ -4,7 +4,7 @@ use std::io::BufRead;
 use std::path::Path;
 
 pub struct Tagger {
-    tags: HashMap<String, Vec<String>>,
+    tags: HashMap<String, Vec<(String, String)>>,
 }
 
 impl Tagger {
@@ -24,21 +24,20 @@ impl Tagger {
 
                 let parts: Vec<_> = line.split('\t').collect();
 
-                let word = parts[0].to_string();
+                let word = parts[0].to_lowercase();
+                let inflection = parts[1].to_string();
                 let tag = parts[2].to_string();
 
-                tags.entry(word).or_insert_with(Vec::new).push(tag);
+                tags.entry(word)
+                    .or_insert_with(Vec::new)
+                    .push((inflection, tag));
             }
         }
 
         Ok(Tagger { tags })
     }
 
-    pub fn get_tags(&self, word: &str) -> Vec<&str> {
-        if let Some(tags) = self.tags.get(word) {
-            tags.iter().map(|x| x.as_str()).collect()
-        } else {
-            vec!["UNKNOWN"]
-        }
+    pub fn get_tags(&self, word: &str) -> Vec<(String, String)> {
+        self.tags.get(word).cloned().unwrap_or_else(Vec::new)
     }
 }

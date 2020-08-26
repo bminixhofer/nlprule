@@ -4,13 +4,9 @@ use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod disambiguate;
-mod inflect;
-mod language_specific;
 mod tag;
 
 use disambiguate::Disambiguator;
-use inflect::Inflecter;
-use language_specific::adapt_tokens;
 use tag::Tagger;
 
 lazy_static! {
@@ -20,14 +16,6 @@ lazy_static! {
             std::env::var("RULE_LANG").unwrap()
         ))
     };
-}
-
-lazy_static! {
-    static ref INFLECTER: Inflecter = Inflecter::from_dumps(format!(
-        "data/dumps/{}",
-        std::env::var("RULE_LANG").unwrap()
-    ))
-    .unwrap();
 }
 
 lazy_static! {
@@ -85,6 +73,7 @@ fn get_token_strs(text: &str) -> Vec<&str> {
 pub struct Token<'a> {
     pub text: &'a str,
     pub lower: String,
+    pub tags: Vec<(String, String)>,
     pub inflections: Vec<String>,
     pub lower_inflections: Vec<String>,
     pub postags: Vec<String>,
@@ -98,6 +87,7 @@ impl<'a> Token<'a> {
         Token {
             text: "",
             inflections: Vec::new(),
+            tags: Vec::new(),
             lower_inflections: Vec::new(),
             lower: String::new(),
             postags: vec!["SENT_START".to_string()],
@@ -136,18 +126,15 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
                 let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
                 let trimmed = x.trim();
 
-                let (inflections, lower_inflections) = INFLECTER.get_inflections(trimmed);
+                let lower = trimmed.to_lowercase();
 
                 Token {
                     text: trimmed,
-                    lower: trimmed.to_lowercase(),
-                    inflections,
-                    lower_inflections,
-                    postags: TAGGER
-                        .get_tags(trimmed)
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect(),
+                    tags: TAGGER.get_tags(&lower),
+                    lower,
+                    inflections: Vec::new(),
+                    lower_inflections: Vec::new(),
+                    postags: Vec::new(),
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
@@ -156,6 +143,20 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
             .filter(|token| !token.text.is_empty()),
     );
 
-    let tokens = adapt_tokens(tokens);
-    DISAMBIGUATOR.apply(tokens)
+    let mut tokens = DISAMBIGUATOR.apply(tokens);
+
+    // postprocessing, should probably be handled by a TokenBuilder
+    tokens.iter_mut().for_each(|x| {
+        x.inflections = x.tags.iter().map(|x| x.0.clone()).collect();
+        x.inflections.push(x.text.to_string());
+
+        x.lower_inflections = x.inflections.iter().map(|x| x.to_lowercase()).collect();
+        x.postags = x.tags.iter().map(|x| x.1.clone()).collect();
+
+        if x.postags.is_empty() {
+            x.postags = vec!["UNKNOWN".to_string()];
+        }
+    });
+
+    tokens
 }
