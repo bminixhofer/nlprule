@@ -13,6 +13,7 @@ struct Opts {
 }
 
 fn main() {
+    env_logger::init();
     let opts = Opts::parse();
     let ids = opts.ids.iter().map(|x| x.as_str()).collect::<Vec<_>>();
 

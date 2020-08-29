@@ -380,7 +380,9 @@ pub enum RuleContainer {
 #[serde(deny_unknown_fields)]
 pub struct DisambiguationExample {
     #[serde(rename = "type")]
-    pub kind: Option<String>,
+    pub kind: String,
+    pub inputform: Option<String>,
+    pub outputform: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Vec<ExamplePart>,
 }
@@ -388,7 +390,7 @@ pub struct DisambiguationExample {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Disambiguation {
-    postag: String,
+    pub postag: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

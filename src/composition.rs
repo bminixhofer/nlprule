@@ -179,13 +179,13 @@ impl OffsetAtom {
     }
 }
 
-pub struct MatchAtom<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O> {
+pub struct MatchAtom<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O> {
     matcher: M,
     access: A,
     phantom: std::marker::PhantomData<O>,
 }
 
-impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O + Sync + Send> Atom
+impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O + Sync + Send> Atom
     for MatchAtom<O, M, A>
 {
     fn is_match(&self, input: &[&Token], position: usize) -> bool {
@@ -193,9 +193,7 @@ impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O
     }
 }
 
-impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O>
-    MatchAtom<O, M, A>
-{
+impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O> MatchAtom<O, M, A> {
     pub fn new(matcher: M, access: A) -> Self {
         MatchAtom {
             matcher,
@@ -209,7 +207,7 @@ impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token<'a>) -> &'a O
 pub struct Group<'a> {
     pub char_start: usize,
     pub char_end: usize,
-    pub tokens: Vec<&'a Token<'a>>,
+    pub tokens: Vec<&'a Token>,
 }
 
 impl<'a> Group<'a> {
@@ -305,7 +303,7 @@ impl Composition {
             .any(|x| x.atom.is_match(tokens, position))
     }
 
-    pub fn apply<'a>(&self, tokens: &[&'a Token<'a>], start: usize) -> Option<MatchGraph<'a>> {
+    pub fn apply<'a>(&self, tokens: &[&'a Token], start: usize) -> Option<MatchGraph<'a>> {
         let mut position = start;
 
         let mut cur_count = 0;

@@ -3,7 +3,7 @@ use crate::composition::{
     Quantifier, RegexMatcher, StringMatcher, TrueAtom,
 };
 use crate::rule;
-use crate::tokenizer::Token;
+use crate::tokenizer::{Token, Word};
 use crate::{structure, utils, Error};
 use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
@@ -57,7 +57,9 @@ fn parse_match_attribs(
                     &token.inflections[..]
                 }))
             } else if case_sensitive {
-                Box::new(MatchAtom::new($matcher, |token: &Token| token.text))
+                Box::new(MatchAtom::new($matcher, |token: &Token| {
+                    token.text.as_str()
+                }))
             } else if inflected {
                 Box::new(MatchAtom::new($matcher, |token: &Token| {
                     &token.lower_inflections[..]
@@ -450,6 +452,26 @@ impl TryFrom<structure::Rule> for rule::Rule {
     }
 }
 
+fn parse_tag_form(form: &str) -> Word {
+    lazy_static! {
+        static ref REGEX: Regex = Regex::new(r"(\w+)\[(.+?)\]").unwrap();
+    }
+
+    let captures = REGEX.captures(form).unwrap();
+    let word = captures.get(1).unwrap().as_str().to_string();
+    let tags = captures.get(2).unwrap().as_str();
+
+    let tags = tags
+        .split(',')
+        .map(|x| {
+            let parts: Vec<_> = x.split('/').collect();
+            (parts[0].to_string(), parts.get(1).map(|x| x.to_string()))
+        })
+        .collect();
+
+    rule::Word::new_with_tags(word, tags)
+}
+
 impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
     type Error = Error;
 
@@ -467,11 +489,71 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             Vec::new()
         };
 
+        let disambiguations = vec![rule::Disambiguation::Limit(data.disambig.postag)];
+
+        let mut tests = Vec::new();
+
+        for example in &data.examples {
+            let mut texts = Vec::new();
+            let mut char_span: Option<(usize, usize)> = None;
+            let mut char_length = 0;
+
+            for part in &example.parts {
+                match part {
+                    structure::ExamplePart::Text(text) => {
+                        texts.push(text.as_str());
+                        char_length += text.chars().count();
+                    }
+                    structure::ExamplePart::Marker(marker) => {
+                        if char_span.is_some() {
+                            return Err(Error::Unexpected(
+                                "example must have one or zero markers".into(),
+                            ));
+                        }
+
+                        texts.push(marker.text.as_str());
+                        let length = marker.text.chars().count();
+
+                        char_span = Some((char_length, char_length + length));
+
+                        char_length += marker.text.chars().count();
+                    }
+                }
+            }
+
+            let text = texts.join("");
+
+            let test = match example.kind.as_str() {
+                "untouched" => rule::DisambiguationTest::Unchanged(text),
+                "ambiguous" => rule::DisambiguationTest::Changed(rule::DisambiguationChange {
+                    text,
+                    before: parse_tag_form(
+                        example
+                            .inputform
+                            .as_ref()
+                            .expect("must have inputform when ambiguous example"),
+                    ),
+                    after: parse_tag_form(
+                        &example
+                            .outputform
+                            .as_ref()
+                            .expect("must have inputform when ambiguous example"),
+                    ),
+                    char_span: char_span.expect("must have marker when ambiguous example"),
+                }),
+                x => panic!("unknown disambiguation example type {}", x),
+            };
+
+            tests.push(test);
+        }
+
         Ok(rule::DisambiguationRule {
             composition,
             antipatterns,
+            disambiguations,
             start,
             end,
+            tests,
             id: String::new(),
         })
     }

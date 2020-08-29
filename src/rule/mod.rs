@@ -1,5 +1,5 @@
 use crate::composition::{Composition, Group, MatchGraph};
-use crate::tokenizer::{tokenize, Token};
+use crate::tokenizer::{finalize, tokenize, IncompleteToken, Token, Word};
 use crate::utils;
 use log::{info, warn};
 use regex::Regex;
@@ -50,7 +50,7 @@ impl Match {
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
             .tokens
             .get(0)
-            .map(|x| x.text)
+            .map(|x| x.text.as_str())
             .unwrap_or("");
 
         if let Some((regex, replacement)) = &self.regex_replacer {
@@ -137,9 +137,9 @@ trait RuleMatch {
 
     fn get_match<'a>(
         &self,
-        tokens: &'a [&Token<'a>],
+        tokens: &'a [&Token],
         i: usize,
-        mask: &mut Vec<bool>,
+        mask: Option<&mut Vec<bool>>,
     ) -> Option<MatchGraph<'a>> {
         if let Some(graph) = self.composition().apply(tokens, i) {
             let start_group = graph.by_id(self.start()).unwrap_or_else(|| {
@@ -157,7 +157,10 @@ trait RuleMatch {
             let end = end_group.char_end;
 
             // only add the suggestion if we don't have any yet from this rule in its range
-            if !mask[start..end].iter().any(|x| *x) {
+            if mask
+                .as_ref()
+                .map_or(true, |x| !x[start..end].iter().any(|x| *x))
+            {
                 let mut blocked = false;
 
                 // TODO: cache / move to outer loop
@@ -182,7 +185,9 @@ trait RuleMatch {
                 }
 
                 if !blocked {
-                    mask[start..end].iter_mut().for_each(|x| *x = true);
+                    if let Some(mask) = mask {
+                        mask[start..end].iter_mut().for_each(|x| *x = true);
+                    }
 
                     return Some(graph);
                 }
@@ -222,12 +227,47 @@ macro_rules! impl_rule_match {
 impl_rule_match!(Rule);
 impl_rule_match!(DisambiguationRule);
 
+pub enum Disambiguation {
+    Limit(String),
+}
+
+impl Disambiguation {
+    fn apply(&self, word: &mut Word) {
+        match &self {
+            Disambiguation::Limit(limit) => {
+                word.tags
+                    .retain(|x| x.1.as_ref().map(|x| x == limit).unwrap_or(false));
+                if word.tags.is_empty() {
+                    word.tags
+                        .insert((word.text.to_string(), Some(limit.to_string())));
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DisambiguationChange {
+    text: String,
+    char_span: (usize, usize),
+    before: Word,
+    after: Word,
+}
+
+#[derive(Debug)]
+pub enum DisambiguationTest {
+    Unchanged(String),
+    Changed(DisambiguationChange),
+}
+
 pub struct DisambiguationRule {
     pub id: String,
     composition: Composition,
     antipatterns: Vec<Composition>,
+    disambiguations: Vec<Disambiguation>,
     start: usize,
     end: usize,
+    tests: Vec<DisambiguationTest>,
 }
 
 impl DisambiguationRule {
@@ -235,12 +275,79 @@ impl DisambiguationRule {
         self.id = id;
     }
 
-    pub fn apply<'a>(&self, tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
-        tokens
+    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
+        let complete_tokens = finalize(tokens.clone());
+        let refs: Vec<&Token> = complete_tokens.iter().collect();
+
+        for i in 0..tokens.len() {
+            if let Some(graph) = self.get_match(&refs, i, None) {
+                for (group_idx, disambiguation) in (self.start..self.end).zip(&self.disambiguations)
+                {
+                    let group = graph.by_id(group_idx).unwrap_or_else(|| {
+                        panic!("{} group must exist in graph: {}", self.id, self.start)
+                    });
+
+                    let group_byte_spans: HashSet<_> =
+                        group.tokens.iter().map(|x| x.byte_span).collect();
+
+                    tokens
+                        .iter_mut()
+                        .filter(|x| group_byte_spans.contains(&x.byte_span))
+                        .for_each(|x| disambiguation.apply(&mut x.word));
+                }
+            }
+        }
     }
 
     pub fn test(&self) -> bool {
-        false
+        let mut passes = Vec::new();
+
+        for test in &self.tests {
+            let text = match test {
+                DisambiguationTest::Unchanged(x) => x.as_str(),
+                DisambiguationTest::Changed(x) => x.text.as_str(),
+            };
+
+            let tokens_before = tokenize(text);
+            let mut tokens_after = tokens_before.clone();
+            self.apply(&mut tokens_after);
+
+            info!("Tokens: {:#?}", tokens_before);
+
+            let pass = match test {
+                DisambiguationTest::Unchanged(_) => tokens_before == tokens_after,
+                DisambiguationTest::Changed(change) => {
+                    let before = tokens_before
+                        .iter()
+                        .find(|x| x.char_span == change.char_span)
+                        .unwrap();
+
+                    let after = tokens_after
+                        .iter()
+                        .find(|x| x.char_span == change.char_span)
+                        .unwrap();
+
+                    before.word == change.before && after.word == change.after
+                }
+            };
+
+            if !pass {
+                warn!(
+                    "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
+                    self.id,
+                    test,
+                    tokens_before
+                        .into_iter()
+                        .map(|x| x.word)
+                        .collect::<Vec<_>>(),
+                    tokens_after.into_iter().map(|x| x.word).collect::<Vec<_>>(),
+                );
+            }
+
+            passes.push(pass);
+        }
+
+        passes.iter().all(|x| *x)
     }
 }
 
@@ -259,7 +366,7 @@ impl Rule {
         self.id = id;
     }
 
-    pub fn apply<'a>(&self, tokens: &[Token<'a>]) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
@@ -272,7 +379,7 @@ impl Rule {
         ];
 
         for i in 0..tokens.len() {
-            if let Some(graph) = self.get_match(&refs, i, &mut mask) {
+            if let Some(graph) = self.get_match(&refs, i, Some(&mut mask)) {
                 let start_group = graph.by_id(self.start).unwrap_or_else(|| {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
                 });
@@ -302,7 +409,7 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in &self.tests {
-            let tokens = tokenize(&test.text);
+            let tokens = finalize(tokenize(&test.text));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
 

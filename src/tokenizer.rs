@@ -69,11 +69,62 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     tokens
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Word {
+    pub text: String,
+    pub tags: HashSet<(String, Option<String>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IncompleteToken {
+    pub word: Word,
+    pub byte_span: (usize, usize),
+    pub char_span: (usize, usize),
+    pub has_space_before: bool,
+}
+
+impl<'a> From<IncompleteToken> for Token {
+    fn from(data: IncompleteToken) -> Token {
+        let mut inflections: Vec<_> = data.word.tags.iter().map(|x| x.0.clone()).collect();
+        inflections.push(data.word.text.to_string());
+
+        let lower_inflections = inflections.iter().map(|x| x.to_lowercase()).collect();
+        let mut postags: Vec<_> = data.word.tags.iter().filter_map(|x| x.1.clone()).collect();
+
+        if postags.is_empty() {
+            postags = vec!["UNKNOWN".to_string()];
+        }
+
+        Token {
+            lower: data.word.text.to_lowercase(),
+            text: data.word.text,
+            byte_span: data.byte_span,
+            char_span: data.char_span,
+            inflections,
+            lower_inflections,
+            postags,
+            has_space_before: data.has_space_before,
+        }
+    }
+}
+
+impl Word {
+    pub fn new_with_tags(text: String, tags: HashSet<(String, Option<String>)>) -> Self {
+        Word { text, tags }
+    }
+
+    pub fn new(text: String) -> Self {
+        Word {
+            tags: TAGGER.get_tags(&text.to_lowercase()),
+            text,
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct Token<'a> {
-    pub text: &'a str,
+pub struct Token {
+    pub text: String,
     pub lower: String,
-    pub tags: Vec<(String, String)>,
     pub inflections: Vec<String>,
     pub lower_inflections: Vec<String>,
     pub postags: Vec<String>,
@@ -82,12 +133,11 @@ pub struct Token<'a> {
     pub has_space_before: bool,
 }
 
-impl<'a> Token<'a> {
-    fn sent_start() -> Token<'static> {
+impl<'a> Token {
+    fn sent_start() -> Token {
         Token {
-            text: "",
+            text: String::new(),
             inflections: Vec::new(),
-            tags: Vec::new(),
             lower_inflections: Vec::new(),
             lower: String::new(),
             postags: vec!["SENT_START".to_string()],
@@ -98,7 +148,19 @@ impl<'a> Token<'a> {
     }
 }
 
-pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
+pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
+    let mut finalized = vec![Token::sent_start()];
+    finalized.extend(tokens.into_iter().map(|x| x.into()));
+
+    finalized
+}
+
+pub fn disambiguate(mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
+    DISAMBIGUATOR.apply(&mut tokens);
+    tokens
+}
+
+pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
     let _sentence_indices = text
         .unicode_sentences()
         .map(|sentence| {
@@ -113,7 +175,7 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
 
     let mut current_char = 0;
 
-    let mut tokens = vec![Token::sent_start()];
+    let mut tokens = Vec::new();
 
     tokens.extend(
         get_token_strs(text)
@@ -126,37 +188,15 @@ pub fn tokenize<'a>(text: &'a str) -> Vec<Token<'a>> {
                 let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
                 let trimmed = x.trim();
 
-                let lower = trimmed.to_lowercase();
-
-                Token {
-                    text: trimmed,
-                    tags: TAGGER.get_tags(&lower),
-                    lower,
-                    inflections: Vec::new(),
-                    lower_inflections: Vec::new(),
-                    postags: Vec::new(),
+                IncompleteToken {
+                    word: Word::new(trimmed.to_string()),
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
                 }
             })
-            .filter(|token| !token.text.is_empty()),
+            .filter(|token| !token.word.text.is_empty()),
     );
-
-    let mut tokens = DISAMBIGUATOR.apply(tokens);
-
-    // postprocessing, should probably be handled by a TokenBuilder
-    tokens.iter_mut().for_each(|x| {
-        x.inflections = x.tags.iter().map(|x| x.0.clone()).collect();
-        x.inflections.push(x.text.to_string());
-
-        x.lower_inflections = x.inflections.iter().map(|x| x.to_lowercase()).collect();
-        x.postags = x.tags.iter().map(|x| x.1.clone()).collect();
-
-        if x.postags.is_empty() {
-            x.postags = vec!["UNKNOWN".to_string()];
-        }
-    });
 
     tokens
 }

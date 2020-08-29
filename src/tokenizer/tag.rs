@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{read_dir, File};
 use std::io::BufRead;
 use std::path::Path;
 
 pub struct Tagger {
-    tags: HashMap<String, Vec<(String, String)>>,
+    tags: HashMap<String, HashSet<(String, String)>>,
 }
 
 impl Tagger {
@@ -29,15 +29,19 @@ impl Tagger {
                 let tag = parts[2].to_string();
 
                 tags.entry(word)
-                    .or_insert_with(Vec::new)
-                    .push((inflection, tag));
+                    .or_insert_with(HashSet::new)
+                    .insert((inflection, tag));
             }
         }
 
         Ok(Tagger { tags })
     }
 
-    pub fn get_tags(&self, word: &str) -> Vec<(String, String)> {
-        self.tags.get(word).cloned().unwrap_or_else(Vec::new)
+    pub fn get_tags(&self, word: &str) -> HashSet<(String, Option<String>)> {
+        self.tags
+            .get(word)
+            .cloned()
+            .map(|x| x.into_iter().map(|x| (x.0, Some(x.1))).collect())
+            .unwrap_or_else(|| vec![(word.to_string(), None)].into_iter().collect())
     }
 }

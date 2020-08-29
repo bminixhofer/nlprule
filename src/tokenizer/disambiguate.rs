@@ -1,6 +1,6 @@
 use crate::rule::DisambiguationRule;
 use crate::structure::read_disambiguation_rules;
-use crate::tokenizer::Token;
+use crate::tokenizer::IncompleteToken;
 use std::convert::TryFrom;
 use std::path::Path;
 
@@ -30,11 +30,9 @@ impl Disambiguator {
         Disambiguator { rules }
     }
 
-    pub fn apply<'a>(&self, mut tokens: Vec<Token<'a>>) -> Vec<Token<'a>> {
+    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
         for rule in &self.rules {
-            tokens = rule.apply(tokens);
+            rule.apply(tokens);
         }
-
-        tokens
     }
 }
