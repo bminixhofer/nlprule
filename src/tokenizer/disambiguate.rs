@@ -30,6 +30,16 @@ impl Disambiguator {
         Disambiguator { rules }
     }
 
+    pub fn apply_up_to_id(&self, tokens: &mut Vec<IncompleteToken>, id: &str) {
+        for rule in &self.rules {
+            if rule.id == id {
+                break;
+            }
+
+            rule.apply(tokens);
+        }
+    }
+
     pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
         for rule in &self.rules {
             rule.apply(tokens);

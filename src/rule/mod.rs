@@ -1,5 +1,5 @@
 use crate::composition::{Composition, Group, MatchGraph};
-use crate::tokenizer::{finalize, tokenize, IncompleteToken, Token, Word};
+use crate::tokenizer::{disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word};
 use crate::utils;
 use log::{info, warn};
 use regex::Regex;
@@ -308,7 +308,7 @@ impl DisambiguationRule {
                 DisambiguationTest::Changed(x) => x.text.as_str(),
             };
 
-            let tokens_before = tokenize(text);
+            let tokens_before = disambiguate_up_to_id(tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
             self.apply(&mut tokens_after);
 
@@ -317,7 +317,7 @@ impl DisambiguationRule {
             let pass = match test {
                 DisambiguationTest::Unchanged(_) => tokens_before == tokens_after,
                 DisambiguationTest::Changed(change) => {
-                    let before = tokens_before
+                    let _before = tokens_before
                         .iter()
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
@@ -327,7 +327,7 @@ impl DisambiguationRule {
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
 
-                    before.word == change.before && after.word == change.after
+                    after.word == change.after
                 }
             };
 

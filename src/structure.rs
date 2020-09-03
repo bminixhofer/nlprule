@@ -239,6 +239,7 @@ pub struct Exception {
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
+    pub chunk: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -263,6 +264,7 @@ pub struct Token {
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
+    pub chunk: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -275,6 +277,7 @@ pub trait MatchAttributes {
     fn case_sensitive(&self) -> &Option<String>;
     fn inflected(&self) -> &Option<String>;
     fn postag(&self) -> &Option<String>;
+    fn chunk(&self) -> &Option<String>;
     fn regexp(&self) -> &Option<String>;
     fn spacebefore(&self) -> &Option<String>;
     fn negate(&self) -> &Option<String>;
@@ -293,6 +296,10 @@ macro_rules! impl_match_attributes {
 
             fn postag(&self) -> &Option<String> {
                 &self.postag
+            }
+
+            fn chunk(&self) -> &Option<String> {
+                &self.chunk
             }
 
             fn regexp(&self) -> &Option<String> {
@@ -403,7 +410,7 @@ pub struct DisambiguationRule {
     pub suggestions: Option<Vec<Suggestion>>,
     pub disambig: Disambiguation,
     #[serde(rename = "example")]
-    pub examples: Vec<DisambiguationExample>,
+    pub examples: Option<Vec<DisambiguationExample>>,
     pub id: Option<String>,
     pub name: Option<String>,
 }

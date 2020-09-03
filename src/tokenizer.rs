@@ -3,11 +3,17 @@ use regex::Regex;
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod chunk;
 mod disambiguate;
 mod tag;
 
+use chunk::Chunker;
 use disambiguate::Disambiguator;
 use tag::Tagger;
+
+lazy_static! {
+    pub static ref CHUNKER: Chunker = Chunker::new();
+}
 
 lazy_static! {
     static ref DISAMBIGUATOR: Disambiguator = {
@@ -81,6 +87,7 @@ pub struct IncompleteToken {
     pub byte_span: (usize, usize),
     pub char_span: (usize, usize),
     pub has_space_before: bool,
+    pub chunk: Option<String>,
 }
 
 impl<'a> From<IncompleteToken> for Token {
@@ -104,6 +111,7 @@ impl<'a> From<IncompleteToken> for Token {
             lower_inflections,
             postags,
             has_space_before: data.has_space_before,
+            chunk: data.chunk,
         }
     }
 }
@@ -131,6 +139,7 @@ pub struct Token {
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
+    pub chunk: Option<String>,
 }
 
 impl<'a> Token {
@@ -144,6 +153,7 @@ impl<'a> Token {
             char_span: (0, 0),
             byte_span: (0, 0),
             has_space_before: false,
+            chunk: None,
         }
     }
 }
@@ -153,6 +163,11 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
     finalized.extend(tokens.into_iter().map(|x| x.into()));
 
     finalized
+}
+
+pub fn disambiguate_up_to_id(mut tokens: Vec<IncompleteToken>, id: &str) -> Vec<IncompleteToken> {
+    DISAMBIGUATOR.apply_up_to_id(&mut tokens, id);
+    tokens
 }
 
 pub fn disambiguate(mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
@@ -174,7 +189,6 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
         });
 
     let mut current_char = 0;
-
     let mut tokens = Vec::new();
 
     tokens.extend(
@@ -193,10 +207,13 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
+                    chunk: None,
                 }
             })
             .filter(|token| !token.word.text.is_empty()),
     );
+
+    CHUNKER.apply(text, &mut tokens).unwrap();
 
     tokens
 }

@@ -105,6 +105,14 @@ fn parse_match_attribs(
         atoms.push(Box::new(tag_atom));
     }
 
+    if let Some(chunk) = attribs.chunk() {
+        let chunk_atom = MatchAtom::new(StringMatcher::new(chunk.trim().to_string()), |token| {
+            &token.chunk
+        });
+
+        atoms.push(Box::new(chunk_atom));
+    }
+
     if let Some(space_before) = attribs.spacebefore() {
         let value = match space_before.as_str() {
             "yes" => true,
@@ -493,58 +501,60 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
 
         let mut tests = Vec::new();
 
-        for example in &data.examples {
-            let mut texts = Vec::new();
-            let mut char_span: Option<(usize, usize)> = None;
-            let mut char_length = 0;
+        if let Some(examples) = data.examples.as_ref() {
+            for example in examples {
+                let mut texts = Vec::new();
+                let mut char_span: Option<(usize, usize)> = None;
+                let mut char_length = 0;
 
-            for part in &example.parts {
-                match part {
-                    structure::ExamplePart::Text(text) => {
-                        texts.push(text.as_str());
-                        char_length += text.chars().count();
-                    }
-                    structure::ExamplePart::Marker(marker) => {
-                        if char_span.is_some() {
-                            return Err(Error::Unexpected(
-                                "example must have one or zero markers".into(),
-                            ));
+                for part in &example.parts {
+                    match part {
+                        structure::ExamplePart::Text(text) => {
+                            texts.push(text.as_str());
+                            char_length += text.chars().count();
                         }
+                        structure::ExamplePart::Marker(marker) => {
+                            if char_span.is_some() {
+                                return Err(Error::Unexpected(
+                                    "example must have one or zero markers".into(),
+                                ));
+                            }
 
-                        texts.push(marker.text.as_str());
-                        let length = marker.text.chars().count();
+                            texts.push(marker.text.as_str());
+                            let length = marker.text.chars().count();
 
-                        char_span = Some((char_length, char_length + length));
+                            char_span = Some((char_length, char_length + length));
 
-                        char_length += marker.text.chars().count();
+                            char_length += marker.text.chars().count();
+                        }
                     }
                 }
+
+                let text = texts.join("");
+
+                let test = match example.kind.as_str() {
+                    "untouched" => rule::DisambiguationTest::Unchanged(text),
+                    "ambiguous" => rule::DisambiguationTest::Changed(rule::DisambiguationChange {
+                        text,
+                        before: parse_tag_form(
+                            example
+                                .inputform
+                                .as_ref()
+                                .expect("must have inputform when ambiguous example"),
+                        ),
+                        after: parse_tag_form(
+                            &example
+                                .outputform
+                                .as_ref()
+                                .expect("must have inputform when ambiguous example"),
+                        ),
+                        char_span: char_span.expect("must have marker when ambiguous example"),
+                    }),
+                    x => panic!("unknown disambiguation example type {}", x),
+                };
+
+                tests.push(test);
             }
-
-            let text = texts.join("");
-
-            let test = match example.kind.as_str() {
-                "untouched" => rule::DisambiguationTest::Unchanged(text),
-                "ambiguous" => rule::DisambiguationTest::Changed(rule::DisambiguationChange {
-                    text,
-                    before: parse_tag_form(
-                        example
-                            .inputform
-                            .as_ref()
-                            .expect("must have inputform when ambiguous example"),
-                    ),
-                    after: parse_tag_form(
-                        &example
-                            .outputform
-                            .as_ref()
-                            .expect("must have inputform when ambiguous example"),
-                    ),
-                    char_span: char_span.expect("must have marker when ambiguous example"),
-                }),
-                x => panic!("unknown disambiguation example type {}", x),
-            };
-
-            tests.push(test);
         }
 
         Ok(rule::DisambiguationRule {

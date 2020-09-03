@@ -30,12 +30,19 @@ pub fn fix_regex_replacement(replacement: &str) -> String {
     REGEX.replace_all(replacement, r"${${1}}").to_string()
 }
 
+pub fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
+    let placeholder = "###escaped_backslash###";
+
+    string
+        .as_ref()
+        .replace(r"\\", placeholder)
+        .replace(&format!(r"\{}", c), c)
+        .replace(placeholder, r"\\")
+}
+
 pub fn fix_regex(regex: &str, must_fully_match: bool) -> String {
     // TODO: more exhaustive backslash check
-    let fixed = regex
-        .replace(r"\!", "!")
-        .replace(r"\,", ",")
-        .replace(r"\/", "/");
+    let fixed = unescape(unescape(unescape(regex, "!"), ","), "/");
 
     if must_fully_match {
         format!("^({})$", fixed)
