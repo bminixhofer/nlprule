@@ -34,8 +34,18 @@ fn main() {
     let rules = rules
         .into_iter()
         .filter_map(|x| match x {
-            Ok(rule) => Some(rule),
+            Ok(rule) => {
+                if errors.is_empty() {
+                    Some(rule)
+                } else {
+                    None
+                }
+            }
             Err(err) => {
+                if errors.is_empty() {
+                    println!("First error: {}", err);
+                }
+
                 errors
                     .entry(format!("{}", err))
                     .and_modify(|x| *x += 1)
@@ -64,11 +74,18 @@ fn main() {
         )
         .collect();
 
+    println!("Last ID: {}", rules[rules.len() - 1].id);
     println!("Runnable rules: {}", rules.len());
-    println!(
-        "Rules passing tests: {}",
-        rules
-            .iter()
-            .fold(0, |count, rule| count + rule.test() as usize)
-    );
+
+    let mut passes = 0;
+
+    for rule in rules {
+        if rule.test() {
+            passes += 1;
+        } else {
+            break;
+        }
+    }
+
+    println!("Rules passing tests: {}", passes);
 }

@@ -396,8 +396,24 @@ pub struct DisambiguationExample {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct WordData {
+    pub pos: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Filter {
+    args: String,
+    class: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Disambiguation {
-    pub postag: String,
+    pub postag: Option<String>,
+    pub action: Option<String>,
+    #[serde(rename = "wd")]
+    pub word_datas: Option<Vec<WordData>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -413,6 +429,7 @@ pub struct DisambiguationRule {
     pub examples: Option<Vec<DisambiguationExample>>,
     pub id: Option<String>,
     pub name: Option<String>,
+    pub filter: Option<Filter>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

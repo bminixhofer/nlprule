@@ -1,5 +1,7 @@
 use crate::composition::{Composition, Group, MatchGraph};
-use crate::tokenizer::{disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word};
+use crate::tokenizer::{
+    disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
+};
 use crate::utils;
 use log::{info, warn};
 use regex::Regex;
@@ -228,19 +230,32 @@ impl_rule_match!(Rule);
 impl_rule_match!(DisambiguationRule);
 
 pub enum Disambiguation {
-    Limit(String),
+    Limit(WordData),
+    Remove(WordData),
+    Add(WordData),
 }
 
 impl Disambiguation {
     fn apply(&self, word: &mut Word) {
         match &self {
             Disambiguation::Limit(limit) => {
-                word.tags
-                    .retain(|x| x.1.as_ref().map(|x| x == limit).unwrap_or(false));
+                word.tags.retain(|x| x.pos == limit.pos);
                 if word.tags.is_empty() {
                     word.tags
-                        .insert((word.text.to_string(), Some(limit.to_string())));
+                        .insert(WordData::new(word.text.to_string(), limit.pos.to_string()));
                 }
+            }
+            Disambiguation::Remove(data) => {
+                word.tags.retain(|x| x.pos != data.pos);
+            }
+            Disambiguation::Add(data) => {
+                let mut data = data.clone();
+                if data.lemma.is_empty() {
+                    data.lemma = word.text.to_string();
+                }
+
+                word.tags.insert(data);
+                word.tags.retain(|x| !x.pos.is_empty());
             }
         }
     }

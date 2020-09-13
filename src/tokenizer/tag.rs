@@ -1,3 +1,4 @@
+use super::WordData;
 use std::collections::{HashMap, HashSet};
 use std::fs::{read_dir, File};
 use std::io::BufRead;
@@ -37,11 +38,15 @@ impl Tagger {
         Ok(Tagger { tags })
     }
 
-    pub fn get_tags(&self, word: &str) -> HashSet<(String, Option<String>)> {
+    pub fn get_tags(&self, word: &str) -> HashSet<WordData> {
         self.tags
             .get(word)
             .cloned()
-            .map(|x| x.into_iter().map(|x| (x.0, Some(x.1))).collect())
-            .unwrap_or_else(|| vec![(word.to_string(), None)].into_iter().collect())
+            .map(|x| x.into_iter().map(|x| WordData::new(x.0, x.1)).collect())
+            .unwrap_or_else(|| {
+                vec![WordData::new(word.to_string(), String::new())]
+                    .into_iter()
+                    .collect()
+            })
     }
 }

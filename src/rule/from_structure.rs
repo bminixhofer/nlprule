@@ -3,7 +3,7 @@ use crate::composition::{
     Quantifier, RegexMatcher, StringMatcher, TrueAtom,
 };
 use crate::rule;
-use crate::tokenizer::{Token, Word};
+use crate::tokenizer::{Token, Word, WordData};
 use crate::{structure, utils, Error};
 use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
@@ -462,7 +462,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
 
 fn parse_tag_form(form: &str) -> Word {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(\w+)\[(.+?)\]").unwrap();
+        static ref REGEX: Regex = Regex::new(r"([\w-]+)\[(.+?)\]").unwrap();
     }
 
     let captures = REGEX.captures(form).unwrap();
@@ -473,11 +473,21 @@ fn parse_tag_form(form: &str) -> Word {
         .split(',')
         .map(|x| {
             let parts: Vec<_> = x.split('/').collect();
-            (parts[0].to_string(), parts.get(1).map(|x| x.to_string()))
+            if parts.len() < 2 {
+                WordData::new(parts[0].to_string(), String::new())
+            } else {
+                WordData::new(parts[0].to_string(), parts[1].to_string())
+            }
         })
         .collect();
 
     rule::Word::new_with_tags(word, tags)
+}
+
+impl From<structure::WordData> for WordData {
+    fn from(data: structure::WordData) -> Self {
+        WordData::new(String::new(), data.pos)
+    }
 }
 
 impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
@@ -497,7 +507,29 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             Vec::new()
         };
 
-        let disambiguations = vec![rule::Disambiguation::Limit(data.disambig.postag)];
+        let word_datas: Vec<_> = if let Some(postag) = data.disambig.postag {
+            vec![WordData::new(String::new(), postag)]
+        } else if let Some(wds) = data.disambig.word_datas {
+            wds.into_iter().map(|x| x.into()).collect()
+        } else {
+            Vec::new()
+        };
+
+        let disambiguations = match data.disambig.action.as_deref() {
+            Some("remove") => Ok(word_datas
+                .into_iter()
+                .map(rule::Disambiguation::Remove)
+                .collect()),
+            Some("add") => Ok(word_datas
+                .into_iter()
+                .map(rule::Disambiguation::Add)
+                .collect()),
+            Some(x) => Err(Error::Unimplemented(format!("action {}", x))),
+            None => Ok(word_datas
+                .into_iter()
+                .map(rule::Disambiguation::Limit)
+                .collect()),
+        }?;
 
         let mut tests = Vec::new();
 

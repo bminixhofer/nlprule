@@ -75,10 +75,22 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     tokens
 }
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct WordData {
+    pub lemma: String,
+    pub pos: String,
+}
+
+impl WordData {
+    pub fn new(lemma: String, pos: String) -> Self {
+        WordData { lemma, pos }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word {
     pub text: String,
-    pub tags: HashSet<(String, Option<String>)>,
+    pub tags: HashSet<WordData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,11 +104,11 @@ pub struct IncompleteToken {
 
 impl<'a> From<IncompleteToken> for Token {
     fn from(data: IncompleteToken) -> Token {
-        let mut inflections: Vec<_> = data.word.tags.iter().map(|x| x.0.clone()).collect();
+        let mut inflections: Vec<_> = data.word.tags.iter().map(|x| x.lemma.clone()).collect();
         inflections.push(data.word.text.to_string());
 
         let lower_inflections = inflections.iter().map(|x| x.to_lowercase()).collect();
-        let mut postags: Vec<_> = data.word.tags.iter().filter_map(|x| x.1.clone()).collect();
+        let mut postags: Vec<_> = data.word.tags.iter().map(|x| x.pos.clone()).collect();
 
         if postags.is_empty() {
             postags = vec!["UNKNOWN".to_string()];
@@ -117,7 +129,7 @@ impl<'a> From<IncompleteToken> for Token {
 }
 
 impl Word {
-    pub fn new_with_tags(text: String, tags: HashSet<(String, Option<String>)>) -> Self {
+    pub fn new_with_tags(text: String, tags: HashSet<WordData>) -> Self {
         Word { text, tags }
     }
 
