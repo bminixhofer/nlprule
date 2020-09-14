@@ -1,4 +1,5 @@
 use crate::composition::{Composition, Group, MatchGraph};
+use crate::filter::Filter;
 use crate::tokenizer::{
     disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
 };
@@ -280,6 +281,7 @@ pub struct DisambiguationRule {
     composition: Composition,
     antipatterns: Vec<Composition>,
     disambiguations: Vec<Disambiguation>,
+    filter: Option<Box<dyn Filter>>,
     start: usize,
     end: usize,
     tests: Vec<DisambiguationTest>,
@@ -296,6 +298,12 @@ impl DisambiguationRule {
 
         for i in 0..tokens.len() {
             if let Some(graph) = self.get_match(&refs, i, None) {
+                if let Some(filter) = &self.filter {
+                    if !filter.keep(&graph) {
+                        continue;
+                    }
+                }
+
                 for (group_idx, disambiguation) in (self.start..self.end).zip(&self.disambiguations)
                 {
                     let group = graph.by_id(group_idx).unwrap_or_else(|| {

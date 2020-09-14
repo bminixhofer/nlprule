@@ -16,7 +16,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref DISAMBIGUATOR: Disambiguator = {
+    pub static ref DISAMBIGUATOR: Disambiguator = {
         Disambiguator::from_xml(format!(
             "data/disambiguation.{}.canonic.xml",
             std::env::var("RULE_LANG").unwrap()
@@ -25,7 +25,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref TAGGER: Tagger = Tagger::from_dumps(format!(
+    pub static ref TAGGER: Tagger = Tagger::from_dumps(format!(
         "data/dumps/{}",
         std::env::var("RULE_LANG").unwrap()
     ))

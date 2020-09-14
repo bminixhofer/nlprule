@@ -2,6 +2,7 @@ use crate::composition::{
     AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, OffsetAtom, OrAtom, Part,
     Quantifier, RegexMatcher, StringMatcher, TrueAtom,
 };
+use crate::filter::get_filter;
 use crate::rule;
 use crate::tokenizer::{Token, Word, WordData};
 use crate::{structure, utils, Error};
@@ -531,6 +532,27 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .collect()),
         }?;
 
+        let filter = if let Some(filter_data) = data.filter {
+            let args = filter_data
+                .args
+                .split(' ')
+                .map(|x| {
+                    let idx = x.find(':').unwrap();
+                    (
+                        x[..idx].to_string(),
+                        x[(idx + ':'.len_utf8())..].to_string(),
+                    )
+                })
+                .collect();
+
+            Some(get_filter(
+                filter_data.class.split('.').next_back().unwrap(),
+                args,
+            ))
+        } else {
+            None
+        };
+
         let mut tests = Vec::new();
 
         if let Some(examples) = data.examples.as_ref() {
@@ -591,6 +613,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
 
         Ok(rule::DisambiguationRule {
             composition,
+            filter,
             antipatterns,
             disambiguations,
             start,

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 pub mod composition;
+pub mod filter;
 pub mod rule;
 pub mod structure;
 pub mod tokenizer;

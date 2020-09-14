@@ -403,8 +403,8 @@ pub struct WordData {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Filter {
-    args: String,
-    class: String,
+    pub args: String,
+    pub class: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
