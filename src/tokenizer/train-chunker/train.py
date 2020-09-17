@@ -192,6 +192,7 @@ torch.onnx.export(
     "model.onnx",
     input_names=["input_ids", "attention_mask"],
     output_names=["output"],
+    opset_version=11,  # for onnxruntime
     dynamic_axes={
         "input_ids": {0: "batch", 1: "seq"},
         "attention_mask": {0: "batch", 1: "seq"},
