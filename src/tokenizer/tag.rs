@@ -5,7 +5,7 @@ use std::io::BufRead;
 use std::path::Path;
 
 pub struct Tagger {
-    tags: HashMap<String, HashSet<(String, String)>>,
+    tags: HashMap<String, HashSet<WordData>>,
 }
 
 impl Tagger {
@@ -25,13 +25,13 @@ impl Tagger {
 
                 let parts: Vec<_> = line.split('\t').collect();
 
-                let word = parts[0].to_lowercase();
+                let word = parts[0].to_string();
                 let inflection = parts[1].to_string();
                 let tag = parts[2].to_string();
 
                 tags.entry(word)
                     .or_insert_with(HashSet::new)
-                    .insert((inflection, tag));
+                    .insert(WordData::new(inflection, tag));
             }
         }
 
@@ -39,14 +39,18 @@ impl Tagger {
     }
 
     pub fn get_tags(&self, word: &str) -> HashSet<WordData> {
-        self.tags
-            .get(word)
-            .cloned()
-            .map(|x| x.into_iter().map(|x| WordData::new(x.0, x.1)).collect())
-            .unwrap_or_else(|| {
-                vec![WordData::new(word.to_string(), String::new())]
-                    .into_iter()
-                    .collect()
-            })
+        let mut tags = self.tags.get(word).cloned().unwrap_or_else(HashSet::new);
+        tags.extend(
+            self.tags
+                .get(&word.to_lowercase())
+                .cloned()
+                .unwrap_or_else(HashSet::new),
+        );
+
+        if tags.is_empty() {
+            tags.insert(WordData::new(word.to_string(), String::new()));
+        }
+
+        tags
     }
 }

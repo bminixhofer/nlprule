@@ -34,18 +34,42 @@ impl Chunker {
 
         let out: &PyList = self.module.as_ref(py).call1("chunk", (text,))?.downcast()?;
 
-        for token in tokens {
-            for chunk in out.iter() {
-                let chunk: &PyDict = chunk.downcast()?;
-                let chunk_char_span: (usize, usize) = chunk.get_item("range").unwrap().extract()?;
+        for chunk in out.iter() {
+            let chunk: &PyDict = chunk.downcast()?;
+            let chunk_char_span: (usize, usize) = chunk.get_item("range").unwrap().extract()?;
+            let tag: String = chunk.get_item("tag").unwrap().extract()?;
 
+            let mut i = 0;
+
+            for j in 0..tokens.len() {
                 // if token span is inside chunk span
-                if token.char_span.0 >= chunk_char_span.0 && token.char_span.1 <= chunk_char_span.1
+                if tokens[j].char_span.0 >= chunk_char_span.0
+                    && tokens[j].char_span.1 <= chunk_char_span.1
                 {
-                    token.chunk = Some(chunk.get_item("tag").unwrap().extract()?);
+                    if tokens[j].chunk.is_some() {
+                        continue;
+                    }
+
+                    if tag.starts_with("NP") // if at the end of chunk
+                        && (j == tokens.len() - 1
+                            || (tokens[j + 1].char_span.1 > chunk_char_span.1))
+                    {
+                        if i == 0 {
+                            tokens[j].chunk = Some(format!("B-{0}|E-{0}", tag))
+                        } else {
+                            tokens[j].chunk = Some(format!("E-{0}", tag))
+                        }
+                    } else if i == 0 {
+                        tokens[j].chunk = Some(format!("B-{}", tag))
+                    } else {
+                        tokens[j].chunk = Some(format!("I-{}", tag))
+                    }
+
+                    i += 1;
                 }
             }
         }
+
         Ok(())
     }
 }

@@ -359,11 +359,8 @@ impl DisambiguationRule {
                     "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
                     self.id,
                     test,
-                    tokens_before
-                        .into_iter()
-                        .map(|x| x.word)
-                        .collect::<Vec<_>>(),
-                    tokens_after.into_iter().map(|x| x.word).collect::<Vec<_>>(),
+                    tokens_before.into_iter().collect::<Vec<_>>(),
+                    tokens_after.into_iter().collect::<Vec<_>>(),
                 );
             }
 

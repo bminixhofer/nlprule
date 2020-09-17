@@ -21,7 +21,7 @@ struct NoDisambiguationEnglishPartialPosTagFilter {
 
 impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
     fn from_args(args: HashMap<String, String>) -> Self {
-        if let Some(_) = args.get("negate_postag") {
+        if args.contains_key("negate_postag") {
             panic!("negate_postag not supported in NoDisambiguationEnglishPartialPosTagFilter");
         }
 
@@ -43,7 +43,7 @@ impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
             tokens.iter().all(|x| {
                 if let Some(captures) = self.regexp.captures(&x.text) {
                     // get group 2 because `must_fully_match` adds one group
-                    let tags = TAGGER.get_tags(&captures.get(2).unwrap().as_str().to_lowercase());
+                    let tags = TAGGER.get_tags(&captures.get(2).unwrap().as_str());
 
                     tags.iter().any(|x| self.postag_regexp.is_match(&x.pos))
                 } else {

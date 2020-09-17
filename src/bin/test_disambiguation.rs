@@ -43,7 +43,7 @@ fn main() {
             }
             Err(err) => {
                 if errors.is_empty() {
-                    println!("First error: {}", err);
+                    println!("First parse error: {}", err);
                 }
 
                 errors
@@ -55,21 +55,29 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
-    errors.sort_by_key(|x| -(x.1 as i32));
-
-    println!("Errors: {:#?}", &errors);
     println!("Parsed rules: {}", rules.len());
+
+    let mut had_construct_error = false;
 
     let rules: Vec<_> = rules
         .into_iter()
         .filter_map(
             |(rule_structure, id)| match DisambiguationRule::try_from(rule_structure) {
                 Ok(mut rule) => {
-                    rule.set_id(id);
-                    Some(rule)
+                    if !had_construct_error {
+                        rule.set_id(id);
+                        Some(rule)
+                    } else {
+                        None
+                    }
                 }
-                Err(_) => None,
+                Err(err) => {
+                    if !had_construct_error {
+                        println!("First construct error: {}", err);
+                    }
+                    had_construct_error = true;
+                    None
+                }
             },
         )
         .collect();

@@ -135,7 +135,7 @@ impl Word {
 
     pub fn new(text: String) -> Self {
         Word {
-            tags: TAGGER.get_tags(&text.to_lowercase()),
+            tags: TAGGER.get_tags(&text),
             text,
         }
     }

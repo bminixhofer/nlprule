@@ -239,6 +239,7 @@ pub struct Exception {
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
+    pub postag_regexp: Option<String>,
     pub chunk: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
@@ -250,6 +251,7 @@ pub struct Exception {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::large_enum_variant)]
 pub enum TokenPart {
     Text(XMLString),
     Exception(Exception),
@@ -264,6 +266,7 @@ pub struct Token {
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
+    pub postag_regexp: Option<String>,
     pub chunk: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
@@ -277,6 +280,7 @@ pub trait MatchAttributes {
     fn case_sensitive(&self) -> &Option<String>;
     fn inflected(&self) -> &Option<String>;
     fn postag(&self) -> &Option<String>;
+    fn postag_regexp(&self) -> &Option<String>;
     fn chunk(&self) -> &Option<String>;
     fn regexp(&self) -> &Option<String>;
     fn spacebefore(&self) -> &Option<String>;
@@ -296,6 +300,10 @@ macro_rules! impl_match_attributes {
 
             fn postag(&self) -> &Option<String> {
                 &self.postag
+            }
+
+            fn postag_regexp(&self) -> &Option<String> {
+                &self.postag_regexp
             }
 
             fn chunk(&self) -> &Option<String> {

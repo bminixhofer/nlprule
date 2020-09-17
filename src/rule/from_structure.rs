@@ -51,6 +51,13 @@ fn parse_match_attribs(
         false
     };
 
+    // TODO: also reformat is_regex etc.
+    let is_postag_regexp = match attribs.postag_regexp().as_deref() {
+        Some("yes") => true,
+        None => false,
+        x => panic!("unknown is_postag_regexp value {:?}", x),
+    };
+
     macro_rules! make_atom {
         ($matcher:expr) => {
             if case_sensitive && inflected {
@@ -99,11 +106,20 @@ fn parse_match_attribs(
     }
 
     if let Some(postag) = attribs.postag() {
-        let tag_atom = MatchAtom::new(StringMatcher::new(postag.trim().to_string()), |token| {
-            &token.postags[..]
-        });
+        let tag_atom: Box<dyn Atom> = if is_postag_regexp {
+            let regex = utils::fix_regex(&postag.trim(), true);
+            let regex = RegexBuilder::new(&regex).build().expect("invalid regex");
+            let matcher = RegexMatcher::new(regex);
 
-        atoms.push(Box::new(tag_atom));
+            Box::new(MatchAtom::new(matcher, |token| &token.postags[..]))
+        } else {
+            Box::new(MatchAtom::new(
+                StringMatcher::new(postag.trim().to_string()),
+                |token| &token.postags[..],
+            ))
+        };
+
+        atoms.push(tag_atom);
     }
 
     if let Some(chunk) = attribs.chunk() {
@@ -525,6 +541,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .into_iter()
                 .map(rule::Disambiguation::Add)
                 .collect()),
+            Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
             Some(x) => Err(Error::Unimplemented(format!("action {}", x))),
             None => Ok(word_datas
                 .into_iter()
