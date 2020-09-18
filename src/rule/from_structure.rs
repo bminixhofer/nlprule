@@ -572,6 +572,14 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .map(rule::Disambiguation::Replace)
                 .collect()),
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
+            Some("filter") => Ok(word_datas
+                .iter()
+                .map(|x| {
+                    rule::Disambiguation::Filter(rule::POSFilter::Regex(
+                        Regex::new(&utils::fix_regex(&x.pos, true)).unwrap(),
+                    ))
+                })
+                .collect()),
             Some("filterall") => {
                 let mut disambig = Vec::new();
                 let mut marker_disambig = Vec::new();
