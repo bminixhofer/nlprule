@@ -513,7 +513,8 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
     fn try_from(
         data: structure::DisambiguationRule,
     ) -> Result<rule::DisambiguationRule, Self::Error> {
-        let (composition, start, end) = parse_pattern(data.pattern);
+        // might need the pattern later so clone it here
+        let (composition, start, end) = parse_pattern(data.pattern.clone());
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
@@ -542,6 +543,38 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .map(rule::Disambiguation::Add)
                 .collect()),
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
+            Some("filterall") => {
+                let mut disambiguations = Vec::new();
+
+                for part in &data.pattern.parts {
+                    match part {
+                        structure::PatternPart::Marker(marker) => {
+                            for token in &marker.tokens {
+                                let disambiguation = if let Some(postag) = &token.postag {
+                                    match token.postag_regexp.as_deref() {
+                                        Some("yes") => {
+                                            rule::Disambiguation::Filter(rule::POSFilter::Regex(
+                                                Regex::new(&utils::fix_regex(&postag, true))
+                                                    .unwrap(),
+                                            ))
+                                        }
+                                        Some(_) | None => rule::Disambiguation::Filter(
+                                            rule::POSFilter::String(postag.to_string()),
+                                        ),
+                                    }
+                                } else {
+                                    rule::Disambiguation::Nop
+                                };
+
+                                disambiguations.push(disambiguation);
+                            }
+                        }
+                        structure::PatternPart::Token(_) => {}
+                    }
+                }
+
+                Ok(disambiguations)
+            }
             Some(x) => Err(Error::Unimplemented(format!("action {}", x))),
             None => Ok(word_datas
                 .into_iter()

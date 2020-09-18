@@ -230,15 +230,39 @@ macro_rules! impl_rule_match {
 impl_rule_match!(Rule);
 impl_rule_match!(DisambiguationRule);
 
+pub enum POSFilter {
+    Regex(Regex),
+    String(String),
+}
+
+impl POSFilter {
+    pub fn regex(regex: Regex) -> Self {
+        POSFilter::Regex(regex)
+    }
+
+    pub fn string(regex: String) -> Self {
+        POSFilter::String(regex)
+    }
+
+    fn filter(&self, data: &mut Word) {
+        data.tags.retain(|x| match self {
+            POSFilter::String(string) => &x.pos == string,
+            POSFilter::Regex(regex) => regex.is_match(&x.pos),
+        })
+    }
+}
+
 pub enum Disambiguation {
     Limit(WordData),
     Remove(WordData),
     Add(WordData),
+    Filter(POSFilter),
+    Nop,
 }
 
 impl Disambiguation {
     fn apply(&self, word: &mut Word) {
-        match &self {
+        match self {
             Disambiguation::Limit(limit) => {
                 word.tags.retain(|x| x.pos == limit.pos);
                 if word.tags.is_empty() {
@@ -249,6 +273,7 @@ impl Disambiguation {
             Disambiguation::Remove(data) => {
                 word.tags.retain(|x| x.pos != data.pos);
             }
+            Disambiguation::Filter(filter) => filter.filter(word),
             Disambiguation::Add(data) => {
                 let mut data = data.clone();
                 if data.lemma.is_empty() {
@@ -258,6 +283,7 @@ impl Disambiguation {
                 word.tags.insert(data);
                 word.tags.retain(|x| !x.pos.is_empty());
             }
+            Disambiguation::Nop => {}
         }
     }
 }
