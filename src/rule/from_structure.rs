@@ -51,11 +51,17 @@ fn parse_match_attribs(
         false
     };
 
-    // TODO: also reformat is_regex etc.
+    // TODO: also reformat is_regex etc., maybe macro?
     let is_postag_regexp = match attribs.postag_regexp().as_deref() {
         Some("yes") => true,
         None => false,
         x => panic!("unknown is_postag_regexp value {:?}", x),
+    };
+
+    let negate_pos = match attribs.negate_pos().as_deref() {
+        Some("yes") => true,
+        None => false,
+        x => panic!("unknown negate_pos value {:?}", x),
     };
 
     macro_rules! make_atom {
@@ -106,7 +112,7 @@ fn parse_match_attribs(
     }
 
     if let Some(postag) = attribs.postag() {
-        let tag_atom: Box<dyn Atom> = if is_postag_regexp {
+        let mut tag_atom: Box<dyn Atom> = if is_postag_regexp {
             let regex = utils::fix_regex(&postag.trim(), true);
             let regex = RegexBuilder::new(&regex).build().expect("invalid regex");
             let matcher = RegexMatcher::new(regex);
@@ -118,6 +124,10 @@ fn parse_match_attribs(
                 |token| &token.postags[..],
             ))
         };
+
+        if negate_pos {
+            tag_atom = Box::new(NotAtom::new(tag_atom));
+        }
 
         atoms.push(tag_atom);
     }
@@ -503,7 +513,22 @@ fn parse_tag_form(form: &str) -> Word {
 
 impl From<structure::WordData> for WordData {
     fn from(data: structure::WordData) -> Self {
-        WordData::new(String::new(), data.pos)
+        WordData::new(data.lemma.unwrap_or_else(String::new), data.pos)
+    }
+}
+
+fn pos_filter_from_token(token: &structure::Token) -> rule::Disambiguation {
+    if let Some(postag) = &token.postag {
+        match token.postag_regexp.as_deref() {
+            Some("yes") => rule::Disambiguation::Filter(rule::POSFilter::Regex(
+                Regex::new(&utils::fix_regex(&postag, true)).unwrap(),
+            )),
+            Some(_) | None => {
+                rule::Disambiguation::Filter(rule::POSFilter::String(postag.to_string()))
+            }
+        }
+    } else {
+        rule::Disambiguation::Nop
     }
 }
 
@@ -548,34 +573,29 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .collect()),
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
             Some("filterall") => {
-                let mut disambiguations = Vec::new();
+                let mut disambig = Vec::new();
+                let mut marker_disambig = Vec::new();
+                let mut has_marker = false;
 
                 for part in &data.pattern.parts {
                     match part {
                         structure::PatternPart::Marker(marker) => {
+                            has_marker = true;
                             for token in &marker.tokens {
-                                let disambiguation = if let Some(postag) = &token.postag {
-                                    match token.postag_regexp.as_deref() {
-                                        Some("yes") => {
-                                            rule::Disambiguation::Filter(rule::POSFilter::Regex(
-                                                Regex::new(&utils::fix_regex(&postag, true))
-                                                    .unwrap(),
-                                            ))
-                                        }
-                                        Some(_) | None => rule::Disambiguation::Filter(
-                                            rule::POSFilter::String(postag.to_string()),
-                                        ),
-                                    }
-                                } else {
-                                    rule::Disambiguation::Nop
-                                };
-
-                                disambiguations.push(disambiguation);
+                                marker_disambig.push(pos_filter_from_token(token));
                             }
                         }
-                        structure::PatternPart::Token(_) => {}
+                        structure::PatternPart::Token(token) => {
+                            disambig.push(pos_filter_from_token(token))
+                        }
                     }
                 }
+
+                let disambiguations = if has_marker {
+                    marker_disambig
+                } else {
+                    disambig
+                };
 
                 Ok(disambiguations)
             }

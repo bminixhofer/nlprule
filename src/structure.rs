@@ -244,6 +244,7 @@ pub struct Exception {
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
+    pub negate_pos: Option<String>,
     pub scope: Option<String>,
     pub text: Option<XMLString>,
 }
@@ -271,6 +272,7 @@ pub struct Token {
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
+    pub negate_pos: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Option<Vec<TokenPart>>,
 }
@@ -285,6 +287,7 @@ pub trait MatchAttributes {
     fn regexp(&self) -> &Option<String>;
     fn spacebefore(&self) -> &Option<String>;
     fn negate(&self) -> &Option<String>;
+    fn negate_pos(&self) -> &Option<String>;
 }
 
 macro_rules! impl_match_attributes {
@@ -319,6 +322,10 @@ macro_rules! impl_match_attributes {
             }
 
             fn negate(&self) -> &Option<String> {
+                &self.negate
+            }
+
+            fn negate_pos(&self) -> &Option<String> {
                 &self.negate
             }
         }
@@ -406,6 +413,7 @@ pub struct DisambiguationExample {
 #[serde(deny_unknown_fields)]
 pub struct WordData {
     pub pos: String,
+    pub lemma: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
