@@ -11,8 +11,9 @@ use chunk::Chunker;
 use disambiguate::Disambiguator;
 use tag::Tagger;
 
-lazy_static! {
-    pub static ref CHUNKER: Chunker = Chunker::new();
+// chunker can not be shared across threads, so cant be lazy static
+thread_local! {
+    pub static CHUNKER: Chunker = Chunker::new().unwrap();
 }
 
 lazy_static! {
@@ -99,7 +100,7 @@ pub struct IncompleteToken {
     pub byte_span: (usize, usize),
     pub char_span: (usize, usize),
     pub has_space_before: bool,
-    pub chunk: Option<String>,
+    pub chunks: Vec<String>,
 }
 
 impl<'a> From<IncompleteToken> for Token {
@@ -123,7 +124,7 @@ impl<'a> From<IncompleteToken> for Token {
             lower_inflections,
             postags,
             has_space_before: data.has_space_before,
-            chunk: data.chunk,
+            chunks: data.chunks,
         }
     }
 }
@@ -151,7 +152,7 @@ pub struct Token {
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
-    pub chunk: Option<String>,
+    pub chunks: Vec<String>,
 }
 
 impl<'a> Token {
@@ -165,7 +166,7 @@ impl<'a> Token {
             char_span: (0, 0),
             byte_span: (0, 0),
             has_space_before: false,
-            chunk: None,
+            chunks: Vec::new(),
         }
     }
 }
@@ -219,13 +220,14 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
-                    chunk: None,
+                    chunks: Vec::new(),
                 }
             })
             .filter(|token| !token.word.text.is_empty()),
     );
 
-    CHUNKER.apply(text, &mut tokens).unwrap();
-
+    CHUNKER.with(|x| {
+        x.apply(text, &mut tokens).unwrap();
+    });
     tokens
 }

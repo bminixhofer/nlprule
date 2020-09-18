@@ -14,7 +14,7 @@ model_name = "distilroberta-base"
 batch_size = 32
 grad_acc_steps = 1
 epochs = 5
-max_lr = 5e-4
+max_lr = 1e-4
 device = torch.device("cuda")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
@@ -34,11 +34,11 @@ model = AutoModelForTokenClassification.from_pretrained(
 ).to(device)
 
 # remove some layers
-model.base_model.encoder.layer = model.base_model.encoder.layer[:2]
+# model.base_model.encoder.layer = model.base_model.encoder.layer[:2]
 
 # remove some heads
 # TODO: do this smarter after training
-model.prune_heads({0: [0, 1, 2, 3, 4, 5], 1: [0, 1, 2, 3, 4, 5]})
+# model.prune_heads({0: [0, 1, 2, 3, 4, 5], 1: [0, 1, 2, 3, 4, 5]})
 
 train_loader = DataLoader(
     train_dataset,

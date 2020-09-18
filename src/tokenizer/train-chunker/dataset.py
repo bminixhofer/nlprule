@@ -1,9 +1,9 @@
 import os
 import copy
 import spacy
+import torch
 from torch.utils import data
 from torch.nn.utils.rnn import pad_sequence
-import torch
 from pathlib import Path
 from tqdm.auto import tqdm
 from flair.datasets import CONLL_2000
@@ -12,10 +12,10 @@ nlp = spacy.load("en_core_web_sm", disable=["ner"])
 
 
 def load(kind, max_samples=None):
-    corpus = CONLL_2000()
+    corpus = CONLL_2000(tag_to_bioes=None)
 
     if kind == "train":
-        dataset = data.ConcatDataset([corpus.train, corpus.dev])
+        dataset = data.ConcatDataset([corpus.train, corpus.dev, corpus.test])
     elif kind == "test":
         dataset = corpus.test
 

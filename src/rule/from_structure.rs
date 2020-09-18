@@ -124,7 +124,7 @@ fn parse_match_attribs(
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = MatchAtom::new(StringMatcher::new(chunk.trim().to_string()), |token| {
-            &token.chunk
+            &token.chunks[..]
         });
 
         atoms.push(Box::new(chunk_atom));
@@ -298,7 +298,7 @@ fn parse_suggestion(
                 }
             }
             structure::SuggestionPart::Match(m) => {
-                let last_id = get_last_id(&composition.parts);
+                let last_id = get_last_id(&composition.parts) as usize;
                 let mut id =
                     m.no.parse::<usize>()
                         .expect("no must be parsable as usize.")
@@ -346,8 +346,8 @@ fn parse_suggestion(
     rule::Suggester { parts }
 }
 
-fn get_last_id(parts: &[Part]) -> usize {
-    parts.iter().fold(0, |a, x| a + x.visible as usize) - 1
+fn get_last_id(parts: &[Part]) -> isize {
+    parts.iter().fold(0, |a, x| a + x.visible as isize) - 1
 }
 
 fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
@@ -378,8 +378,8 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
         }
     }
 
-    let start = start.unwrap_or(0);
-    let end = end.unwrap_or_else(|| get_last_id(&composition_parts) + 1);
+    let start = start.unwrap_or(0) as usize;
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts) + 1) as usize;
 
     let composition = Composition::new(composition_parts);
 
