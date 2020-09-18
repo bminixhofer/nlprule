@@ -16,6 +16,7 @@ struct NoDisambiguationEnglishPartialPosTagFilter {
     index: usize,
     regexp: Regex,
     postag_regexp: Regex,
+    #[allow(dead_code)]
     negate_postag: bool,
 }
 
