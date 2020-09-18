@@ -272,8 +272,9 @@ impl Disambiguation {
                 }
             }
             Disambiguation::Remove(data) => {
-                word.tags
-                    .retain(|x| !(x.pos == data.pos && x.lemma == data.lemma));
+                word.tags.retain(|x| {
+                    !(x.pos == data.pos && (data.lemma.is_empty() || x.lemma == data.lemma))
+                });
             }
             Disambiguation::Filter(filter) => filter.filter(word),
             Disambiguation::Add(data) => {
