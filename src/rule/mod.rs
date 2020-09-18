@@ -256,6 +256,7 @@ pub enum Disambiguation {
     Limit(WordData),
     Remove(WordData),
     Add(WordData),
+    Replace(WordData),
     Filter(POSFilter),
     Nop,
 }
@@ -282,6 +283,15 @@ impl Disambiguation {
 
                 word.tags.insert(data);
                 word.tags.retain(|x| !x.pos.is_empty());
+            }
+            Disambiguation::Replace(data) => {
+                let mut data = data.clone();
+                if data.lemma.is_empty() {
+                    data.lemma = word.text.to_string();
+                }
+
+                word.tags.clear();
+                word.tags.insert(data);
             }
             Disambiguation::Nop => {}
         }

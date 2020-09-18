@@ -542,6 +542,10 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 .into_iter()
                 .map(rule::Disambiguation::Add)
                 .collect()),
+            Some("replace") => Ok(word_datas
+                .into_iter()
+                .map(rule::Disambiguation::Replace)
+                .collect()),
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
             Some("filterall") => {
                 let mut disambiguations = Vec::new();
