@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use regex::Regex;
+use onig::{Regex, RegexOptions};
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust
 pub fn apply_to_first<F>(string: &str, func: F) -> String
@@ -19,7 +19,7 @@ pub fn normalize_whitespace(string: &str) -> String {
         static ref REGEX: Regex = Regex::new(r"(\s)\s+").unwrap();
     }
 
-    REGEX.replace_all(string, r"$1").to_string()
+    REGEX.replace_all(string, r"$1")
 }
 
 pub fn fix_regex_replacement(replacement: &str) -> String {
@@ -40,13 +40,32 @@ pub fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
         .replace(placeholder, r"\\")
 }
 
-pub fn fix_regex(regex: &str, must_fully_match: bool) -> String {
+pub fn new_regex(regex: &str, must_fully_match: bool, case_sensitive: bool) -> Regex {
     // TODO: more exhaustive backslash check
-    let fixed = unescape(unescape(unescape(regex, "!"), ","), "/");
+    let mut fixed = unescape(unescape(unescape(regex, "!"), ","), "/");
+    let mut case_sensitive = case_sensitive;
 
-    if must_fully_match {
+    for pattern in &["(?iu)", "(?i)"] {
+        if fixed.contains(pattern) {
+            case_sensitive = false;
+            fixed = fixed.replace(pattern, "");
+        }
+    }
+
+    let fixed = if must_fully_match {
         format!("^({})$", fixed)
     } else {
         fixed
-    }
+    };
+
+    Regex::with_options(
+        &fixed,
+        if case_sensitive {
+            RegexOptions::REGEX_OPTION_NONE
+        } else {
+            RegexOptions::REGEX_OPTION_IGNORECASE
+        },
+        onig::Syntax::java(),
+    )
+    .unwrap()
 }

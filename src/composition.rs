@@ -1,5 +1,5 @@
 use crate::tokenizer::Token;
-use regex::Regex;
+use onig::Regex;
 use std::collections::HashMap;
 
 pub trait Match<T: ?Sized>: Send + Sync {

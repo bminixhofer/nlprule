@@ -5,7 +5,7 @@ use crate::tokenizer::{
 };
 use crate::utils;
 use log::{info, warn};
-use regex::Regex;
+use onig::Regex;
 use std::collections::HashSet;
 
 pub mod from_structure;
@@ -240,8 +240,8 @@ impl POSFilter {
         POSFilter::Regex(regex)
     }
 
-    pub fn string(regex: String) -> Self {
-        POSFilter::String(regex)
+    pub fn string(string: String) -> Self {
+        POSFilter::String(string)
     }
 
     fn filter(&self, data: &mut Word) {

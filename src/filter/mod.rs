@@ -1,7 +1,7 @@
 use crate::composition::MatchGraph;
 use crate::tokenizer::TAGGER;
 use crate::utils;
-use regex::Regex;
+use onig::Regex;
 use std::collections::HashMap;
 
 pub trait Filter: Send + Sync {
@@ -28,9 +28,8 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
 
         NoDisambiguationEnglishPartialPosTagFilter {
             index: args.get("no").unwrap().parse::<usize>().unwrap() - 1,
-            regexp: Regex::new(&utils::fix_regex(&args.get("regexp").unwrap(), true)).unwrap(),
-            postag_regexp: Regex::new(&utils::fix_regex(&args.get("postag_regexp").unwrap(), true))
-                .unwrap(),
+            regexp: utils::new_regex(&args.get("regexp").unwrap(), true, true),
+            postag_regexp: utils::new_regex(&args.get("postag_regexp").unwrap(), true, true),
             negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),
         }
     }
@@ -44,7 +43,7 @@ impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
             tokens.iter().all(|x| {
                 if let Some(captures) = self.regexp.captures(&x.text) {
                     // get group 2 because `must_fully_match` adds one group
-                    let tags = TAGGER.get_tags(&captures.get(2).unwrap().as_str());
+                    let tags = TAGGER.get_tags(&captures.at(2).unwrap());
 
                     tags.iter().any(|x| self.postag_regexp.is_match(&x.pos))
                 } else {

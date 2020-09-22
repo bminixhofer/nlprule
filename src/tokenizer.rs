@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use regex::Regex;
+use onig::Regex;
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -65,10 +65,10 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     let mut prev = 0;
     let split_func = |c: char| c.is_whitespace() || r##"'’`´‘],.:!?/\()<=>„“”"+#…*"##.contains(c);
 
-    for m in URL_REGEX.find_iter(text) {
-        tokens.extend(split(&text[prev..m.start()], split_func));
-        tokens.push(&text[m.start()..m.end()]);
-        prev = m.end();
+    for (start, end) in URL_REGEX.find_iter(text) {
+        tokens.extend(split(&text[prev..start], split_func));
+        tokens.push(&text[start..end]);
+        prev = end;
     }
 
     tokens.extend(split(&text[prev..text.len()], split_func));

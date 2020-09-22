@@ -430,6 +430,7 @@ pub struct DisambiguationExample {
 #[serde(deny_unknown_fields)]
 pub struct WordData {
     pub pos: String,
+    pub text: Option<String>,
     pub lemma: Option<String>,
 }
 
@@ -442,11 +443,28 @@ pub struct Filter {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DisambiguationMatch {
+    pub no: usize,
+    pub postag: Option<String>,
+    pub postag_regexp: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum DisambiguationPart {
+    #[serde(rename = "wd")]
+    WordData(WordData),
+    #[serde(rename = "match")]
+    Match(DisambiguationMatch),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Disambiguation {
     pub postag: Option<String>,
     pub action: Option<String>,
-    #[serde(rename = "wd")]
-    pub word_datas: Option<Vec<WordData>>,
+    #[serde(rename = "$value")]
+    pub word_datas: Option<Vec<DisambiguationPart>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

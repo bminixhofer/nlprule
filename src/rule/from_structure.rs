@@ -7,7 +7,7 @@ use crate::rule;
 use crate::tokenizer::{Token, Word, WordData};
 use crate::{structure, utils, Error};
 use lazy_static::lazy_static;
-use regex::{Regex, RegexBuilder};
+use onig::Regex;
 use std::convert::TryFrom;
 
 // TODO: should be an option in config OR restricted to one sentence
@@ -64,38 +64,18 @@ fn parse_match_attribs(
         x => panic!("unknown negate_pos value {:?}", x),
     };
 
-    macro_rules! make_atom {
-        ($matcher:expr) => {
-            if case_sensitive && inflected {
-                Box::new(MatchAtom::new($matcher, |token: &Token| {
-                    &token.inflections[..]
-                }))
-            } else if case_sensitive {
-                Box::new(MatchAtom::new($matcher, |token: &Token| {
-                    token.text.as_str()
-                }))
-            } else if inflected {
-                Box::new(MatchAtom::new($matcher, |token: &Token| {
-                    &token.lower_inflections[..]
-                }))
-            } else {
-                Box::new(MatchAtom::new($matcher, |token: &Token| {
-                    token.lower.as_str()
-                }))
-            }
-        };
-    }
-
     if let Some(text) = text {
         let text_atom: Box<dyn Atom> = if is_regex {
-            let regex = utils::fix_regex(&text.trim(), true);
-            let regex = RegexBuilder::new(&regex)
-                .case_insensitive(!case_sensitive)
-                .build()
-                .expect("invalid regex");
+            let regex = utils::new_regex(text.trim(), true, case_sensitive);
             let matcher = RegexMatcher::new(regex);
 
-            make_atom!(matcher)
+            if inflected {
+                Box::new(MatchAtom::new(matcher, |token: &Token| {
+                    &token.inflections[..]
+                }))
+            } else {
+                Box::new(MatchAtom::new(matcher, |token: &Token| token.text.as_str()))
+            }
         } else {
             let text = if case_sensitive {
                 text.to_string()
@@ -105,7 +85,21 @@ fn parse_match_attribs(
 
             let matcher = StringMatcher::new(text.trim().to_string());
 
-            make_atom!(matcher)
+            if case_sensitive && inflected {
+                Box::new(MatchAtom::new(matcher, |token: &Token| {
+                    &token.inflections[..]
+                }))
+            } else if case_sensitive {
+                Box::new(MatchAtom::new(matcher, |token: &Token| token.text.as_str()))
+            } else if inflected {
+                Box::new(MatchAtom::new(matcher, |token: &Token| {
+                    &token.lower_inflections[..]
+                }))
+            } else {
+                Box::new(MatchAtom::new(matcher, |token: &Token| {
+                    token.lower.as_str()
+                }))
+            }
         };
 
         atoms.push(text_atom);
@@ -113,8 +107,7 @@ fn parse_match_attribs(
 
     if let Some(postag) = attribs.postag() {
         let mut tag_atom: Box<dyn Atom> = if is_postag_regexp {
-            let regex = utils::fix_regex(&postag.trim(), true);
-            let regex = RegexBuilder::new(&regex).build().expect("invalid regex");
+            let regex = utils::new_regex(&postag.trim(), true, true);
             let matcher = RegexMatcher::new(regex);
 
             Box::new(MatchAtom::new(matcher, |token| &token.postags[..]))
@@ -286,17 +279,17 @@ fn parse_suggestion(
                 let mut end_index = 0;
 
                 for capture in MATCH_REGEX.captures_iter(&text) {
-                    let mat = capture.get(0).unwrap();
-                    if end_index != mat.start() {
+                    let (start, end) = capture.pos(0).unwrap();
+
+                    if end_index != start {
                         parts.push(rule::SuggesterPart::Text(
-                            (&text[end_index..mat.start()]).to_string(),
+                            (&text[end_index..end]).to_string(),
                         ))
                     }
 
                     let index = capture
-                        .get(1)
+                        .at(1)
                         .unwrap()
-                        .as_str()
                         .parse::<usize>()
                         .expect("match regex capture must be parsable as usize.")
                         - 1;
@@ -304,7 +297,7 @@ fn parse_suggestion(
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
                         index, None, None,
                     )));
-                    end_index = mat.end();
+                    end_index = end;
                 }
 
                 if end_index < text.len() {
@@ -330,8 +323,7 @@ fn parse_suggestion(
 
                 let replacer = match (m.regexp_match, m.regexp_replace) {
                     (Some(regex_match), Some(regex_replace)) => Some((
-                        Regex::new(&utils::fix_regex(&regex_match, false))
-                            .expect("invalid regex_match regex."),
+                        utils::new_regex(&regex_match, false, true),
                         utils::fix_regex_replacement(&regex_replace),
                     )),
                     _ => None,
@@ -548,8 +540,8 @@ fn parse_tag_form(form: &str) -> Word {
     }
 
     let captures = REGEX.captures(form).unwrap();
-    let word = captures.get(1).unwrap().as_str().to_string();
-    let tags = captures.get(2).unwrap().as_str();
+    let word = captures.at(1).unwrap().to_string();
+    let tags = captures.at(2).unwrap();
 
     let tags = tags
         .split(',')
@@ -572,12 +564,15 @@ impl From<structure::WordData> for WordData {
     }
 }
 
-fn pos_filter_from_token(token: &structure::Token) -> rule::Disambiguation {
-    if let Some(postag) = &token.postag {
-        match token.postag_regexp.as_deref() {
-            Some("yes") => rule::Disambiguation::Filter(rule::POSFilter::Regex(
-                Regex::new(&utils::fix_regex(&postag, true)).unwrap(),
-            )),
+fn parse_pos_filter(
+    postag: &Option<String>,
+    postag_regexp: &Option<String>,
+) -> rule::Disambiguation {
+    if let Some(postag) = postag {
+        match postag_regexp.as_deref() {
+            Some("yes") => rule::Disambiguation::Filter(rule::POSFilter::Regex(utils::new_regex(
+                &postag, true, true,
+            ))),
             Some(_) | None => {
                 rule::Disambiguation::Filter(rule::POSFilter::String(postag.to_string()))
             }
@@ -606,9 +601,16 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         };
 
         let word_datas: Vec<_> = if let Some(postag) = data.disambig.postag {
-            vec![WordData::new(String::new(), postag)]
+            vec![either::Left(WordData::new(String::new(), postag))]
         } else if let Some(wds) = data.disambig.word_datas {
-            wds.into_iter().map(|x| x.into()).collect()
+            wds.into_iter()
+                .map(|part| match part {
+                    structure::DisambiguationPart::WordData(x) => either::Left(x.into()),
+                    structure::DisambiguationPart::Match(x) => {
+                        either::Right(parse_pos_filter(&x.postag, &x.postag_regexp))
+                    }
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -616,23 +618,39 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         let disambiguations = match data.disambig.action.as_deref() {
             Some("remove") => Ok(word_datas
                 .into_iter()
+                .map(|x| {
+                    x.left()
+                        .expect("match not supported for `remove` disambiguation")
+                })
                 .map(rule::Disambiguation::Remove)
                 .collect()),
             Some("add") => Ok(word_datas
                 .into_iter()
+                .map(|x| {
+                    x.left()
+                        .expect("match not supported for `add` disambiguation")
+                })
                 .map(rule::Disambiguation::Add)
                 .collect()),
             Some("replace") => Ok(word_datas
                 .into_iter()
+                .map(|x| {
+                    x.left()
+                        .expect("match not supported for `replace` disambiguation")
+                })
                 .map(rule::Disambiguation::Replace)
                 .collect()),
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
             Some("filter") => Ok(word_datas
-                .iter()
+                .into_iter()
                 .map(|x| {
-                    rule::Disambiguation::Filter(rule::POSFilter::Regex(
-                        Regex::new(&utils::fix_regex(&x.pos, true)).unwrap(),
-                    ))
+                    x.left()
+                        .expect("match not supported for `remove` disambiguation")
+                })
+                .map(|x| {
+                    rule::Disambiguation::Filter(rule::POSFilter::Regex(utils::new_regex(
+                        &x.pos, true, true,
+                    )))
                 })
                 .collect()),
             Some("filterall") => {
@@ -651,11 +669,12 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                                     structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
                                 };
 
-                                marker_disambig.push(pos_filter_from_token(token));
+                                marker_disambig
+                                    .push(parse_pos_filter(&token.postag, &token.postag_regexp));
                             }
                         }
                         structure::PatternPart::Token(token) => {
-                            disambig.push(pos_filter_from_token(token))
+                            disambig.push(parse_pos_filter(&token.postag, &token.postag_regexp))
                         }
                     }
                 }
@@ -671,7 +690,10 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             Some(x) => Err(Error::Unimplemented(format!("action {}", x))),
             None => Ok(word_datas
                 .into_iter()
-                .map(rule::Disambiguation::Limit)
+                .map(|x| match x {
+                    either::Left(wd) => rule::Disambiguation::Limit(wd),
+                    either::Right(x) => x,
+                })
                 .collect()),
         }?;
 
