@@ -99,6 +99,7 @@ pub struct IncompleteToken {
     pub word: Word,
     pub byte_span: (usize, usize),
     pub char_span: (usize, usize),
+    pub is_sentence_end: bool,
     pub has_space_before: bool,
     pub chunks: Vec<String>,
 }
@@ -113,6 +114,10 @@ impl<'a> From<IncompleteToken> for Token {
 
         if postags.is_empty() {
             postags = vec!["UNKNOWN".to_string()];
+        }
+
+        if data.is_sentence_end {
+            postags.push("SENT_END".to_string());
         }
 
         Token {
@@ -189,7 +194,7 @@ pub fn disambiguate(mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
 }
 
 pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
-    let _sentence_indices = text
+    let sentence_indices = text
         .unicode_sentences()
         .map(|sentence| {
             let ptr = sentence.as_ptr() as usize;
@@ -209,7 +214,7 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
             .into_iter()
             .map(|x| {
                 let char_start = current_char;
-                let _ptr = x.as_ptr() as usize;
+                let ptr = x.as_ptr() as usize;
                 current_char += x.chars().count();
 
                 let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
@@ -219,6 +224,7 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
                     word: Word::new(trimmed.to_string()),
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
+                    is_sentence_end: sentence_indices.1.contains(&(ptr + x.len())),
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
                 }

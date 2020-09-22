@@ -336,10 +336,27 @@ impl_match_attributes!(&Exception);
 impl_match_attributes!(&Token);
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
-pub struct PatternMarker {
+pub struct TokenVector {
     #[serde(rename = "token")]
     pub tokens: Vec<Token>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
+pub enum TokenCombination {
+    Token(Token),
+    Or(TokenVector),
+    And(TokenVector),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternMarker {
+    #[serde(rename = "$value")]
+    pub tokens: Vec<TokenCombination>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

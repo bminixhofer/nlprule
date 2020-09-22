@@ -79,8 +79,8 @@ impl<T> GenericMatcher<T> {
 }
 
 pub struct Quantifier {
-    min: usize,
-    max: usize,
+    pub min: usize,
+    pub max: usize,
 }
 
 impl Quantifier {

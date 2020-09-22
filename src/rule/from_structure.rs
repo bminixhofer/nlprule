@@ -169,6 +169,46 @@ fn parse_match_attribs(
     }
 }
 
+fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Atom> {
+    if let Some(parts) = &token.parts {
+        let exceptions = parts
+            .iter()
+            .filter_map(|x| match x {
+                structure::TokenPart::Exception(x) => Some(x),
+                _ => None,
+            })
+            .map(|x| {
+                let exception_text = if let Some(exception_text) = &x.text {
+                    Some(exception_text.as_str())
+                } else {
+                    None
+                };
+                let mut atom = parse_match_attribs(x, exception_text, case_sensitive);
+
+                let offset = if let Some(scope) = &x.scope {
+                    match scope.as_str() {
+                        "next" => 1,
+                        "current" => 0,
+                        "previous" => -1,
+                        _ => panic!("unknown scope value {}", scope),
+                    }
+                } else {
+                    0
+                };
+
+                if offset != 0 {
+                    atom = Box::new(OffsetAtom::new(atom, offset));
+                }
+
+                atom
+            })
+            .collect::<Vec<_>>();
+        Box::new(NotAtom::new(Box::new(OrAtom::new(exceptions))))
+    } else {
+        Box::new(TrueAtom {})
+    }
+}
+
 fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
     let mut parts = Vec::new();
     let text = if let Some(parts) = &token.parts {
@@ -206,47 +246,10 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
     let quantifier = Quantifier::new(min, max);
     let mut atom = parse_match_attribs(token, text, case_sensitive);
 
-    if let Some(parts) = &token.parts {
-        let exceptions = parts
-            .iter()
-            .filter_map(|x| match x {
-                structure::TokenPart::Exception(x) => Some(x),
-                _ => None,
-            })
-            .map(|x| {
-                let exception_text = if let Some(exception_text) = &x.text {
-                    Some(exception_text.as_str())
-                } else {
-                    None
-                };
-                let mut atom = parse_match_attribs(x, exception_text, case_sensitive);
-
-                let offset = if let Some(scope) = &x.scope {
-                    match scope.as_str() {
-                        "next" => 1,
-                        "current" => 0,
-                        "previous" => -1,
-                        _ => panic!("unknown scope value {}", scope),
-                    }
-                } else {
-                    0
-                };
-
-                if offset != 0 {
-                    atom = Box::new(OffsetAtom::new(atom, offset));
-                }
-
-                atom
-            })
-            .collect::<Vec<_>>();
-
-        if !exceptions.is_empty() {
-            atom = Box::new(AndAtom::new(vec![
-                atom,
-                Box::new(NotAtom::new(Box::new(OrAtom::new(exceptions)))),
-            ]));
-        }
-    }
+    atom = Box::new(AndAtom::new(vec![
+        atom,
+        get_exceptions(token, case_sensitive),
+    ]));
 
     parts.push(Part::new(atom, quantifier, true));
 
@@ -256,8 +259,9 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         } else {
             to_skip.parse().expect("can't parse skip as usize or -1")
         };
+
         parts.push(Part::new(
-            Box::new(TrueAtom::new()),
+            get_exceptions(token, case_sensitive),
             Quantifier::new(0, to_skip),
             false,
         ));
@@ -379,7 +383,58 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
                 start = Some(get_last_id(&composition_parts) + 1);
 
                 for token in &marker.tokens {
-                    let atoms_to_add = parse_token(token, case_sensitive);
+                    let atoms_to_add = match token {
+                        structure::TokenCombination::Token(token) => {
+                            parse_token(token, case_sensitive)
+                        }
+                        structure::TokenCombination::And(tokens) => {
+                            let atom = AndAtom::new(
+                                tokens
+                                    .tokens
+                                    .iter()
+                                    .map(|x| {
+                                        let mut parsed = parse_token(x, case_sensitive);
+
+                                        if parsed.len() != 1
+                                            || parsed[0].quantifier.min != 1
+                                            || parsed[0].quantifier.max != 1
+                                        {
+                                            panic!(
+                                                "control flow in `And` tokens is not implemented."
+                                            )
+                                        }
+
+                                        parsed.remove(0).atom
+                                    })
+                                    .collect(),
+                            );
+                            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                        }
+                        structure::TokenCombination::Or(tokens) => {
+                            let atom = OrAtom::new(
+                                tokens
+                                    .tokens
+                                    .iter()
+                                    .map(|x| {
+                                        let mut parsed = parse_token(x, case_sensitive);
+
+                                        if parsed.len() != 1
+                                            || parsed[0].quantifier.min != 1
+                                            || parsed[0].quantifier.max != 1
+                                        {
+                                            panic!(
+                                                "control flow in `Or` tokens is not implemented."
+                                            )
+                                        }
+
+                                        parsed.remove(0).atom
+                                    })
+                                    .collect(),
+                            );
+                            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                        }
+                    };
+
                     composition_parts.extend(atoms_to_add);
                 }
 
@@ -489,7 +544,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
 
 fn parse_tag_form(form: &str) -> Word {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"([\w-]+)\[(.+?)\]").unwrap();
+        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
     }
 
     let captures = REGEX.captures(form).unwrap();
@@ -590,6 +645,12 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                         structure::PatternPart::Marker(marker) => {
                             has_marker = true;
                             for token in &marker.tokens {
+                                let token = match token {
+                                    structure::TokenCombination::Token(token) => token,
+                                    structure::TokenCombination::And(tokens) => &tokens.tokens[0],
+                                    structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                };
+
                                 marker_disambig.push(pos_filter_from_token(token));
                             }
                         }
