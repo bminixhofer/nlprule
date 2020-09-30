@@ -244,17 +244,24 @@ impl POSFilter {
         POSFilter::String(string)
     }
 
-    fn filter(&self, data: &mut Word) {
+    fn keep(&self, data: &mut Word) {
         data.tags.retain(|x| match self {
             POSFilter::String(string) => &x.pos == string,
             POSFilter::Regex(regex) => regex.is_match(&x.pos),
+        })
+    }
+
+    fn remove(&self, data: &mut Word) {
+        data.tags.retain(|x| match self {
+            POSFilter::String(string) => &x.pos != string,
+            POSFilter::Regex(regex) => !regex.is_match(&x.pos),
         })
     }
 }
 
 pub enum Disambiguation {
     Limit(WordData),
-    Remove(WordData),
+    Remove(either::Either<WordData, POSFilter>),
     Add(WordData),
     Replace(WordData),
     Filter(POSFilter),
@@ -271,12 +278,17 @@ impl Disambiguation {
                         .insert(WordData::new(word.text.to_string(), limit.pos.to_string()));
                 }
             }
-            Disambiguation::Remove(data) => {
-                word.tags.retain(|x| {
-                    !(x.pos == data.pos && (data.lemma.is_empty() || x.lemma == data.lemma))
-                });
-            }
-            Disambiguation::Filter(filter) => filter.filter(word),
+            Disambiguation::Remove(data_or_filter) => match data_or_filter {
+                either::Left(data) => {
+                    word.tags.retain(|x| {
+                        !(x.pos == data.pos && (data.lemma.is_empty() || x.lemma == data.lemma))
+                    });
+                }
+                either::Right(filter) => {
+                    filter.remove(word);
+                }
+            },
+            Disambiguation::Filter(filter) => filter.keep(word),
             Disambiguation::Add(data) => {
                 let mut data = data.clone();
                 if data.lemma.is_empty() {

@@ -1,20 +1,33 @@
 use super::WordData;
 use std::collections::{HashMap, HashSet};
-use std::fs::{read_dir, File};
+use std::fs::File;
 use std::io::BufRead;
-use std::path::Path;
 
 pub struct Tagger {
     tags: HashMap<String, HashSet<WordData>>,
 }
 
 impl Tagger {
-    pub fn from_dumps<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+    pub fn from_dumps(paths: &[&str], remove_paths: &[&str]) -> std::io::Result<Self> {
         let mut tags = HashMap::new();
+        let mut disallowed: HashSet<String> = HashSet::new();
 
-        for entry in read_dir(path)? {
-            let entry = entry?;
-            let file = File::open(entry.path())?;
+        for path in remove_paths {
+            let file = File::open(path)?;
+            let reader = std::io::BufReader::new(file);
+
+            for line in reader.lines() {
+                let line = line?;
+                if line.starts_with('#') {
+                    continue;
+                }
+
+                disallowed.insert(line.to_string());
+            }
+        }
+
+        for path in paths {
+            let file = File::open(path)?;
             let reader = std::io::BufReader::new(file);
 
             for line in reader.lines() {
@@ -24,6 +37,10 @@ impl Tagger {
                 }
 
                 let parts: Vec<_> = line.split('\t').collect();
+
+                if disallowed.contains(&line) {
+                    continue;
+                }
 
                 let word = parts[0].to_string();
                 let inflection = parts[1].to_string();

@@ -26,10 +26,22 @@ lazy_static! {
 }
 
 lazy_static! {
-    pub static ref TAGGER: Tagger = Tagger::from_dumps(format!(
-        "data/dumps/{}",
-        std::env::var("RULE_LANG").unwrap()
-    ))
+    pub static ref TAGGER: Tagger = Tagger::from_dumps(
+        &[
+            &format!(
+                "data/dumps/{}/output.dump",
+                std::env::var("RULE_LANG").unwrap()
+            ),
+            &format!(
+                "data/dumps/{}/added.txt",
+                std::env::var("RULE_LANG").unwrap()
+            )
+        ],
+        &[&format!(
+            "data/dumps/{}/removed.txt",
+            std::env::var("RULE_LANG").unwrap()
+        )]
+    )
     .unwrap();
 }
 

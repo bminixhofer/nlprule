@@ -545,12 +545,12 @@ fn parse_tag_form(form: &str) -> Word {
 
     let tags = tags
         .split(',')
-        .map(|x| {
+        .filter_map(|x| {
             let parts: Vec<_> = x.split('/').collect();
             if parts.len() < 2 {
-                WordData::new(parts[0].to_string(), String::new())
+                None
             } else {
-                WordData::new(parts[0].to_string(), parts[1].to_string())
+                Some(WordData::new(parts[0].to_string(), parts[1].to_string()))
             }
         })
         .collect();
@@ -564,21 +564,10 @@ impl From<structure::WordData> for WordData {
     }
 }
 
-fn parse_pos_filter(
-    postag: &Option<String>,
-    postag_regexp: &Option<String>,
-) -> rule::Disambiguation {
-    if let Some(postag) = postag {
-        match postag_regexp.as_deref() {
-            Some("yes") => rule::Disambiguation::Filter(rule::POSFilter::Regex(utils::new_regex(
-                &postag, true, true,
-            ))),
-            Some(_) | None => {
-                rule::Disambiguation::Filter(rule::POSFilter::String(postag.to_string()))
-            }
-        }
-    } else {
-        rule::Disambiguation::Nop
+fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> rule::POSFilter {
+    match postag_regexp.as_deref() {
+        Some("yes") => rule::POSFilter::Regex(utils::new_regex(&postag, true, true)),
+        Some(_) | None => rule::POSFilter::String(postag.to_string()),
     }
 }
 
@@ -600,15 +589,14 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             Vec::new()
         };
 
-        let word_datas: Vec<_> = if let Some(postag) = data.disambig.postag {
-            vec![either::Left(WordData::new(String::new(), postag))]
-        } else if let Some(wds) = data.disambig.word_datas {
+        let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()
                 .map(|part| match part {
                     structure::DisambiguationPart::WordData(x) => either::Left(x.into()),
-                    structure::DisambiguationPart::Match(x) => {
-                        either::Right(parse_pos_filter(&x.postag, &x.postag_regexp))
-                    }
+                    structure::DisambiguationPart::Match(x) => either::Right(parse_pos_filter(
+                        &x.postag.unwrap(),
+                        x.postag_regexp.as_deref(),
+                    )),
                 })
                 .collect()
         } else {
@@ -616,43 +604,44 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         };
 
         let disambiguations = match data.disambig.action.as_deref() {
-            Some("remove") => Ok(word_datas
-                .into_iter()
-                .map(|x| {
-                    x.left()
-                        .expect("match not supported for `remove` disambiguation")
-                })
-                .map(rule::Disambiguation::Remove)
-                .collect()),
-            Some("add") => Ok(word_datas
-                .into_iter()
-                .map(|x| {
-                    x.left()
-                        .expect("match not supported for `add` disambiguation")
-                })
-                .map(rule::Disambiguation::Add)
-                .collect()),
-            Some("replace") => Ok(word_datas
-                .into_iter()
-                .map(|x| {
-                    x.left()
-                        .expect("match not supported for `replace` disambiguation")
-                })
-                .map(rule::Disambiguation::Replace)
-                .collect()),
+            Some("remove") => {
+                if let Some(postag) = data.disambig.postag.as_ref() {
+                    Ok(vec![rule::Disambiguation::Remove(either::Right(
+                        parse_pos_filter(postag, Some("yes")),
+                    ))])
+                } else {
+                    Ok(word_datas
+                        .into_iter()
+                        .map(rule::Disambiguation::Remove)
+                        .collect())
+                }
+            }
+            Some("add") => {
+                if data.disambig.postag.is_some() {
+                    panic!("postag not supported for `add`.")
+                }
+
+                Ok(word_datas
+                    .into_iter()
+                    .map(|x| x.left().expect("match not supported for `add`"))
+                    .map(rule::Disambiguation::Add)
+                    .collect())
+            }
+            Some("replace") => {
+                if data.disambig.postag.is_some() {
+                    panic!("postag not supported for `replace`.")
+                }
+
+                Ok(word_datas
+                    .into_iter()
+                    .map(|x| {
+                        x.left()
+                            .expect("match not supported for `replace` disambiguation")
+                    })
+                    .map(rule::Disambiguation::Replace)
+                    .collect())
+            }
             Some("ignore_spelling") => Ok(Vec::new()), // ignore_spelling can be ignored since we dont check spelling
-            Some("filter") => Ok(word_datas
-                .into_iter()
-                .map(|x| {
-                    x.left()
-                        .expect("match not supported for `remove` disambiguation")
-                })
-                .map(|x| {
-                    rule::Disambiguation::Filter(rule::POSFilter::Regex(utils::new_regex(
-                        &x.pos, true, true,
-                    )))
-                })
-                .collect()),
             Some("filterall") => {
                 let mut disambig = Vec::new();
                 let mut marker_disambig = Vec::new();
@@ -669,13 +658,19 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                                     structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
                                 };
 
-                                marker_disambig
-                                    .push(parse_pos_filter(&token.postag, &token.postag_regexp));
+                                marker_disambig.push(
+                                    token.postag.as_ref().map(|x| {
+                                        parse_pos_filter(x, token.postag_regexp.as_deref())
+                                    }),
+                                );
                             }
                         }
-                        structure::PatternPart::Token(token) => {
-                            disambig.push(parse_pos_filter(&token.postag, &token.postag_regexp))
-                        }
+                        structure::PatternPart::Token(token) => disambig.push(
+                            token
+                                .postag
+                                .as_ref()
+                                .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref())),
+                        ),
                     }
                 }
 
@@ -685,16 +680,48 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                     disambig
                 };
 
-                Ok(disambiguations)
+                Ok(disambiguations
+                    .into_iter()
+                    .map(|x| match x {
+                        Some(filter) => rule::Disambiguation::Filter(filter),
+                        None => rule::Disambiguation::Nop,
+                    })
+                    .collect())
+            }
+            Some("filter") => {
+                if let Some(postag) = data.disambig.postag.as_ref() {
+                    Ok(vec![rule::Disambiguation::Filter(parse_pos_filter(
+                        postag,
+                        Some("yes"),
+                    ))])
+                } else {
+                    Ok(word_datas
+                        .into_iter()
+                        .map(|x| {
+                            x.left()
+                                .expect("match not supported for `filter` disambiguation")
+                        })
+                        .map(rule::Disambiguation::Limit)
+                        .collect())
+                }
+            }
+            None => {
+                if let Some(postag) = data.disambig.postag.as_ref() {
+                    Ok(vec![rule::Disambiguation::Limit(WordData::new(
+                        String::new(),
+                        postag.to_string(),
+                    ))])
+                } else {
+                    Ok(word_datas
+                        .into_iter()
+                        .map(|wd_or_filter| match wd_or_filter {
+                            either::Left(wd) => rule::Disambiguation::Limit(wd),
+                            either::Right(filter) => rule::Disambiguation::Filter(filter),
+                        })
+                        .collect())
+                }
             }
             Some(x) => Err(Error::Unimplemented(format!("action {}", x))),
-            None => Ok(word_datas
-                .into_iter()
-                .map(|x| match x {
-                    either::Left(wd) => rule::Disambiguation::Limit(wd),
-                    either::Right(x) => x,
-                })
-                .collect()),
         }?;
 
         let filter = if let Some(filter_data) = data.filter {

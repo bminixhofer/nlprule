@@ -27,7 +27,7 @@ pub fn fix_regex_replacement(replacement: &str) -> String {
         static ref REGEX: Regex = Regex::new(r"\$(\d)").unwrap();
     }
 
-    REGEX.replace_all(replacement, r"${${1}}").to_string()
+    REGEX.replace_all(replacement, r"${${1}}")
 }
 
 pub fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {

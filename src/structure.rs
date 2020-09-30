@@ -326,7 +326,7 @@ macro_rules! impl_match_attributes {
             }
 
             fn negate_pos(&self) -> &Option<String> {
-                &self.negate
+                &self.negate_pos
             }
         }
     };
