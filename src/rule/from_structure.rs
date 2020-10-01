@@ -4,7 +4,7 @@ use crate::composition::{
 };
 use crate::filter::get_filter;
 use crate::rule;
-use crate::tokenizer::{Token, Word, WordData};
+use crate::tokenizer::{Word, WordData};
 use crate::{structure, utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
@@ -76,11 +76,11 @@ fn parse_match_attribs(
             let matcher = RegexMatcher::new(regex, negate);
 
             if inflected {
-                Box::new(MatchAtom::new(matcher, |token: &Token| {
-                    &token.inflections[..]
+                Box::new(MatchAtom::new(matcher, |t, m| {
+                    m.is_slice_match(&t.inflections[..])
                 }))
             } else {
-                Box::new(MatchAtom::new(matcher, |token: &Token| token.text.as_str()))
+                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.text)))
             }
         } else {
             let text = if case_sensitive {
@@ -92,19 +92,17 @@ fn parse_match_attribs(
             let matcher = StringMatcher::new(text.trim().to_string(), negate);
 
             if case_sensitive && inflected {
-                Box::new(MatchAtom::new(matcher, |token: &Token| {
-                    &token.inflections[..]
+                Box::new(MatchAtom::new(matcher, |t, m| {
+                    m.is_slice_match(&t.inflections[..])
                 }))
             } else if case_sensitive {
-                Box::new(MatchAtom::new(matcher, |token: &Token| token.text.as_str()))
+                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.text)))
             } else if inflected {
-                Box::new(MatchAtom::new(matcher, |token: &Token| {
-                    &token.lower_inflections[..]
+                Box::new(MatchAtom::new(matcher, |t, m| {
+                    m.is_slice_match(&t.inflections[..])
                 }))
             } else {
-                Box::new(MatchAtom::new(matcher, |token: &Token| {
-                    token.lower.as_str()
-                }))
+                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.lower)))
             }
         };
 
@@ -116,11 +114,13 @@ fn parse_match_attribs(
             let regex = utils::new_regex(&postag.trim(), true, true);
             let matcher = RegexMatcher::new(regex, negate_pos);
 
-            Box::new(MatchAtom::new(matcher, |token| &token.postags[..]))
+            Box::new(MatchAtom::new(matcher, |t, m| {
+                m.is_slice_match(&t.postags[..])
+            }))
         } else {
             Box::new(MatchAtom::new(
                 StringMatcher::new(postag.trim().to_string(), negate_pos),
-                |token| &token.postags[..],
+                |t, m| m.is_slice_match(&t.postags[..]),
             ))
         };
 
@@ -130,7 +130,7 @@ fn parse_match_attribs(
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = MatchAtom::new(
             StringMatcher::new(chunk.trim().to_string(), false),
-            |token| &token.chunks[..],
+            |t, m| m.is_slice_match(&t.chunks[..]),
         );
 
         atoms.push(Box::new(chunk_atom));
@@ -145,7 +145,7 @@ fn parse_match_attribs(
 
         atoms.push(Box::new(MatchAtom::new(
             GenericMatcher::new(value),
-            |token| &token.has_space_before,
+            |t, m| m.is_match(&t.has_space_before),
         )));
     }
 

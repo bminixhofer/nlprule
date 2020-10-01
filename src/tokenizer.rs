@@ -121,7 +121,6 @@ impl<'a> From<IncompleteToken> for Token {
         let mut inflections: Vec<_> = data.word.tags.iter().map(|x| x.lemma.clone()).collect();
         inflections.push(data.word.text.to_string());
 
-        let lower_inflections = inflections.iter().map(|x| x.to_lowercase()).collect();
         let mut postags: Vec<_> = data.word.tags.iter().map(|x| x.pos.clone()).collect();
 
         if postags.is_empty() {
@@ -138,7 +137,6 @@ impl<'a> From<IncompleteToken> for Token {
             byte_span: data.byte_span,
             char_span: data.char_span,
             inflections,
-            lower_inflections,
             postags,
             has_space_before: data.has_space_before,
             chunks: data.chunks,
@@ -164,7 +162,6 @@ pub struct Token {
     pub text: String,
     pub lower: String,
     pub inflections: Vec<String>,
-    pub lower_inflections: Vec<String>,
     pub postags: Vec<String>,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
@@ -177,7 +174,6 @@ impl<'a> Token {
         Token {
             text: String::new(),
             inflections: Vec::new(),
-            lower_inflections: Vec::new(),
             lower: String::new(),
             postags: vec!["SENT_START".to_string()],
             char_span: (0, 0),

@@ -2,19 +2,15 @@ use crate::tokenizer::Token;
 use onig::Regex;
 use std::collections::HashMap;
 
-pub trait Match<T: ?Sized>: Send + Sync {
-    fn is_match(&self, input: &T) -> bool;
-}
-
 pub struct RegexMatcher {
     regex: Regex,
     negate: bool,
 }
 
-impl Match<[String]> for RegexMatcher {
-    fn is_match(&self, input: &[String]) -> bool {
+impl RegexMatcher {
+    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S]) -> bool {
         input.iter().any(|x| {
-            let matches = self.regex.is_match(x);
+            let matches = self.regex.is_match(x.as_ref());
             if self.negate {
                 !matches
             } else {
@@ -22,10 +18,8 @@ impl Match<[String]> for RegexMatcher {
             }
         })
     }
-}
 
-impl Match<str> for RegexMatcher {
-    fn is_match(&self, input: &str) -> bool {
+    pub fn is_match(&self, input: &str) -> bool {
         let matches = self.regex.is_match(input);
         if self.negate {
             !matches
@@ -33,9 +27,7 @@ impl Match<str> for RegexMatcher {
             matches
         }
     }
-}
 
-impl RegexMatcher {
     pub fn new(regex: Regex, negate: bool) -> Self {
         RegexMatcher { regex, negate }
     }
@@ -46,10 +38,10 @@ pub struct StringMatcher {
     negate: bool,
 }
 
-impl Match<[String]> for StringMatcher {
-    fn is_match(&self, input: &[String]) -> bool {
+impl StringMatcher {
+    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S]) -> bool {
         input.iter().any(|x| {
-            let matches = *x == self.string;
+            let matches = x.as_ref() == self.string;
             if self.negate {
                 !matches
             } else {
@@ -57,10 +49,8 @@ impl Match<[String]> for StringMatcher {
             }
         })
     }
-}
 
-impl Match<str> for StringMatcher {
-    fn is_match(&self, input: &str) -> bool {
+    pub fn is_match(&self, input: &str) -> bool {
         let matches = input == self.string;
         if self.negate {
             !matches
@@ -68,9 +58,7 @@ impl Match<str> for StringMatcher {
             matches
         }
     }
-}
 
-impl StringMatcher {
     pub fn new(string: String, negate: bool) -> Self {
         StringMatcher { string, negate }
     }
@@ -80,13 +68,11 @@ pub struct GenericMatcher<T> {
     value: T,
 }
 
-impl<T: Eq + Send + Sync> Match<T> for GenericMatcher<T> {
-    fn is_match(&self, input: &T) -> bool {
+impl<T: Eq + Send + Sync> GenericMatcher<T> {
+    pub fn is_match(&self, input: &T) -> bool {
         input == &self.value
     }
-}
 
-impl<T> GenericMatcher<T> {
     pub fn new(value: T) -> Self {
         GenericMatcher { value }
     }
@@ -199,27 +185,20 @@ impl OffsetAtom {
     }
 }
 
-pub struct MatchAtom<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O> {
+pub struct MatchAtom<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> {
     matcher: M,
     access: A,
-    phantom: std::marker::PhantomData<O>,
 }
 
-impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O + Sync + Send> Atom
-    for MatchAtom<O, M, A>
-{
+impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> Atom for MatchAtom<M, A> {
     fn is_match(&self, input: &[&Token], position: usize) -> bool {
-        self.matcher.is_match((self.access)(input[position]))
+        (self.access)(input[position], &self.matcher)
     }
 }
 
-impl<O: ?Sized + Send + Sync, M: Match<O>, A: for<'a> Fn(&'a Token) -> &'a O> MatchAtom<O, M, A> {
+impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> MatchAtom<M, A> {
     pub fn new(matcher: M, access: A) -> Self {
-        MatchAtom {
-            matcher,
-            access,
-            phantom: std::marker::PhantomData,
-        }
+        MatchAtom { matcher, access }
     }
 }
 
