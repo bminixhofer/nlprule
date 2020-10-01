@@ -346,6 +346,21 @@ fn get_last_id(parts: &[Part]) -> isize {
     parts.iter().fold(0, |a, x| a + x.visible as isize) - 1
 }
 
+fn parse_parallel_tokens(tokens: &[structure::Token], case_sensitive: bool) -> Vec<Box<dyn Atom>> {
+    tokens
+        .iter()
+        .map(|x| {
+            let mut parsed = parse_token(x, case_sensitive);
+
+            if parsed.len() != 1 || parsed[0].quantifier.min != 1 || parsed[0].quantifier.max != 1 {
+                panic!("control flow in parallel tokens is not implemented.")
+            }
+
+            parsed.remove(0).atom
+        })
+        .collect()
+}
+
 fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
     let mut start = None;
     let mut end = None;
@@ -370,49 +385,13 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
                             parse_token(token, case_sensitive)
                         }
                         structure::TokenCombination::And(tokens) => {
-                            let atom = AndAtom::new(
-                                tokens
-                                    .tokens
-                                    .iter()
-                                    .map(|x| {
-                                        let mut parsed = parse_token(x, case_sensitive);
-
-                                        if parsed.len() != 1
-                                            || parsed[0].quantifier.min != 1
-                                            || parsed[0].quantifier.max != 1
-                                        {
-                                            panic!(
-                                                "control flow in `And` tokens is not implemented."
-                                            )
-                                        }
-
-                                        parsed.remove(0).atom
-                                    })
-                                    .collect(),
-                            );
+                            let atom =
+                                AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
                             vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
                         }
                         structure::TokenCombination::Or(tokens) => {
-                            let atom = OrAtom::new(
-                                tokens
-                                    .tokens
-                                    .iter()
-                                    .map(|x| {
-                                        let mut parsed = parse_token(x, case_sensitive);
-
-                                        if parsed.len() != 1
-                                            || parsed[0].quantifier.min != 1
-                                            || parsed[0].quantifier.max != 1
-                                        {
-                                            panic!(
-                                                "control flow in `Or` tokens is not implemented."
-                                            )
-                                        }
-
-                                        parsed.remove(0).atom
-                                    })
-                                    .collect(),
-                            );
+                            let atom =
+                                OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
                             vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
                         }
                     };
@@ -421,6 +400,16 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
                 }
 
                 end = Some(get_last_id(&composition_parts) + 1);
+            }
+            structure::PatternPart::And(tokens) => {
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+
+                composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
+            }
+            structure::PatternPart::Or(tokens) => {
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+
+                composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
             }
         }
     }
@@ -644,8 +633,8 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                             for token in &marker.tokens {
                                 let token = match token {
                                     structure::TokenCombination::Token(token) => token,
-                                    structure::TokenCombination::And(tokens) => &tokens.tokens[0],
-                                    structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                    structure::TokenCombination::And(tokens)
+                                    | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
                                 };
 
                                 marker_disambig.push(
@@ -661,6 +650,12 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                                 .as_ref()
                                 .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref())),
                         ),
+                        structure::PatternPart::And(tokens)
+                        | structure::PatternPart::Or(tokens) => {
+                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
+                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref())
+                            }))
+                        }
                     }
                 }
 

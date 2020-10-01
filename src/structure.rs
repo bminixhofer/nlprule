@@ -365,6 +365,8 @@ pub struct PatternMarker {
 pub enum PatternPart {
     Token(Token),
     Marker(PatternMarker),
+    Or(TokenVector),
+    And(TokenVector),
 }
 
 #[derive(Debug, Clone, Deserialize)]
