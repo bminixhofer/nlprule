@@ -58,6 +58,12 @@ fn parse_match_attribs(
         x => panic!("unknown is_postag_regexp value {:?}", x),
     };
 
+    let negate = match attribs.negate().as_deref() {
+        Some("yes") => true,
+        None => false,
+        x => panic!("unknown negate value {:?}", x),
+    };
+
     let negate_pos = match attribs.negate_pos().as_deref() {
         Some("yes") => true,
         None => false,
@@ -67,7 +73,7 @@ fn parse_match_attribs(
     if let Some(text) = text {
         let text_atom: Box<dyn Atom> = if is_regex {
             let regex = utils::new_regex(text.trim(), true, case_sensitive);
-            let matcher = RegexMatcher::new(regex);
+            let matcher = RegexMatcher::new(regex, negate);
 
             if inflected {
                 Box::new(MatchAtom::new(matcher, |token: &Token| {
@@ -83,7 +89,7 @@ fn parse_match_attribs(
                 text.to_lowercase()
             };
 
-            let matcher = StringMatcher::new(text.trim().to_string());
+            let matcher = StringMatcher::new(text.trim().to_string(), negate);
 
             if case_sensitive && inflected {
                 Box::new(MatchAtom::new(matcher, |token: &Token| {
@@ -106,29 +112,26 @@ fn parse_match_attribs(
     }
 
     if let Some(postag) = attribs.postag() {
-        let mut tag_atom: Box<dyn Atom> = if is_postag_regexp {
+        let tag_atom: Box<dyn Atom> = if is_postag_regexp {
             let regex = utils::new_regex(&postag.trim(), true, true);
-            let matcher = RegexMatcher::new(regex);
+            let matcher = RegexMatcher::new(regex, negate_pos);
 
             Box::new(MatchAtom::new(matcher, |token| &token.postags[..]))
         } else {
             Box::new(MatchAtom::new(
-                StringMatcher::new(postag.trim().to_string()),
+                StringMatcher::new(postag.trim().to_string(), negate_pos),
                 |token| &token.postags[..],
             ))
         };
-
-        if negate_pos {
-            tag_atom = Box::new(NotAtom::new(tag_atom));
-        }
 
         atoms.push(tag_atom);
     }
 
     if let Some(chunk) = attribs.chunk() {
-        let chunk_atom = MatchAtom::new(StringMatcher::new(chunk.trim().to_string()), |token| {
-            &token.chunks[..]
-        });
+        let chunk_atom = MatchAtom::new(
+            StringMatcher::new(chunk.trim().to_string(), false),
+            |token| &token.chunks[..],
+        );
 
         atoms.push(Box::new(chunk_atom));
     }
@@ -146,20 +149,7 @@ fn parse_match_attribs(
         )));
     }
 
-    if atoms.is_empty() {
-        Box::new(TrueAtom::new())
-    } else {
-        let mut out_atom: Box<dyn Atom> = Box::new(AndAtom::new(atoms));
-
-        if let Some(negate) = attribs.negate() {
-            match negate.as_str() {
-                "yes" => out_atom = Box::new(NotAtom::new(out_atom)),
-                _ => panic!("unknown negate value {}", negate),
-            }
-        }
-
-        out_atom
-    }
+    Box::new(AndAtom::new(atoms))
 }
 
 fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Atom> {

@@ -272,10 +272,16 @@ impl Disambiguation {
     fn apply(&self, word: &mut Word) {
         match self {
             Disambiguation::Limit(limit) => {
+                let clone = word.tags.clone();
+
+                // empty the hash set
                 word.tags.retain(|x| x.pos == limit.pos);
+
                 if word.tags.is_empty() {
-                    word.tags
-                        .insert(WordData::new(word.text.to_string(), limit.pos.to_string()));
+                    word.tags.extend(clone.into_iter().map(|mut x| {
+                        x.pos = limit.pos.to_string();
+                        x
+                    }));
                 }
             }
             Disambiguation::Remove(data_or_filter) => match data_or_filter {

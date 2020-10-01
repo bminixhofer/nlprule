@@ -8,57 +8,71 @@ pub trait Match<T: ?Sized>: Send + Sync {
 
 pub struct RegexMatcher {
     regex: Regex,
+    negate: bool,
 }
 
 impl Match<[String]> for RegexMatcher {
     fn is_match(&self, input: &[String]) -> bool {
-        input.iter().any(|x| self.regex.is_match(x))
+        input.iter().any(|x| {
+            let matches = self.regex.is_match(x);
+            if self.negate {
+                !matches
+            } else {
+                matches
+            }
+        })
     }
 }
 
 impl Match<str> for RegexMatcher {
     fn is_match(&self, input: &str) -> bool {
-        self.regex.is_match(input)
+        let matches = self.regex.is_match(input);
+        if self.negate {
+            !matches
+        } else {
+            matches
+        }
     }
 }
 
 impl RegexMatcher {
-    pub fn new(regex: Regex) -> Self {
-        RegexMatcher { regex }
+    pub fn new(regex: Regex, negate: bool) -> Self {
+        RegexMatcher { regex, negate }
     }
 }
 
 pub struct StringMatcher {
     string: String,
+    negate: bool,
 }
 
 impl Match<[String]> for StringMatcher {
     fn is_match(&self, input: &[String]) -> bool {
-        input.iter().any(|x| *x == self.string)
-    }
-}
-
-impl Match<Option<String>> for StringMatcher {
-    fn is_match(&self, input: &Option<String>) -> bool {
-        input.as_ref().map(|x| *x == self.string).unwrap_or(false)
-    }
-}
-
-impl Match<[&str]> for StringMatcher {
-    fn is_match(&self, input: &[&str]) -> bool {
-        input.iter().any(|x| *x == self.string)
+        input.iter().any(|x| {
+            let matches = *x == self.string;
+            if self.negate {
+                !matches
+            } else {
+                matches
+            }
+        })
     }
 }
 
 impl Match<str> for StringMatcher {
     fn is_match(&self, input: &str) -> bool {
-        input == self.string
+        let matches = input == self.string;
+        if self.negate {
+            !matches
+        } else {
+            matches
+        }
     }
 }
 
 impl StringMatcher {
-    pub fn new(string: String) -> Self {
-        StringMatcher { string }
+    pub fn new(string: String, negate: bool) -> Self {
+        StringMatcher { string, negate }
     }
 }
 
