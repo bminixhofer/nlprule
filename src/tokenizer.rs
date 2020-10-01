@@ -245,7 +245,7 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
     );
 
     CHUNKER.with(|x| {
-        x.apply(text, &mut tokens).unwrap();
+        x.apply(&mut tokens).unwrap();
     });
     tokens
 }
