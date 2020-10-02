@@ -273,20 +273,15 @@ impl Disambiguation {
     fn apply(&self, word: &mut Word) {
         match self {
             Disambiguation::Limit(limit) => {
-                let clone = word.tags.clone();
+                let last = word
+                    .tags
+                    .get(0)
+                    .map_or(word.text.to_string(), |x| x.lemma.to_string());
 
                 word.tags.retain(|x| x.pos == limit.pos);
 
                 if word.tags.is_empty() {
-                    word.tags.extend(clone.into_iter().map(|mut x| {
-                        x.pos = limit.pos.to_string();
-                        x
-                    }));
-                }
-
-                if word.tags.is_empty() {
-                    word.tags
-                        .insert(WordData::new(word.text.to_string(), limit.pos.to_string()));
+                    word.tags.push(WordData::new(last, limit.pos.to_string()));
                 }
             }
             Disambiguation::Remove(data_or_filter) => match data_or_filter {
@@ -306,7 +301,7 @@ impl Disambiguation {
                     data.lemma = word.text.to_string();
                 }
 
-                word.tags.insert(data);
+                word.tags.push(data);
                 word.tags.retain(|x| !x.pos.is_empty());
             }
             Disambiguation::Replace(data) => {
@@ -316,7 +311,7 @@ impl Disambiguation {
                 }
 
                 word.tags.clear();
-                word.tags.insert(data);
+                word.tags.push(data);
             }
             Disambiguation::Nop => {}
         }
@@ -411,7 +406,10 @@ impl DisambiguationRule {
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
 
-                    after.word == change.after
+                    let unordered_tags = after.word.tags.iter().collect::<HashSet<_>>();
+                    let unordered_tags_change = change.after.tags.iter().collect::<HashSet<_>>();
+
+                    after.word.text == change.after.text && unordered_tags == unordered_tags_change
                 }
             };
 

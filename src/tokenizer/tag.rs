@@ -1,16 +1,16 @@
 use super::WordData;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufRead;
 
 pub struct Tagger {
-    tags: HashMap<String, HashSet<WordData>>,
+    tags: HashMap<String, Vec<WordData>>,
 }
 
 impl Tagger {
     pub fn from_dumps(paths: &[&str], remove_paths: &[&str]) -> std::io::Result<Self> {
         let mut tags = HashMap::new();
-        let mut disallowed: HashSet<String> = HashSet::new();
+        let mut disallowed: Vec<String> = Vec::new();
 
         for path in remove_paths {
             let file = File::open(path)?;
@@ -22,7 +22,7 @@ impl Tagger {
                     continue;
                 }
 
-                disallowed.insert(line.to_string());
+                disallowed.push(line.to_string());
             }
         }
 
@@ -47,22 +47,21 @@ impl Tagger {
                 let tag = parts[2].to_string();
 
                 tags.entry(word)
-                    .or_insert_with(HashSet::new)
-                    .insert(WordData::new(inflection, tag));
+                    .or_insert_with(Vec::new)
+                    .push(WordData::new(inflection, tag));
             }
         }
 
         Ok(Tagger { tags })
     }
 
-    pub fn get_tags(&self, word: &str) -> HashSet<WordData> {
-        let mut tags = self.tags.get(word).cloned().unwrap_or_else(HashSet::new);
-        tags.extend(
-            self.tags
-                .get(&word.to_lowercase())
-                .cloned()
-                .unwrap_or_else(HashSet::new),
-        );
+    pub fn get_tags(&self, word: &str) -> Vec<WordData> {
+        let mut tags = self.tags.get(word).cloned().unwrap_or_else(Vec::new);
+        let lower = word.to_lowercase();
+
+        if word != lower {
+            tags.extend(self.tags.get(&lower).cloned().unwrap_or_else(Vec::new));
+        }
 
         tags
     }

@@ -103,7 +103,7 @@ impl WordData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word {
     pub text: String,
-    pub tags: HashSet<WordData>,
+    pub tags: Vec<WordData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,16 +121,21 @@ impl<'a> From<IncompleteToken> for Token {
         let mut word = data.word.clone();
 
         word.tags
-            .insert(WordData::new(data.word.text.to_string(), String::new()));
+            .push(WordData::new(data.word.text.to_string(), String::new()));
 
         if word.tags.iter().all(|x| x.pos.is_empty()) {
             word.tags
-                .insert(WordData::new(data.word.text.to_string(), "UNKNOWN".into()));
+                .push(WordData::new(data.word.text.to_string(), "UNKNOWN".into()));
         }
 
         if data.is_sentence_end {
             word.tags
-                .insert(WordData::new(data.word.text.to_string(), "SENT_END".into()));
+                .push(WordData::new(data.word.text.to_string(), "SENT_END".into()));
+        }
+
+        if [".", ",", ";", ":", "…", "!", "?"].contains(&word.text.as_str()) {
+            word.tags
+                .push(WordData::new(data.word.text.to_string(), "PCT".into()))
         }
 
         Token {
@@ -144,7 +149,7 @@ impl<'a> From<IncompleteToken> for Token {
 }
 
 impl Word {
-    pub fn new_with_tags(text: String, tags: HashSet<WordData>) -> Self {
+    pub fn new_with_tags(text: String, tags: Vec<WordData>) -> Self {
         Word { text, tags }
     }
 
