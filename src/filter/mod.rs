@@ -41,7 +41,7 @@ impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
             let tokens = &group.tokens;
 
             tokens.iter().all(|x| {
-                if let Some(captures) = self.regexp.captures(&x.text) {
+                if let Some(captures) = self.regexp.captures(&x.word.text) {
                     // get group 2 because `must_fully_match` adds one group
                     let tags = TAGGER.get_tags(&captures.at(2).unwrap());
 

@@ -118,26 +118,25 @@ pub struct IncompleteToken {
 
 impl<'a> From<IncompleteToken> for Token {
     fn from(data: IncompleteToken) -> Token {
-        let mut inflections: Vec<_> = data.word.tags.iter().map(|x| x.lemma.clone()).collect();
-        inflections.push(data.word.text.to_string());
+        let mut word = data.word.clone();
 
-        let mut postags: Vec<_> = data.word.tags.iter().map(|x| x.pos.clone()).collect();
+        word.tags
+            .insert(WordData::new(data.word.text.to_string(), String::new()));
 
-        if postags.is_empty() {
-            postags = vec!["UNKNOWN".to_string()];
+        if word.tags.iter().all(|x| x.pos.is_empty()) {
+            word.tags
+                .insert(WordData::new(data.word.text.to_string(), "UNKNOWN".into()));
         }
 
         if data.is_sentence_end {
-            postags.push("SENT_END".to_string());
+            word.tags
+                .insert(WordData::new(data.word.text.to_string(), "SENT_END".into()));
         }
 
         Token {
-            lower: data.word.text.to_lowercase(),
-            text: data.word.text,
+            word,
             byte_span: data.byte_span,
             char_span: data.char_span,
-            inflections,
-            postags,
             has_space_before: data.has_space_before,
             chunks: data.chunks,
         }
@@ -159,10 +158,7 @@ impl Word {
 
 #[derive(Debug)]
 pub struct Token {
-    pub text: String,
-    pub lower: String,
-    pub inflections: Vec<String>,
-    pub postags: Vec<String>,
+    pub word: Word,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
@@ -172,10 +168,12 @@ pub struct Token {
 impl<'a> Token {
     fn sent_start() -> Token {
         Token {
-            text: String::new(),
-            inflections: Vec::new(),
-            lower: String::new(),
-            postags: vec!["SENT_START".to_string()],
+            word: Word::new_with_tags(
+                String::new(),
+                vec![WordData::new(String::new(), "SENT_START".into())]
+                    .into_iter()
+                    .collect(),
+            ),
             char_span: (0, 0),
             byte_span: (0, 0),
             has_space_before: false,

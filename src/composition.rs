@@ -2,65 +2,75 @@ use crate::tokenizer::Token;
 use onig::Regex;
 use std::collections::HashMap;
 
-pub struct RegexMatcher {
-    regex: Regex,
+pub struct Matcher {
+    matcher: either::Either<String, Regex>,
     negate: bool,
 }
 
-impl RegexMatcher {
+impl Matcher {
+    pub fn new_regex(regex: Regex, negate: bool) -> Self {
+        Matcher {
+            matcher: either::Right(regex),
+            negate,
+        }
+    }
+
+    pub fn new_string(string: String, negate: bool) -> Self {
+        Matcher {
+            matcher: either::Left(string),
+            negate,
+        }
+    }
+
     pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S]) -> bool {
-        input.iter().any(|x| {
-            let matches = self.regex.is_match(x.as_ref());
-            if self.negate {
-                !matches
-            } else {
-                matches
-            }
-        })
+        input.iter().any(|x| self.is_match(x.as_ref()))
     }
 
     pub fn is_match(&self, input: &str) -> bool {
-        let matches = self.regex.is_match(input);
+        if input.is_empty() {
+            return false;
+        }
+
+        let matches = match &self.matcher {
+            either::Left(string) => string == input,
+            either::Right(regex) => regex.is_match(input),
+        };
+
         if self.negate {
             !matches
         } else {
             matches
         }
     }
-
-    pub fn new(regex: Regex, negate: bool) -> Self {
-        RegexMatcher { regex, negate }
-    }
 }
 
-pub struct StringMatcher {
-    string: String,
-    negate: bool,
+pub struct WordDataMatcher {
+    pos_matcher: Option<Matcher>,
+    inflect_matcher: Option<Matcher>,
 }
 
-impl StringMatcher {
-    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S]) -> bool {
-        input.iter().any(|x| {
-            let matches = x.as_ref() == self.string;
-            if self.negate {
-                !matches
-            } else {
-                matches
-            }
-        })
-    }
-
-    pub fn is_match(&self, input: &str) -> bool {
-        let matches = input == self.string;
-        if self.negate {
-            !matches
-        } else {
-            matches
+impl WordDataMatcher {
+    pub fn new(pos_matcher: Option<Matcher>, inflect_matcher: Option<Matcher>) -> Self {
+        WordDataMatcher {
+            pos_matcher,
+            inflect_matcher,
         }
     }
 
-    pub fn new(string: String, negate: bool) -> Self {
-        StringMatcher { string, negate }
+    pub fn is_match<S1: AsRef<str>, S2: AsRef<str>>(&self, input: &[(S1, S2)]) -> bool {
+        input.iter().any(|x| {
+            let pos_matches = self
+                .pos_matcher
+                .as_ref()
+                .map_or(true, |m| m.is_match(x.0.as_ref()));
+
+            let inflect_matches = self
+                .inflect_matcher
+                .as_ref()
+                .map_or(true, |m| m.is_match(x.1.as_ref()));
+
+            pos_matches && inflect_matches
+        })
     }
 }
 

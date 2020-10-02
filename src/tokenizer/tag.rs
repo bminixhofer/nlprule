@@ -64,10 +64,6 @@ impl Tagger {
                 .unwrap_or_else(HashSet::new),
         );
 
-        if tags.is_empty() {
-            tags.insert(WordData::new(word.to_string(), String::new()));
-        }
-
         tags
     }
 }

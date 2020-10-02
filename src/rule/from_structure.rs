@@ -1,6 +1,6 @@
 use crate::composition::{
-    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, NotAtom, OffsetAtom, OrAtom, Part,
-    Quantifier, RegexMatcher, StringMatcher, TrueAtom,
+    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, Matcher, NotAtom, OffsetAtom, OrAtom,
+    Part, Quantifier, TrueAtom, WordDataMatcher,
 };
 use crate::filter::get_filter;
 use crate::rule;
@@ -70,66 +70,76 @@ fn parse_match_attribs(
         x => panic!("unknown negate_pos value {:?}", x),
     };
 
+    let mut inflect_matcher = None;
+    let mut pos_matcher = None;
+
     if let Some(text) = text {
-        let text_atom: Box<dyn Atom> = if is_regex {
+        let matcher = if is_regex {
             let regex = utils::new_regex(text.trim(), true, case_sensitive);
-            let matcher = RegexMatcher::new(regex, negate);
-
-            if inflected {
-                Box::new(MatchAtom::new(matcher, |t, m| {
-                    m.is_slice_match(&t.inflections[..])
-                }))
-            } else {
-                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.text)))
-            }
+            Matcher::new_regex(regex, negate)
+        } else if case_sensitive {
+            Matcher::new_string(text.trim().to_string(), negate)
         } else {
-            let text = if case_sensitive {
-                text.to_string()
-            } else {
-                text.to_lowercase()
-            };
-
-            let matcher = StringMatcher::new(text.trim().to_string(), negate);
-
-            if case_sensitive && inflected {
-                Box::new(MatchAtom::new(matcher, |t, m| {
-                    m.is_slice_match(&t.inflections[..])
-                }))
-            } else if case_sensitive {
-                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.text)))
-            } else if inflected {
-                Box::new(MatchAtom::new(matcher, |t, m| {
-                    m.is_slice_match(&t.inflections[..])
-                }))
-            } else {
-                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.lower)))
-            }
+            Matcher::new_string(text.trim().to_lowercase(), negate)
         };
 
-        atoms.push(text_atom);
+        if inflected {
+            inflect_matcher = Some(matcher);
+        } else {
+            let text_atom: Box<dyn Atom> = if is_regex {
+                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.word.text)))
+            } else if case_sensitive {
+                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.word.text)))
+            } else {
+                Box::new(MatchAtom::new(matcher, |t, m| {
+                    m.is_match(&t.word.text.to_lowercase())
+                }))
+            };
+
+            atoms.push(text_atom);
+        }
     }
 
     if let Some(postag) = attribs.postag() {
-        let tag_atom: Box<dyn Atom> = if is_postag_regexp {
+        pos_matcher = Some(if is_postag_regexp {
             let regex = utils::new_regex(&postag.trim(), true, true);
-            let matcher = RegexMatcher::new(regex, negate_pos);
+            Matcher::new_regex(regex, negate_pos)
+        } else {
+            Matcher::new_string(postag.trim().to_string(), negate_pos)
+        });
+    }
 
+    if pos_matcher.is_some() || inflect_matcher.is_some() {
+        let matcher = WordDataMatcher::new(pos_matcher, inflect_matcher);
+
+        let atom: Box<dyn Atom> = if case_sensitive {
             Box::new(MatchAtom::new(matcher, |t, m| {
-                m.is_slice_match(&t.postags[..])
+                m.is_match(
+                    &t.word
+                        .tags
+                        .iter()
+                        .map(|x| (&x.pos, &x.lemma))
+                        .collect::<Vec<_>>(),
+                )
             }))
         } else {
-            Box::new(MatchAtom::new(
-                StringMatcher::new(postag.trim().to_string(), negate_pos),
-                |t, m| m.is_slice_match(&t.postags[..]),
-            ))
+            Box::new(MatchAtom::new(matcher, |t, m| {
+                m.is_match(
+                    &t.word
+                        .tags
+                        .iter()
+                        .map(|x| (&x.pos, x.lemma.to_lowercase()))
+                        .collect::<Vec<_>>(),
+                )
+            }))
         };
 
-        atoms.push(tag_atom);
+        atoms.push(atom);
     }
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = MatchAtom::new(
-            StringMatcher::new(chunk.trim().to_string(), false),
+            Matcher::new_string(chunk.trim().to_string(), false),
             |t, m| m.is_slice_match(&t.chunks[..]),
         );
 
@@ -525,6 +535,11 @@ fn parse_tag_form(form: &str) -> Word {
     let tags = tags
         .split(',')
         .filter_map(|x| {
+            if x == "</S>" {
+                // special symbol, presumably for SENT_END, can be ignored
+                return None;
+            }
+
             let parts: Vec<_> = x.split('/').collect();
             if parts.len() < 2 {
                 None

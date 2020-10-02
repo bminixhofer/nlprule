@@ -53,7 +53,7 @@ impl Match {
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
             .tokens
             .get(0)
-            .map(|x| x.text.as_str())
+            .map(|x| x.word.text.as_str())
             .unwrap_or("");
 
         if let Some((regex, replacement)) = &self.regex_replacer {
@@ -118,6 +118,7 @@ impl Suggester {
         if !matchers_have_conversion
             && !start_group.tokens.is_empty()
             && (start_group.tokens[0]
+                .word
                 .text
                 .chars()
                 .next()
@@ -274,7 +275,6 @@ impl Disambiguation {
             Disambiguation::Limit(limit) => {
                 let clone = word.tags.clone();
 
-                // empty the hash set
                 word.tags.retain(|x| x.pos == limit.pos);
 
                 if word.tags.is_empty() {
@@ -282,6 +282,11 @@ impl Disambiguation {
                         x.pos = limit.pos.to_string();
                         x
                     }));
+                }
+
+                if word.tags.is_empty() {
+                    word.tags
+                        .insert(WordData::new(word.text.to_string(), limit.pos.to_string()));
                 }
             }
             Disambiguation::Remove(data_or_filter) => match data_or_filter {
