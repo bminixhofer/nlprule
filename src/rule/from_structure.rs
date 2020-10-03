@@ -371,6 +371,49 @@ fn parse_parallel_tokens(tokens: &[structure::Token], case_sensitive: bool) -> V
         .collect()
 }
 
+fn parse_token_combination(
+    token_combination: &structure::TokenCombination,
+    case_sensitive: bool,
+) -> Vec<Part> {
+    let atoms_to_add = match token_combination {
+        structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
+        structure::TokenCombination::And(tokens) => {
+            let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+        }
+        structure::TokenCombination::Or(tokens) => {
+            let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+        }
+        structure::TokenCombination::Unify(unify) => {
+            let mut out = Vec::new();
+
+            for token_combination in &unify.tokens {
+                out.extend(match token_combination {
+                    structure::UnifyTokenCombination::Token(token) => {
+                        parse_token(token, case_sensitive)
+                    }
+                    structure::UnifyTokenCombination::And(tokens) => {
+                        let atom =
+                            AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                        vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                    }
+                    structure::UnifyTokenCombination::Or(tokens) => {
+                        let atom =
+                            OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                        vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                    }
+                    structure::UnifyTokenCombination::Feature(_) => vec![],
+                });
+            }
+
+            out
+        }
+    };
+
+    atoms_to_add
+}
+
 fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
     let mut start = None;
     let mut end = None;
@@ -390,22 +433,7 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
                 start = Some(get_last_id(&composition_parts) + 1);
 
                 for token in &marker.tokens {
-                    let atoms_to_add = match token {
-                        structure::TokenCombination::Token(token) => {
-                            parse_token(token, case_sensitive)
-                        }
-                        structure::TokenCombination::And(tokens) => {
-                            let atom =
-                                AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-                            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-                        }
-                        structure::TokenCombination::Or(tokens) => {
-                            let atom =
-                                OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-                            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-                        }
-                    };
-
+                    let atoms_to_add = parse_token_combination(token, case_sensitive);
                     composition_parts.extend(atoms_to_add);
                 }
 
@@ -650,6 +678,9 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                                     structure::TokenCombination::Token(token) => token,
                                     structure::TokenCombination::And(tokens)
                                     | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                    structure::TokenCombination::Unify(_) => {
+                                        panic!("`unify` not supported in `filterall`")
+                                    }
                                 };
 
                                 marker_disambig.push(
@@ -704,6 +735,18 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                         .map(rule::Disambiguation::Limit)
                         .collect())
                 }
+            }
+            Some("unify") => {
+                for part in &data.pattern.parts {
+                    if let structure::PatternPart::Marker(marker) = part {
+                        match &marker.tokens[..] {
+                            [structure::TokenCombination::Unify(_)] => {}
+                            _ => panic!("only `unify` as only element in `marker` is implemented"),
+                        }
+                    }
+                }
+
+                Ok(vec![])
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {

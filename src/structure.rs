@@ -111,7 +111,8 @@ mod preprocess {
             .filter(|x| {
                 let name = x.tag_name().name();
 
-                name == "rulegroup"
+                name == "unification"
+                    || name == "rulegroup"
                     || (name == "rule"
                         && x.parent_element()
                             .expect("must have parent")
@@ -336,11 +337,33 @@ impl_match_attributes!(&Exception);
 impl_match_attributes!(&Token);
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub struct TokenVector {
     #[serde(rename = "token")]
     pub tokens: Vec<Token>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Feature {
+    id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
+pub enum UnifyTokenCombination {
+    Token(Token),
+    Or(TokenVector),
+    And(TokenVector),
+    Feature(Feature),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unify {
+    #[serde(rename = "$value")]
+    pub tokens: Vec<UnifyTokenCombination>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -350,6 +373,7 @@ pub enum TokenCombination {
     Token(Token),
     Or(TokenVector),
     And(TokenVector),
+    Unify(Unify),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -483,6 +507,8 @@ pub struct DisambiguationRule {
     pub id: Option<String>,
     pub name: Option<String>,
     pub filter: Option<Filter>,
+    #[serde(rename = "__unused_unifications")]
+    pub unifications: Option<Vec<Unification>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -497,11 +523,35 @@ pub struct DisambiguationRuleGroup {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EquivalenceToken {
+    pub postag: String,
+    pub postag_regexp: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Equivalence {
+    pub token: EquivalenceToken,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unification {
+    #[serde(rename = "equivalence")]
+    pub equivalences: Vec<Equivalence>,
+    pub feature: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub enum DisambiguationRuleContainer {
     Rule(DisambiguationRule),
     RuleGroup(DisambiguationRuleGroup),
+    Unification(Unification),
 }
 
 macro_rules! flatten_group {
@@ -576,7 +626,9 @@ pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
     let sanitized = preprocess::sanitize(file, &[]);
     let rules = preprocess::extract_rules(sanitized.as_bytes());
 
-    rules
+    let mut unifications = Vec::new();
+
+    let rules: Vec<_> = rules
         .into_iter()
         .map(|x| {
             let mut out = Vec::new();
@@ -594,11 +646,28 @@ pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
                     DisambiguationRuleContainer::RuleGroup(rule_group) => {
                         flatten_group!(rule_group).into_iter().map(Ok).collect()
                     }
+                    DisambiguationRuleContainer::Unification(unification) => {
+                        unifications.push(unification);
+
+                        vec![]
+                    }
                 },
                 Err(err) => vec![Err(err)],
             });
             out
         })
         .flatten()
+        .collect();
+
+    rules
+        .into_iter()
+        .map(|result| match result {
+            Ok(mut x) => {
+                x.0.unifications = Some(unifications.clone());
+
+                Ok(x)
+            }
+            Err(x) => Err(x),
+        })
         .collect()
 }
