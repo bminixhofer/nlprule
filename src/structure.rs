@@ -257,6 +257,14 @@ pub struct Exception {
 pub enum TokenPart {
     Text(XMLString),
     Exception(Exception),
+    #[serde(rename = "match")]
+    Sub(Sub),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sub {
+    pub no: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

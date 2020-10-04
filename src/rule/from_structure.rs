@@ -19,6 +19,7 @@ fn parse_match_attribs(
     attribs: impl structure::MatchAttributes,
     text: Option<&str>,
     case_sensitive: bool,
+    text_match_idx: Option<usize>,
 ) -> Box<dyn Atom> {
     let mut atoms: Vec<Box<dyn Atom>> = Vec::new();
 
@@ -73,28 +74,27 @@ fn parse_match_attribs(
     let mut inflect_matcher = None;
     let mut pos_matcher = None;
 
-    if let Some(text) = text {
+    if text.is_some() || text_match_idx.is_some() {
         let matcher = if is_regex {
-            let regex = utils::new_regex(text.trim(), true, case_sensitive);
+            let regex = utils::new_regex(text.unwrap().trim(), true, case_sensitive);
             Matcher::new_regex(regex, negate)
-        } else if case_sensitive {
-            Matcher::new_string(text.trim().to_string(), negate)
         } else {
-            Matcher::new_string(text.trim().to_lowercase(), negate)
+            Matcher::new_string(
+                text_match_idx.map_or_else(
+                    || either::Left(text.unwrap().trim().to_string()),
+                    either::Right,
+                ),
+                negate,
+                case_sensitive,
+            )
         };
 
         if inflected {
             inflect_matcher = Some(matcher);
         } else {
-            let text_atom: Box<dyn Atom> = if is_regex {
-                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.word.text)))
-            } else if case_sensitive {
-                Box::new(MatchAtom::new(matcher, |t, m| m.is_match(&t.word.text)))
-            } else {
-                Box::new(MatchAtom::new(matcher, |t, m| {
-                    m.is_match(&t.word.text.to_lowercase())
-                }))
-            };
+            let text_atom: Box<dyn Atom> = Box::new(MatchAtom::new(matcher, |t, g, m| {
+                m.is_match(&t.word.text, g)
+            }));
 
             atoms.push(text_atom);
         }
@@ -105,7 +105,7 @@ fn parse_match_attribs(
             let regex = utils::new_regex(&postag.trim(), true, true);
             Matcher::new_regex(regex, negate_pos)
         } else {
-            Matcher::new_string(postag.trim().to_string(), negate_pos)
+            Matcher::new_string(either::Left(postag.trim().to_string()), negate_pos, true)
         });
     }
 
@@ -113,23 +113,25 @@ fn parse_match_attribs(
         let matcher = WordDataMatcher::new(pos_matcher, inflect_matcher);
 
         let atom: Box<dyn Atom> = if case_sensitive {
-            Box::new(MatchAtom::new(matcher, |t, m| {
+            Box::new(MatchAtom::new(matcher, |t, g, m| {
                 m.is_match(
                     &t.word
                         .tags
                         .iter()
                         .map(|x| (&x.pos, &x.lemma))
                         .collect::<Vec<_>>(),
+                    g,
                 )
             }))
         } else {
-            Box::new(MatchAtom::new(matcher, |t, m| {
+            Box::new(MatchAtom::new(matcher, |t, g, m| {
                 m.is_match(
                     &t.word
                         .tags
                         .iter()
                         .map(|x| (&x.pos, x.lemma.to_lowercase()))
                         .collect::<Vec<_>>(),
+                    g,
                 )
             }))
         };
@@ -139,8 +141,8 @@ fn parse_match_attribs(
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = MatchAtom::new(
-            Matcher::new_string(chunk.trim().to_string(), false),
-            |t, m| m.is_slice_match(&t.chunks[..]),
+            Matcher::new_string(either::Left(chunk.trim().to_string()), false, true),
+            |t, g, m| m.is_slice_match(&t.chunks[..], g),
         );
 
         atoms.push(Box::new(chunk_atom));
@@ -155,7 +157,7 @@ fn parse_match_attribs(
 
         atoms.push(Box::new(MatchAtom::new(
             GenericMatcher::new(value),
-            |t, m| m.is_match(&t.has_space_before),
+            |t, _, m| m.is_match(&t.has_space_before),
         )));
     }
 
@@ -176,7 +178,7 @@ fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Ato
                 } else {
                     None
                 };
-                let mut atom = parse_match_attribs(x, exception_text, case_sensitive);
+                let mut atom = parse_match_attribs(x, exception_text, case_sensitive, None);
 
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
@@ -213,6 +215,15 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         None
     };
 
+    let text_match_idx = if let Some(parts) = &token.parts {
+        parts.iter().find_map(|x| match x {
+            structure::TokenPart::Sub(sub) => Some(sub.no.parse().unwrap()),
+            _ => None,
+        })
+    } else {
+        None
+    };
+
     let min = token
         .min
         .clone()
@@ -237,7 +248,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         .unwrap_or(1usize);
 
     let quantifier = Quantifier::new(min, max);
-    let mut atom = parse_match_attribs(token, text, case_sensitive);
+    let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx);
 
     atom = Box::new(AndAtom::new(vec![
         atom,

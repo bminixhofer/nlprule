@@ -3,8 +3,9 @@ use onig::Regex;
 use std::collections::HashMap;
 
 pub struct Matcher {
-    matcher: either::Either<String, Regex>,
+    matcher: either::Either<either::Either<String, usize>, Regex>,
     negate: bool,
+    case_sensitive: bool,
 }
 
 impl Matcher {
@@ -12,27 +13,50 @@ impl Matcher {
         Matcher {
             matcher: either::Right(regex),
             negate,
+            case_sensitive: true, // handled by regex
         }
     }
 
-    pub fn new_string(string: String, negate: bool) -> Self {
+    pub fn new_string(
+        string_or_idx: either::Either<String, usize>,
+        negate: bool,
+        case_sensitive: bool,
+    ) -> Self {
         Matcher {
-            matcher: either::Left(string),
+            matcher: either::Left(string_or_idx),
             negate,
+            case_sensitive,
         }
     }
 
-    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S]) -> bool {
-        input.iter().any(|x| self.is_match(x.as_ref()))
+    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S], graph: &MatchGraph) -> bool {
+        input.iter().any(|x| self.is_match(x.as_ref(), graph))
     }
 
-    pub fn is_match(&self, input: &str) -> bool {
+    pub fn is_match(&self, input: &str, graph: &MatchGraph) -> bool {
         if input.is_empty() {
             return false;
         }
 
         let matches = match &self.matcher {
-            either::Left(string) => string == input,
+            either::Left(string_or_idx) => match string_or_idx {
+                either::Left(string) => {
+                    if self.case_sensitive {
+                        string == input
+                    } else {
+                        string.to_lowercase() == input.to_lowercase()
+                    }
+                }
+                either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
+                    x.tokens.get(0).map_or(false, |token| {
+                        if self.case_sensitive {
+                            token.word.text == input
+                        } else {
+                            token.word.text.to_lowercase() == input.to_lowercase()
+                        }
+                    })
+                }),
+            },
             either::Right(regex) => regex.is_match(input),
         };
 
@@ -57,17 +81,21 @@ impl WordDataMatcher {
         }
     }
 
-    pub fn is_match<S1: AsRef<str>, S2: AsRef<str>>(&self, input: &[(S1, S2)]) -> bool {
+    pub fn is_match<S1: AsRef<str>, S2: AsRef<str>>(
+        &self,
+        input: &[(S1, S2)],
+        graph: &MatchGraph,
+    ) -> bool {
         input.iter().any(|x| {
             let pos_matches = self
                 .pos_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.0.as_ref()));
+                .map_or(true, |m| m.is_match(x.0.as_ref(), graph));
 
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.1.as_ref()));
+                .map_or(true, |m| m.is_match(x.1.as_ref(), graph));
 
             pos_matches && inflect_matches
         })
@@ -101,13 +129,13 @@ impl Quantifier {
 }
 
 pub trait Atom: Send + Sync {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool;
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool;
 }
 
 pub struct TrueAtom {}
 
 impl Atom for TrueAtom {
-    fn is_match(&self, _input: &[&Token], _position: usize) -> bool {
+    fn is_match(&self, _input: &[&Token], _graph: &MatchGraph, _position: usize) -> bool {
         true
     }
 }
@@ -135,8 +163,10 @@ impl AndAtom {
 }
 
 impl Atom for AndAtom {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool {
-        self.atoms.iter().all(|x| x.is_match(input, position))
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        self.atoms
+            .iter()
+            .all(|x| x.is_match(input, graph, position))
     }
 }
 
@@ -151,8 +181,10 @@ impl OrAtom {
 }
 
 impl Atom for OrAtom {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool {
-        self.atoms.iter().any(|x| x.is_match(input, position))
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        self.atoms
+            .iter()
+            .any(|x| x.is_match(input, graph, position))
     }
 }
 
@@ -167,8 +199,8 @@ impl NotAtom {
 }
 
 impl Atom for NotAtom {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool {
-        !self.atom.is_match(input, position)
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        !self.atom.is_match(input, graph, position)
     }
 }
 
@@ -178,13 +210,13 @@ pub struct OffsetAtom {
 }
 
 impl Atom for OffsetAtom {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool {
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
         let new_position = position as isize + self.offset;
 
         if new_position < 0 || (new_position as usize) >= input.len() {
             false
         } else {
-            self.atom.is_match(input, new_position as usize)
+            self.atom.is_match(input, graph, new_position as usize)
         }
     }
 }
@@ -195,18 +227,25 @@ impl OffsetAtom {
     }
 }
 
-pub struct MatchAtom<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> {
+pub struct MatchAtom<
+    M: Send + Sync,
+    A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync,
+> {
     matcher: M,
     access: A,
 }
 
-impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> Atom for MatchAtom<M, A> {
-    fn is_match(&self, input: &[&Token], position: usize) -> bool {
-        (self.access)(input[position], &self.matcher)
+impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync> Atom
+    for MatchAtom<M, A>
+{
+    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        (self.access)(input[position], &graph, &self.matcher)
     }
 }
 
-impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &M) -> bool + Send + Sync> MatchAtom<M, A> {
+impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync>
+    MatchAtom<M, A>
+{
     pub fn new(matcher: M, access: A) -> Self {
         MatchAtom { matcher, access }
     }
@@ -294,7 +333,13 @@ impl Composition {
         Composition { parts }
     }
 
-    fn next_can_match(&self, tokens: &[&Token], position: usize, index: usize) -> bool {
+    fn next_can_match(
+        &self,
+        tokens: &[&Token],
+        graph: &MatchGraph,
+        position: usize,
+        index: usize,
+    ) -> bool {
         if index == self.parts.len() - 1 {
             return false;
         }
@@ -309,7 +354,7 @@ impl Composition {
 
         self.parts[index + 1..next_required_pos]
             .iter()
-            .any(|x| x.atom.is_match(tokens, position))
+            .any(|x| x.atom.is_match(tokens, graph, position))
     }
 
     pub fn apply<'a>(&self, tokens: &[&'a Token], start: usize) -> Option<MatchGraph<'a>> {
@@ -342,11 +387,11 @@ impl Composition {
             }
 
             if cur_count >= part.quantifier.min
-                && self.next_can_match(&tokens, position, cur_atom_idx)
+                && self.next_can_match(&tokens, &graph, position, cur_atom_idx)
             {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if part.atom.is_match(tokens, position) {
+            } else if part.atom.is_match(tokens, &graph, position) {
                 graph.groups[cur_atom_idx].tokens.push(tokens[position]);
 
                 position += 1;
