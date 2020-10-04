@@ -731,16 +731,46 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 }
             }
             Some("unify") => {
+                let mut filters = Vec::new();
+
                 for part in &data.pattern.parts {
                     if let structure::PatternPart::Marker(marker) = part {
                         match &marker.tokens[..] {
-                            [structure::TokenCombination::Unify(_)] => {}
+                            [structure::TokenCombination::Unify(unify)] => {
+                                for token_combination in &unify.tokens {
+                                    if let structure::UnifyTokenCombination::Feature(feature) =
+                                        token_combination
+                                    {
+                                        // TODO: no unwrap
+                                        let unification = data
+                                            .unifications
+                                            .as_ref()
+                                            .unwrap()
+                                            .iter()
+                                            .find(|x| x.feature == feature.id)
+                                            .unwrap();
+
+                                        filters.push(
+                                            unification
+                                                .equivalences
+                                                .iter()
+                                                .map(|equiv| {
+                                                    parse_pos_filter(
+                                                        &equiv.token.postag,
+                                                        equiv.token.postag_regexp.as_deref(),
+                                                    )
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                            }
                             _ => panic!("only `unify` as only element in `marker` is implemented"),
                         }
                     }
                 }
 
-                Ok(rule::Disambiguation::Nop)
+                Ok(rule::Disambiguation::Unify(filters))
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {

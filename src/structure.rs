@@ -346,7 +346,7 @@ pub struct TokenVector {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Feature {
-    id: String,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -526,7 +526,7 @@ pub struct DisambiguationRuleGroup {
 #[serde(deny_unknown_fields)]
 pub struct EquivalenceToken {
     pub postag: String,
-    pub postag_regexp: String,
+    pub postag_regexp: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
