@@ -261,57 +261,91 @@ impl POSFilter {
 }
 
 pub enum Disambiguation {
-    Limit(WordData),
-    Remove(either::Either<WordData, POSFilter>),
-    Add(WordData),
-    Replace(WordData),
-    Filter(POSFilter),
+    Remove(Vec<either::Either<WordData, POSFilter>>),
+    Add(Vec<WordData>),
+    Replace(Vec<WordData>),
+    Filter(Vec<Option<either::Either<WordData, POSFilter>>>),
     Nop,
 }
 
 impl Disambiguation {
-    fn apply(&self, word: &mut Word) {
+    fn apply(&self, groups: Vec<Vec<&mut IncompleteToken>>) {
         match self {
-            Disambiguation::Limit(limit) => {
-                let last = word
-                    .tags
-                    .get(0)
-                    .map_or(word.text.to_string(), |x| x.lemma.to_string());
-
-                word.tags.retain(|x| x.pos == limit.pos);
-
-                if word.tags.is_empty() {
-                    word.tags.push(WordData::new(last, limit.pos.to_string()));
+            Disambiguation::Remove(data_or_filters) => {
+                for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
+                    for token in group.into_iter() {
+                        match data_or_filter {
+                            either::Left(data) => {
+                                token.word.tags.retain(|x| {
+                                    !(x.pos == data.pos
+                                        && (data.lemma.is_empty() || x.lemma == data.lemma))
+                                });
+                            }
+                            either::Right(filter) => {
+                                filter.remove(&mut token.word);
+                            }
+                        }
+                    }
                 }
             }
-            Disambiguation::Remove(data_or_filter) => match data_or_filter {
-                either::Left(data) => {
-                    word.tags.retain(|x| {
-                        !(x.pos == data.pos && (data.lemma.is_empty() || x.lemma == data.lemma))
-                    });
-                }
-                either::Right(filter) => {
-                    filter.remove(word);
-                }
-            },
-            Disambiguation::Filter(filter) => filter.keep(word),
-            Disambiguation::Add(data) => {
-                let mut data = data.clone();
-                if data.lemma.is_empty() {
-                    data.lemma = word.text.to_string();
-                }
+            Disambiguation::Filter(filters) => {
+                for (group, maybe_filter) in groups.into_iter().zip(filters) {
+                    if let Some(data_or_filter) = maybe_filter {
+                        match data_or_filter {
+                            either::Left(limit) => {
+                                for token in group.into_iter() {
+                                    let last = token
+                                        .word
+                                        .tags
+                                        .get(0)
+                                        .map_or(token.word.text.to_string(), |x| {
+                                            x.lemma.to_string()
+                                        });
 
-                word.tags.push(data);
-                word.tags.retain(|x| !x.pos.is_empty());
+                                    token.word.tags.retain(|x| x.pos == limit.pos);
+
+                                    if token.word.tags.is_empty() {
+                                        token
+                                            .word
+                                            .tags
+                                            .push(WordData::new(last, limit.pos.to_string()));
+                                    }
+                                }
+                            }
+                            either::Right(filter) => {
+                                for token in group.into_iter() {
+                                    filter.keep(&mut token.word)
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Disambiguation::Replace(data) => {
-                let mut data = data.clone();
-                if data.lemma.is_empty() {
-                    data.lemma = word.text.to_string();
-                }
+            Disambiguation::Add(datas) => {
+                for (group, data) in groups.into_iter().zip(datas) {
+                    for token in group.into_iter() {
+                        let mut data = data.clone();
+                        if data.lemma.is_empty() {
+                            data.lemma = token.word.text.to_string();
+                        }
 
-                word.tags.clear();
-                word.tags.push(data);
+                        token.word.tags.push(data);
+                        token.word.tags.retain(|x| !x.pos.is_empty());
+                    }
+                }
+            }
+            Disambiguation::Replace(datas) => {
+                for (group, data) in groups.into_iter().zip(datas) {
+                    for token in group.into_iter() {
+                        let mut data = data.clone();
+                        if data.lemma.is_empty() {
+                            data.lemma = token.word.text.to_string();
+                        }
+
+                        token.word.tags.clear();
+                        token.word.tags.push(data);
+                    }
+                }
             }
             Disambiguation::Nop => {}
         }
@@ -336,7 +370,7 @@ pub struct DisambiguationRule {
     pub id: String,
     composition: Composition,
     antipatterns: Vec<Composition>,
-    disambiguations: Vec<Disambiguation>,
+    disambiguations: Disambiguation,
     filter: Option<Box<dyn Filter>>,
     start: usize,
     end: usize,
@@ -348,9 +382,11 @@ impl DisambiguationRule {
         self.id = id;
     }
 
-    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
+    pub fn apply(&self, mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
         let complete_tokens = finalize(tokens.clone());
         let refs: Vec<&Token> = complete_tokens.iter().collect();
+
+        let mut all_byte_spans = Vec::new();
 
         for i in 0..tokens.len() {
             if let Some(graph) = self.get_match(&refs, i, None) {
@@ -360,8 +396,9 @@ impl DisambiguationRule {
                     }
                 }
 
-                for (group_idx, disambiguation) in (self.start..self.end).zip(&self.disambiguations)
-                {
+                let mut byte_spans = Vec::new();
+
+                for group_idx in self.start..self.end {
                     let group = graph.by_id(group_idx).unwrap_or_else(|| {
                         panic!("{} group must exist in graph: {}", self.id, self.start)
                     });
@@ -369,13 +406,34 @@ impl DisambiguationRule {
                     let group_byte_spans: HashSet<_> =
                         group.tokens.iter().map(|x| x.byte_span).collect();
 
-                    tokens
-                        .iter_mut()
-                        .filter(|x| group_byte_spans.contains(&x.byte_span))
-                        .for_each(|x| disambiguation.apply(&mut x.word));
+                    byte_spans.push(group_byte_spans);
                 }
+
+                all_byte_spans.push(byte_spans);
             }
         }
+
+        for byte_spans in all_byte_spans {
+            let mut groups = Vec::new();
+            let mut refs = tokens.iter_mut().collect::<Vec<_>>();
+
+            for group_byte_spans in byte_spans {
+                let mut group = Vec::new();
+
+                while let Some(i) = refs
+                    .iter()
+                    .position(|x| group_byte_spans.contains(&x.byte_span))
+                {
+                    group.push(refs.remove(i));
+                }
+
+                groups.push(group);
+            }
+
+            self.disambiguations.apply(groups);
+        }
+
+        tokens
     }
 
     pub fn test(&self) -> bool {
@@ -389,7 +447,7 @@ impl DisambiguationRule {
 
             let tokens_before = disambiguate_up_to_id(tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
-            self.apply(&mut tokens_after);
+            tokens_after = self.apply(tokens_after);
 
             info!("Tokens: {:#?}", tokens_before);
 

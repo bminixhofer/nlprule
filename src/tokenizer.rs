@@ -194,14 +194,12 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
     finalized
 }
 
-pub fn disambiguate_up_to_id(mut tokens: Vec<IncompleteToken>, id: &str) -> Vec<IncompleteToken> {
-    DISAMBIGUATOR.apply_up_to_id(&mut tokens, id);
-    tokens
+pub fn disambiguate_up_to_id(tokens: Vec<IncompleteToken>, id: &str) -> Vec<IncompleteToken> {
+    DISAMBIGUATOR.apply_up_to_id(tokens, id)
 }
 
-pub fn disambiguate(mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
-    DISAMBIGUATOR.apply(&mut tokens);
-    tokens
+pub fn disambiguate(tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
+    DISAMBIGUATOR.apply(tokens)
 }
 
 pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
