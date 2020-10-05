@@ -294,7 +294,7 @@ fn parse_suggestion(
 
                     if end_index != start {
                         parts.push(rule::SuggesterPart::Text(
-                            (&text[end_index..end]).to_string(),
+                            (&text[end_index..start]).to_string(),
                         ))
                     }
 

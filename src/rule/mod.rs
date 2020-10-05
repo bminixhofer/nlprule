@@ -1,7 +1,7 @@
 use crate::composition::{Composition, Group, MatchGraph};
 use crate::filter::Filter;
 use crate::tokenizer::{
-    disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
+    disambiguate, disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
 };
 use crate::utils;
 use log::{info, warn};
@@ -593,7 +593,7 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in &self.tests {
-            let tokens = finalize(tokenize(&test.text));
+            let tokens = finalize(disambiguate(tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
 
