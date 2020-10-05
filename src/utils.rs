@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use onig::{Regex, RegexOptions};
+use onig::{Captures, Regex, RegexOptions};
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust
 pub fn apply_to_first<F>(string: &str, func: F) -> String
@@ -13,21 +13,21 @@ where
     }
 }
 
+// see https://github.com/rust-onig/rust-onig/issues/59#issuecomment-340160520
+pub fn dollar_replace(mut replacement: String, caps: &Captures) -> String {
+    for i in 1..caps.len() {
+        replacement = replacement.replace(&format!("${}", i), caps.at(i).unwrap_or(""));
+    }
+    replacement
+}
+
 // remove duplicate whitespaces
 pub fn normalize_whitespace(string: &str) -> String {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(\s)\s+").unwrap();
     }
 
-    REGEX.replace_all(string, r"$1")
-}
-
-pub fn fix_regex_replacement(replacement: &str) -> String {
-    lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"\$(\d)").unwrap();
-    }
-
-    REGEX.replace_all(replacement, r"${${1}}")
+    REGEX.replace_all(string, |caps: &Captures| caps.at(1).unwrap().to_string())
 }
 
 pub fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {

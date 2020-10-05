@@ -5,7 +5,7 @@ use crate::tokenizer::{
 };
 use crate::utils;
 use log::{info, warn};
-use onig::Regex;
+use onig::{Captures, Regex};
 use std::collections::HashSet;
 
 pub mod from_structure;
@@ -57,7 +57,9 @@ impl Match {
             .unwrap_or("");
 
         if let Some((regex, replacement)) = &self.regex_replacer {
-            let replaced = regex.replace_all(text, replacement.as_str());
+            let replaced = regex.replace_all(text, |caps: &Captures| {
+                utils::dollar_replace(replacement.to_string(), caps)
+            });
             (self.conversion)(replaced.as_ref())
         } else {
             (self.conversion)(text)

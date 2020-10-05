@@ -333,10 +333,9 @@ fn parse_suggestion(
                 };
 
                 let replacer = match (m.regexp_match, m.regexp_replace) {
-                    (Some(regex_match), Some(regex_replace)) => Some((
-                        utils::new_regex(&regex_match, false, true),
-                        utils::fix_regex_replacement(&regex_replace),
-                    )),
+                    (Some(regex_match), Some(regex_replace)) => {
+                        Some((utils::new_regex(&regex_match, false, true), regex_replace))
+                    }
                     _ => None,
                 };
 
