@@ -296,7 +296,11 @@ impl<'a> MatchGraph<'a> {
     }
 
     pub fn by_id(&self, id: usize) -> Option<&Group<'a>> {
-        Some(&self.groups[*self.id_to_idx.get(&id)?])
+        Some(&self.groups[self.get_index(id)?])
+    }
+
+    pub fn get_index(&self, id: usize) -> Option<usize> {
+        Some(*self.id_to_idx.get(&id)?)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -305,6 +309,10 @@ impl<'a> MatchGraph<'a> {
 
     pub fn len(&self) -> usize {
         self.groups.len()
+    }
+
+    pub fn groups(&self) -> &[Group] {
+        &self.groups[..]
     }
 }
 

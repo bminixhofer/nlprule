@@ -531,10 +531,24 @@ impl TryFrom<structure::Rule> for rule::Rule {
                         let length = marker.text.chars().count();
 
                         if let Some(correction_text) = &example.correction {
+                            let mut text: Vec<_> =
+                                correction_text.split('|').map(|x| x.to_string()).collect();
+
+                            text = if char_length == 0 {
+                                // title case if at start
+                                text.into_iter()
+                                    .map(|x| {
+                                        utils::apply_to_first(&x, |c| c.to_uppercase().collect())
+                                    })
+                                    .collect()
+                            } else {
+                                text
+                            };
+
                             suggestion = Some(rule::Suggestion {
                                 start: char_length,
                                 end: char_length + length,
-                                text: correction_text.split('|').map(|x| x.to_string()).collect(),
+                                text,
                             });
                         }
 

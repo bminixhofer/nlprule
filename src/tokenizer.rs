@@ -75,7 +75,7 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     }
 
     let mut prev = 0;
-    let split_func = |c: char| c.is_whitespace() || r##"'’`´‘],.:!?/\()<=>„“”"+#…*"##.contains(c);
+    let split_func = |c: char| c.is_whitespace() || r##"'’`´‘],.:;!?/\()<=>„“”"+#…*"##.contains(c);
 
     for (start, end) in URL_REGEX.find_iter(text) {
         tokens.extend(split(&text[prev..start], split_func));

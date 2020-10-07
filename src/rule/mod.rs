@@ -1,4 +1,4 @@
-use crate::composition::{Composition, Group, MatchGraph};
+use crate::composition::{Composition, MatchGraph};
 use crate::filter::Filter;
 use crate::tokenizer::{
     disambiguate, disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
@@ -96,17 +96,18 @@ pub struct Suggester {
 }
 
 impl Suggester {
-    fn apply(&self, groups: &MatchGraph, start_group: &Group, _end_group: &Group) -> String {
+    fn apply(&self, groups: &MatchGraph, start: usize, _end: usize) -> String {
         let mut output = Vec::new();
-        let mut matchers_have_conversion = false;
+
+        let starts_with_conversion = match &self.parts[..] {
+            [SuggesterPart::Match(m), ..] => m.has_conversion(),
+            _ => false,
+        };
 
         for part in &self.parts {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
                 SuggesterPart::Match(m) => {
-                    if m.has_conversion() {
-                        matchers_have_conversion = true;
-                    };
                     output.push(m.apply(groups));
                 }
             }
@@ -114,18 +115,24 @@ impl Suggester {
 
         let suggestion = utils::normalize_whitespace(&output.join(""));
 
-        // if the suggestion contains no case conversion matches, make it title case if:
+        // if the suggestion does not start with a case conversion match, make it title case if:
         // * at sentence start
         // * the replaced text is title case
-        if !matchers_have_conversion
-            && !start_group.tokens.is_empty()
-            && (start_group.tokens[0]
+        let first_token = groups.groups()[groups.get_index(start).unwrap()..]
+            .iter()
+            .find(|x| !x.tokens.is_empty())
+            .unwrap()
+            .tokens[0];
+
+        if !starts_with_conversion
+            && (first_token
                 .word
                 .text
                 .chars()
                 .next()
                 .expect("token must have at least one char")
-                .is_uppercase())
+                .is_uppercase()
+                || first_token.byte_span.0 == 0)
         {
             utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
         } else {
@@ -582,7 +589,7 @@ impl Rule {
                     text: self
                         .suggesters
                         .iter()
-                        .map(|x| x.apply(&graph, start_group, end_group))
+                        .map(|x| x.apply(&graph, self.start, self.end))
                         .collect(),
                 });
             }
