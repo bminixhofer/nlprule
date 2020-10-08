@@ -444,7 +444,7 @@ impl DisambiguationRule {
 
         let mut all_byte_spans = Vec::new();
 
-        for i in 0..tokens.len() {
+        for i in 0..complete_tokens.len() {
             if let Some(graph) = self.get_match(&refs, i, None) {
                 if let Some(filter) = &self.filter {
                     if !filter.keep(&graph) {

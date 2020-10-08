@@ -77,7 +77,7 @@ fn parse_match_attribs(
     if text.is_some() || text_match_idx.is_some() {
         let matcher = if is_regex {
             let regex = utils::new_regex(text.unwrap().trim(), true, case_sensitive);
-            Matcher::new_regex(regex, negate)
+            Matcher::new_regex(regex, negate, inflected)
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
@@ -86,6 +86,7 @@ fn parse_match_attribs(
                 ),
                 negate,
                 case_sensitive,
+                inflected,
             )
         };
 
@@ -103,9 +104,14 @@ fn parse_match_attribs(
     if let Some(postag) = attribs.postag() {
         pos_matcher = Some(if is_postag_regexp {
             let regex = utils::new_regex(&postag.trim(), true, true);
-            Matcher::new_regex(regex, negate_pos)
+            Matcher::new_regex(regex, negate_pos, true)
         } else {
-            Matcher::new_string(either::Left(postag.trim().to_string()), negate_pos, true)
+            Matcher::new_string(
+                either::Left(postag.trim().to_string()),
+                negate_pos,
+                true,
+                true,
+            )
         });
     }
 
@@ -141,7 +147,7 @@ fn parse_match_attribs(
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = MatchAtom::new(
-            Matcher::new_string(either::Left(chunk.trim().to_string()), false, true),
+            Matcher::new_string(either::Left(chunk.trim().to_string()), false, true, true),
             |t, g, m| m.is_slice_match(&t.chunks[..], g),
         );
 

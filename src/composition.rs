@@ -6,14 +6,16 @@ pub struct Matcher {
     matcher: either::Either<either::Either<String, usize>, Regex>,
     negate: bool,
     case_sensitive: bool,
+    empty_always_false: bool,
 }
 
 impl Matcher {
-    pub fn new_regex(regex: Regex, negate: bool) -> Self {
+    pub fn new_regex(regex: Regex, negate: bool, empty_always_false: bool) -> Self {
         Matcher {
             matcher: either::Right(regex),
             negate,
             case_sensitive: true, // handled by regex
+            empty_always_false,
         }
     }
 
@@ -21,11 +23,13 @@ impl Matcher {
         string_or_idx: either::Either<String, usize>,
         negate: bool,
         case_sensitive: bool,
+        empty_always_false: bool,
     ) -> Self {
         Matcher {
             matcher: either::Left(string_or_idx),
             negate,
             case_sensitive,
+            empty_always_false,
         }
     }
 
@@ -35,7 +39,11 @@ impl Matcher {
 
     pub fn is_match(&self, input: &str, graph: &MatchGraph) -> bool {
         if input.is_empty() {
-            return false;
+            return if self.empty_always_false {
+                false
+            } else {
+                self.negate
+            };
         }
 
         let matches = match &self.matcher {

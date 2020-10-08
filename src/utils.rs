@@ -13,6 +13,16 @@ where
     }
 }
 
+pub fn is_title_case(string: &str) -> bool {
+    let mut char_case = string.chars().map(|x| x.is_uppercase());
+
+    char_case.next().unwrap_or(false) && !char_case.any(|x| x)
+}
+
+pub fn is_uppercase(string: &str) -> bool {
+    !string.chars().any(|x| x.is_lowercase())
+}
+
 // see https://github.com/rust-onig/rust-onig/issues/59#issuecomment-340160520
 pub fn dollar_replace(mut replacement: String, caps: &Captures) -> String {
     for i in 1..caps.len() {

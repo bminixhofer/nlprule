@@ -59,7 +59,7 @@ impl Tagger {
         let mut tags = self.tags.get(word).cloned().unwrap_or_else(Vec::new);
         let lower = word.to_lowercase();
 
-        if word != lower {
+        if word != lower && crate::utils::is_title_case(word) || crate::utils::is_uppercase(word) {
             tags.extend(self.tags.get(&lower).cloned().unwrap_or_else(Vec::new));
         }
 
