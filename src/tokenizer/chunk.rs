@@ -79,9 +79,9 @@ pub struct Chunker {
 impl Chunker {
     pub fn new() -> TractResult<Self> {
         let labels = &[
-            "<pad>", "B-NP", "I-NP", "B-VP", "O", "B-ADVP", "I-VP", "B-PP", "B-PRT", "B-ADJP",
-            "I-ADJP", "B-SBAR", "I-ADVP", "I-SBAR", "B-INTJ", "I-INTJ", "B-LST", "I-PP", "B-CONJP",
-            "I-CONJP", "B-UCP",
+            "<pad>", "B-NP", "E-NP", "B-VP", "O", "S-NP", "B-ADVP", "I-VP", "I-NP", "B-PP",
+            "B-PRT", "B-ADJP", "I-ADJP", "B-SBAR", "I-ADVP", "I-SBAR", "B-INTJ", "I-INTJ", "B-LST",
+            "I-PP", "B-CONJP", "I-CONJP", "B-UCP",
         ];
 
         let model = onnx()
@@ -136,11 +136,11 @@ impl Chunker {
         let mut number_mask: Vec<_> = chunks.iter().map(|_| false).collect();
 
         for i in 0..chunks.len() {
-            if chunks[i] == "B-NP" || chunks[i] == "I-NP" {
+            if chunks[i].ends_with("-NP") {
                 let mut end_idx = i;
 
                 for (j, chunk) in chunks.iter().enumerate().skip(i + 1) {
-                    if *chunk != "I-NP" {
+                    if tokens[j].has_space_before && *chunk != "I-NP" && *chunk != "E-NP" {
                         break;
                     }
 
@@ -159,21 +159,16 @@ impl Chunker {
         }
 
         for i in 0..chunks.len() {
-            if chunks[i] == "B-NP" || chunks[i] == "I-NP" {
-                let is_ending = i == chunks.len() - 1 || chunks[i + 1] != "I-NP";
+            if chunks[i].ends_with("-NP") {
                 let number = if number_mask[i] { "plural" } else { "singular" };
 
-                tokens[i].chunks.push(format!("{}-{}", chunks[i], number));
-
-                if is_ending {
-                    let chunkname = format!("E-NP-{}", number);
-
-                    if chunks[i] == "B-NP" {
-                        tokens[i].chunks.push(chunkname);
-                    } else {
-                        tokens[i].chunks[0] = chunkname;
-                    }
-                }
+                tokens[i].chunks = match chunks[i] {
+                    "B-NP" => vec![format!("B-NP-{}", number)],
+                    "I-NP" => vec![format!("I-NP-{}", number)],
+                    "E-NP" => vec![format!("E-NP-{}", number)],
+                    "S-NP" => vec![format!("B-NP-{}", number), format!("E-NP-{}", number)],
+                    x => panic!("invalid chunk {}", x),
+                };
             } else {
                 tokens[i].chunks.push(chunks[i].to_string());
             }
