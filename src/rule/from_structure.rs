@@ -387,47 +387,54 @@ fn parse_parallel_tokens(tokens: &[structure::Token], case_sensitive: bool) -> V
         .collect()
 }
 
-fn parse_token_combination(
-    token_combination: &structure::TokenCombination,
+fn parse_unify_tokens(
+    tokens: &[structure::UnifyTokenCombination],
     case_sensitive: bool,
 ) -> Vec<Part> {
-    let atoms_to_add = match token_combination {
-        structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
-        structure::TokenCombination::And(tokens) => {
-            let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-        }
-        structure::TokenCombination::Or(tokens) => {
-            let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-            vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-        }
-        structure::TokenCombination::Unify(unify) => {
-            let mut out = Vec::new();
+    let mut out = Vec::new();
 
-            for token_combination in &unify.tokens {
-                out.extend(match token_combination {
-                    structure::UnifyTokenCombination::Token(token) => {
-                        parse_token(token, case_sensitive)
-                    }
-                    structure::UnifyTokenCombination::And(tokens) => {
-                        let atom =
-                            AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-                        vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-                    }
-                    structure::UnifyTokenCombination::Or(tokens) => {
-                        let atom =
-                            OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
-                        vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
-                    }
-                    structure::UnifyTokenCombination::Feature(_) => vec![],
-                });
+    for token_combination in tokens {
+        out.extend(match token_combination {
+            structure::UnifyTokenCombination::Token(token) => parse_token(token, case_sensitive),
+            structure::UnifyTokenCombination::And(tokens) => {
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
             }
+            structure::UnifyTokenCombination::Or(tokens) => {
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+            }
+            structure::UnifyTokenCombination::Feature(_) => vec![],
+            structure::UnifyTokenCombination::Ignore(ignore) => {
+                parse_tokens(&ignore.tokens, case_sensitive)
+            }
+        });
+    }
 
-            out
-        }
-    };
+    out
+}
 
-    atoms_to_add
+fn parse_tokens(tokens: &[structure::TokenCombination], case_sensitive: bool) -> Vec<Part> {
+    let mut out = Vec::new();
+
+    for token_combination in tokens {
+        out.extend(match token_combination {
+            structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
+            structure::TokenCombination::And(tokens) => {
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+            }
+            structure::TokenCombination::Or(tokens) => {
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+            }
+            structure::TokenCombination::Unify(unify) => {
+                parse_unify_tokens(&unify.tokens, case_sensitive)
+            }
+        });
+    }
+
+    out
 }
 
 fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
@@ -448,10 +455,7 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
             structure::PatternPart::Marker(marker) => {
                 start = Some(get_last_id(&composition_parts) + 1);
 
-                for token in &marker.tokens {
-                    let atoms_to_add = parse_token_combination(token, case_sensitive);
-                    composition_parts.extend(atoms_to_add);
-                }
+                composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive));
 
                 end = Some(get_last_id(&composition_parts) + 1);
             }
@@ -464,6 +468,9 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
                 let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
 
                 composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
+            }
+            structure::PatternPart::Unify(unify) => {
+                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive))
             }
         }
     }
@@ -623,6 +630,92 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> rule::POSFilte
     }
 }
 
+fn parse_unify(
+    unify: &structure::Unify,
+    unifications: &Option<Vec<structure::Unification>>,
+) -> (
+    Vec<Vec<rule::POSFilter>>,
+    Vec<Option<rule::POSFilter>>,
+    Vec<bool>,
+) {
+    let mut filters = Vec::new();
+    let mut disambig = Vec::new();
+    let mut mask = Vec::new();
+
+    for token_combination in &unify.tokens {
+        match token_combination {
+            structure::UnifyTokenCombination::Feature(feature) => {
+                // TODO: no unwrap
+                let unification = unifications
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .find(|x| x.feature == feature.id)
+                    .unwrap();
+
+                filters.push(
+                    unification
+                        .equivalences
+                        .iter()
+                        .map(|equiv| {
+                            parse_pos_filter(
+                                &equiv.token.postag,
+                                equiv.token.postag_regexp.as_deref(),
+                            )
+                        })
+                        .collect(),
+                );
+            }
+            structure::UnifyTokenCombination::And(tokens)
+            | structure::UnifyTokenCombination::Or(tokens) => {
+                mask.push(true);
+                disambig.push(
+                    tokens.tokens[0]
+                        .postag
+                        .as_ref()
+                        .map(|x| parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref())),
+                )
+            }
+            structure::UnifyTokenCombination::Token(token) => {
+                mask.push(true);
+                disambig.push(
+                    token
+                        .postag
+                        .as_ref()
+                        .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref())),
+                )
+            }
+            structure::UnifyTokenCombination::Ignore(tokens) => {
+                for token_combination in &tokens.tokens {
+                    match token_combination {
+                        structure::TokenCombination::And(tokens)
+                        | structure::TokenCombination::Or(tokens) => {
+                            mask.push(false);
+                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
+                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref())
+                            }))
+                        }
+                        structure::TokenCombination::Token(token) => {
+                            mask.push(false);
+                            disambig.push(
+                                token
+                                    .postag
+                                    .as_ref()
+                                    .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref())),
+                            )
+                        }
+                        structure::TokenCombination::Unify(_) => {
+                            panic!("nested unify not supported")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (filters, disambig, mask)
+}
+
 impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
     type Error = Error;
 
@@ -736,6 +829,9 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                                 ))
                             }))
                         }
+                        structure::PatternPart::Unify(_) => {
+                            panic!("`unify` not supported in `filterall`")
+                        }
                     }
                 }
 
@@ -762,45 +858,29 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             }
             Some("unify") => {
                 let mut filters = Vec::new();
+                let mut disambig = Vec::new();
+                let mut mask = Vec::new();
 
-                for part in &data.pattern.parts {
-                    if let structure::PatternPart::Marker(marker) = part {
-                        match &marker.tokens[..] {
-                            [structure::TokenCombination::Unify(unify)] => {
-                                for token_combination in &unify.tokens {
-                                    if let structure::UnifyTokenCombination::Feature(feature) =
-                                        token_combination
-                                    {
-                                        // TODO: no unwrap
-                                        let unification = data
-                                            .unifications
-                                            .as_ref()
-                                            .unwrap()
-                                            .iter()
-                                            .find(|x| x.feature == feature.id)
-                                            .unwrap();
-
-                                        filters.push(
-                                            unification
-                                                .equivalences
-                                                .iter()
-                                                .map(|equiv| {
-                                                    parse_pos_filter(
-                                                        &equiv.token.postag,
-                                                        equiv.token.postag_regexp.as_deref(),
-                                                    )
-                                                })
-                                                .collect(),
-                                        );
-                                    }
-                                }
-                            }
-                            _ => panic!("only `unify` as only element in `marker` is implemented"),
+                match &data.pattern.parts[..] {
+                    [.., structure::PatternPart::Marker(marker)] => match &marker.tokens[..] {
+                        [structure::TokenCombination::Unify(unify)] => {
+                            let (f, d, m) = parse_unify(&unify, &data.unifications);
+                            filters.extend(f);
+                            disambig.extend(d);
+                            mask.extend(m);
                         }
+                        _ => panic!("only `unify` as only element in `marker` is implemented"),
+                    },
+                    [structure::PatternPart::Unify(unify)] => {
+                        let (f, d, m) = parse_unify(&unify, &data.unifications);
+                        filters.extend(f);
+                        disambig.extend(d);
+                        mask.extend(m);
                     }
+                    _ => panic!("only `unify` as only element in `pattern` is implemented"),
                 }
 
-                Ok(rule::Disambiguation::Unify(filters))
+                Ok(rule::Disambiguation::Unify(filters, disambig, mask))
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {

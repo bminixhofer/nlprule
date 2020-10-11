@@ -274,6 +274,17 @@ impl POSFilter {
             POSFilter::Regex(regex) => !regex.is_match(&x.pos),
         })
     }
+
+    fn apply(filters: &[Vec<&Self>], data: &mut Word) {
+        data.tags.retain(|x| {
+            filters.iter().all(|filter| {
+                filter.iter().any(|f| match f {
+                    POSFilter::String(string) => &x.pos == string,
+                    POSFilter::Regex(regex) => regex.is_match(&x.pos),
+                })
+            })
+        })
+    }
 }
 
 pub enum Disambiguation {
@@ -281,7 +292,7 @@ pub enum Disambiguation {
     Add(Vec<WordData>),
     Replace(Vec<WordData>),
     Filter(Vec<Option<either::Either<WordData, POSFilter>>>),
-    Unify(Vec<Vec<POSFilter>>),
+    Unify(Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>),
     Nop,
 }
 
@@ -364,40 +375,58 @@ impl Disambiguation {
                     }
                 }
             }
-            Disambiguation::Unify(filters) => {
-                let mut apply_filters: Option<Vec<&POSFilter>> = None;
+            Disambiguation::Unify(filters, disambigs, mask) => {
+                let mut filter_mask: Vec<_> = filters
+                    .iter()
+                    .map(|x| x.iter().map(|_| true).collect::<Vec<_>>())
+                    .collect();
 
-                for group in groups.iter() {
+                for (group, use_mask_val) in groups.iter().zip(mask) {
                     for token in group.iter() {
-                        if let Some(apply_filters) = &apply_filters {
-                            // need to finalize here to also match SENT_END etc.
+                        if *use_mask_val {
                             let finalized: Token = (*token).clone().into();
 
-                            for filter in apply_filters {
-                                if !filter.is_match(&finalized.word) {
-                                    return;
+                            for (mask_val, filter) in filter_mask.iter_mut().zip(filters) {
+                                for (m, f) in mask_val.iter_mut().zip(filter) {
+                                    *m = *m && f.is_match(&finalized.word);
                                 }
                             }
-                        } else {
-                            let maybe_apply_filters = filters
-                                .iter()
-                                .map(|equivs| equivs.iter().find(|x| x.is_match(&token.word)))
-                                .collect::<Option<Vec<_>>>();
-
-                            if maybe_apply_filters.is_none() {
-                                return;
-                            }
-
-                            apply_filters = maybe_apply_filters;
                         }
                     }
                 }
 
-                for group in groups.into_iter() {
-                    for token in group.into_iter() {
-                        if let Some(apply_filters) = &apply_filters {
-                            for filter in apply_filters {
-                                filter.keep(&mut token.word);
+                if filter_mask.iter().any(|mask| mask.iter().all(|x| !x)) {
+                    return;
+                }
+
+                let to_apply: Vec<_> = filter_mask
+                    .iter()
+                    .zip(filters)
+                    .map(|(mask_val, filter)| {
+                        mask_val
+                            .iter()
+                            .zip(filter)
+                            .filter_map(|(m, f)| if *m { Some(f) } else { None })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+
+                for ((group, disambig), use_mask_val) in groups.into_iter().zip(disambigs).zip(mask)
+                {
+                    if *use_mask_val {
+                        for token in group.into_iter() {
+                            if !to_apply.is_empty() {
+                                let before = token.word.clone();
+
+                                POSFilter::apply(&to_apply, &mut token.word);
+
+                                if let Some(disambig) = disambig {
+                                    disambig.keep(&mut token.word);
+                                }
+
+                                if token.word.tags.is_empty() {
+                                    token.word = before;
+                                }
                             }
                         }
                     }

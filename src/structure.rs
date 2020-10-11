@@ -358,6 +358,13 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ignore {
+    #[serde(rename = "$value")]
+    pub tokens: Vec<TokenCombination>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub enum UnifyTokenCombination {
@@ -365,6 +372,8 @@ pub enum UnifyTokenCombination {
     Or(TokenVector),
     And(TokenVector),
     Feature(Feature),
+    #[serde(rename = "unify-ignore")]
+    Ignore(Ignore),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -399,6 +408,7 @@ pub enum PatternPart {
     Marker(PatternMarker),
     Or(TokenVector),
     And(TokenVector),
+    Unify(Unify),
 }
 
 #[derive(Debug, Clone, Deserialize)]
