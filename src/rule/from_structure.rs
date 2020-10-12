@@ -75,7 +75,7 @@ fn parse_match_attribs(
     let mut pos_matcher = None;
 
     if text.is_some() || text_match_idx.is_some() {
-        let matcher = if is_regex {
+        let matcher = if is_regex && text_match_idx.is_none() {
             let regex = utils::new_regex(text.unwrap().trim(), true, case_sensitive);
             Matcher::new_regex(regex, negate, inflected)
         } else {
@@ -283,7 +283,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
 fn parse_suggestion(
     data: Vec<structure::SuggestionPart>,
     composition: &Composition,
-) -> rule::Suggester {
+) -> Result<rule::Suggester, Error> {
     let mut parts = Vec::new();
 
     lazy_static! {
@@ -356,7 +356,12 @@ fn parse_suggestion(
                             utils::apply_to_first(x, |c| c.to_uppercase().collect())
                         })),
                         Some("allupper") => Some(Box::new(|x| x.to_uppercase())),
-                        Some(x) => panic!("case conversion {} not supported.", x),
+                        Some(x) => {
+                            return Err(Error::Unimplemented(format!(
+                                "case conversion {} not supported.",
+                                x
+                            )))
+                        }
                         None => None,
                     },
                     replacer,
@@ -365,24 +370,29 @@ fn parse_suggestion(
         }
     }
 
-    rule::Suggester { parts }
+    Ok(rule::Suggester { parts })
 }
 
 fn get_last_id(parts: &[Part]) -> isize {
     parts.iter().fold(0, |a, x| a + x.visible as isize) - 1
 }
 
-fn parse_parallel_tokens(tokens: &[structure::Token], case_sensitive: bool) -> Vec<Box<dyn Atom>> {
+fn parse_parallel_tokens(
+    tokens: &[structure::Token],
+    case_sensitive: bool,
+) -> Result<Vec<Box<dyn Atom>>, Error> {
     tokens
         .iter()
         .map(|x| {
             let mut parsed = parse_token(x, case_sensitive);
 
             if parsed.len() != 1 || parsed[0].quantifier.min != 1 || parsed[0].quantifier.max != 1 {
-                panic!("control flow in parallel tokens is not implemented.")
+                return Err(Error::Unimplemented(
+                    "control flow in parallel tokens is not implemented.".into(),
+                ));
             }
 
-            parsed.remove(0).atom
+            Ok(parsed.remove(0).atom)
         })
         .collect()
 }
@@ -390,54 +400,57 @@ fn parse_parallel_tokens(tokens: &[structure::Token], case_sensitive: bool) -> V
 fn parse_unify_tokens(
     tokens: &[structure::UnifyTokenCombination],
     case_sensitive: bool,
-) -> Vec<Part> {
+) -> Result<Vec<Part>, Error> {
     let mut out = Vec::new();
 
     for token_combination in tokens {
         out.extend(match token_combination {
             structure::UnifyTokenCombination::Token(token) => parse_token(token, case_sensitive),
             structure::UnifyTokenCombination::And(tokens) => {
-                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Or(tokens) => {
-                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Feature(_) => vec![],
             structure::UnifyTokenCombination::Ignore(ignore) => {
-                parse_tokens(&ignore.tokens, case_sensitive)
+                parse_tokens(&ignore.tokens, case_sensitive)?
             }
         });
     }
 
-    out
+    Ok(out)
 }
 
-fn parse_tokens(tokens: &[structure::TokenCombination], case_sensitive: bool) -> Vec<Part> {
+fn parse_tokens(
+    tokens: &[structure::TokenCombination],
+    case_sensitive: bool,
+) -> Result<Vec<Part>, Error> {
     let mut out = Vec::new();
 
     for token_combination in tokens {
         out.extend(match token_combination {
             structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
             structure::TokenCombination::And(tokens) => {
-                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Or(tokens) => {
-                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Unify(unify) => {
-                parse_unify_tokens(&unify.tokens, case_sensitive)
+                parse_unify_tokens(&unify.tokens, case_sensitive)?
             }
         });
     }
 
-    out
+    Ok(out)
 }
 
-fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
+fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usize), Error> {
     let mut start = None;
     let mut end = None;
 
@@ -455,22 +468,22 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
             structure::PatternPart::Marker(marker) => {
                 start = Some(get_last_id(&composition_parts) + 1);
 
-                composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive));
+                composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive)?);
 
                 end = Some(get_last_id(&composition_parts) + 1);
             }
             structure::PatternPart::And(tokens) => {
-                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
 
                 composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Or(tokens) => {
-                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive));
+                let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
 
                 composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Unify(unify) => {
-                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive))
+                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive)?)
             }
         }
     }
@@ -480,20 +493,20 @@ fn parse_pattern(pattern: structure::Pattern) -> (Composition, usize, usize) {
 
     let composition = Composition::new(composition_parts);
 
-    (composition, start, end)
+    Ok((composition, start, end))
 }
 
 impl TryFrom<structure::Rule> for rule::Rule {
     type Error = Error;
 
     fn try_from(data: structure::Rule) -> Result<rule::Rule, Self::Error> {
-        let (composition, start, end) = parse_pattern(data.pattern);
+        let (composition, start, end) = parse_pattern(data.pattern)?;
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
                 .into_iter()
-                .map(|x| parse_pattern(x).0)
-                .collect()
+                .map(|pattern| parse_pattern(pattern).map(|x| x.0))
+                .collect::<Result<Vec<_>, Error>>()?
         } else {
             Vec::new()
         };
@@ -515,7 +528,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                     .into_iter()
                     .map(|x| parse_suggestion(x.parts, &composition)),
             )
-            .collect::<Vec<rule::Suggester>>();
+            .collect::<Result<Vec<rule::Suggester>, Error>>()?;
 
         if suggesters.is_empty() {
             return Err(Error::Unimplemented("rule with no suggestion".into()));
@@ -723,13 +736,13 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         data: structure::DisambiguationRule,
     ) -> Result<rule::DisambiguationRule, Self::Error> {
         // might need the pattern later so clone it here
-        let (composition, start, end) = parse_pattern(data.pattern.clone());
+        let (composition, start, end) = parse_pattern(data.pattern.clone())?;
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
                 .into_iter()
-                .map(|x| parse_pattern(x).0)
-                .collect()
+                .map(|pattern| parse_pattern(pattern).map(|x| x.0))
+                .collect::<Result<Vec<_>, Error>>()?
         } else {
             Vec::new()
         };
@@ -788,6 +801,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 ))
             }
             Some("ignore_spelling") => Ok(rule::Disambiguation::Nop), // ignore_spelling can be ignored since we dont check spelling
+            Some("immunize") => Ok(rule::Disambiguation::Nop), // immunize can probably not be ignored
             Some("filterall") => {
                 let mut disambig = Vec::new();
                 let mut marker_disambig = Vec::new();

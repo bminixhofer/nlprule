@@ -4,6 +4,7 @@ use crate::tokenizer::{
     disambiguate, disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
 };
 use crate::utils;
+use lazy_static::lazy_static;
 use log::{info, warn};
 use onig::{Captures, Regex};
 use std::collections::HashSet;
@@ -332,11 +333,20 @@ impl Disambiguation {
 
                                     token.word.tags.retain(|x| x.pos == limit.pos);
 
+                                    lazy_static! {
+                                        static ref IS_ENGLISH: bool =
+                                            std::env::var("RULE_LANG").unwrap() == "en";
+                                    }
+
                                     if token.word.tags.is_empty() {
-                                        token
-                                            .word
-                                            .tags
-                                            .push(WordData::new(last, limit.pos.to_string()));
+                                        token.word.tags.push(WordData::new(
+                                            if *IS_ENGLISH {
+                                                last
+                                            } else {
+                                                token.word.text.to_string()
+                                            },
+                                            limit.pos.to_string(),
+                                        ));
                                     }
                                 }
                             }
