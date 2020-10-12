@@ -79,3 +79,13 @@ pub fn new_regex(regex: &str, must_fully_match: bool, case_sensitive: bool) -> R
     )
     .unwrap()
 }
+
+#[inline]
+pub fn splitting_chars() -> &'static str {
+    r##"«»'’`´‘],.:;!?/\()<=>„“”"+#…*"##
+}
+
+#[inline]
+pub fn no_space_chars() -> &'static str {
+    r##","##
+}

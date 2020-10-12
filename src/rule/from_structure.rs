@@ -170,7 +170,11 @@ fn parse_match_attribs(
     Box::new(AndAtom::new(atoms))
 }
 
-fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Atom> {
+fn get_exceptions(
+    token: &structure::Token,
+    case_sensitive: bool,
+    only_shifted: bool,
+) -> Box<dyn Atom> {
     if let Some(parts) = &token.parts {
         let exceptions = parts
             .iter()
@@ -178,7 +182,7 @@ fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Ato
                 structure::TokenPart::Exception(x) => Some(x),
                 _ => None,
             })
-            .map(|x| {
+            .filter_map(|x| {
                 let exception_text = if let Some(exception_text) = &x.text {
                     Some(exception_text.as_str())
                 } else {
@@ -201,7 +205,11 @@ fn get_exceptions(token: &structure::Token, case_sensitive: bool) -> Box<dyn Ato
                     atom = Box::new(OffsetAtom::new(atom, offset));
                 }
 
-                atom
+                if !only_shifted || (offset != 0) {
+                    Some(atom)
+                } else {
+                    None
+                }
             })
             .collect::<Vec<_>>();
         Box::new(NotAtom::new(Box::new(OrAtom::new(exceptions))))
@@ -258,7 +266,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
 
     atom = Box::new(AndAtom::new(vec![
         atom,
-        get_exceptions(token, case_sensitive),
+        get_exceptions(token, case_sensitive, false),
     ]));
 
     parts.push(Part::new(atom, quantifier, true));
@@ -271,7 +279,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         };
 
         parts.push(Part::new(
-            get_exceptions(token, case_sensitive),
+            get_exceptions(token, case_sensitive, true),
             Quantifier::new(0, to_skip),
             false,
         ));

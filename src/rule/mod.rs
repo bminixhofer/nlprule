@@ -619,18 +619,38 @@ impl Rule {
                     panic!("{} group must exist in graph: {}", self.id, self.end - 1)
                 });
 
-                let start = start_group.char_start;
+                let text: Vec<String> = self
+                    .suggesters
+                    .iter()
+                    .map(|x| x.apply(&graph, self.start, self.end))
+                    .collect();
+
+                let start = if text
+                    .iter()
+                    .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
+                {
+                    let first_token = graph.groups()[graph.get_index(self.start).unwrap()..]
+                        .iter()
+                        .find(|x| !x.tokens.is_empty())
+                        .unwrap()
+                        .tokens[0];
+
+                    let idx = tokens
+                        .iter()
+                        .position(|x| std::ptr::eq(x, first_token))
+                        .unwrap_or(0);
+
+                    if idx > 0 {
+                        tokens[idx - 1].char_span.1
+                    } else {
+                        start_group.char_start
+                    }
+                } else {
+                    start_group.char_start
+                };
                 let end = end_group.char_end;
 
-                suggestions.push(Suggestion {
-                    start,
-                    end,
-                    text: self
-                        .suggesters
-                        .iter()
-                        .map(|x| x.apply(&graph, self.start, self.end))
-                        .collect(),
-                });
+                suggestions.push(Suggestion { start, end, text });
             }
         }
 
