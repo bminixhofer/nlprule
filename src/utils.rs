@@ -89,3 +89,18 @@ pub fn splitting_chars() -> &'static str {
 pub fn no_space_chars() -> &'static str {
     r##","##
 }
+
+pub fn fix_nospace_chars(text: &str) -> String {
+    text.char_indices()
+        .filter(|(i, c)| {
+            if c.is_whitespace() {
+                !no_space_chars()
+                    .chars()
+                    .any(|nospace_c| text[(i + c.len_utf8())..].starts_with(nospace_c))
+            } else {
+                true
+            }
+        })
+        .map(|x| x.1)
+        .collect()
+}

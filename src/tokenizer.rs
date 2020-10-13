@@ -133,11 +133,6 @@ impl<'a> From<IncompleteToken> for Token {
                 .push(WordData::new(data.word.text.to_string(), "SENT_END".into()));
         }
 
-        if [".", ",", ";", ":", "…", "!", "?"].contains(&word.text.as_str()) {
-            word.tags
-                .push(WordData::new(data.word.text.to_string(), "PCT".into()))
-        }
-
         Token {
             word,
             byte_span: data.byte_span,

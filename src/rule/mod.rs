@@ -650,6 +650,12 @@ impl Rule {
                 };
                 let end = end_group.char_end;
 
+                // fix e. g. "Super , dass"
+                let text = text
+                    .into_iter()
+                    .map(|x| utils::fix_nospace_chars(&x))
+                    .collect();
+
                 suggestions.push(Suggestion { start, end, text });
             }
         }
