@@ -56,19 +56,31 @@ impl Tagger {
         Ok(Tagger { tags })
     }
 
-    fn get_strict_tags(&self, word: &str) -> Vec<WordData> {
+    fn get_strict_tags(
+        &self,
+        word: &str,
+        add_lower: bool,
+        add_lower_if_empty: bool,
+    ) -> Vec<WordData> {
         let mut tags = self.tags.get(word).cloned().unwrap_or_else(Vec::new);
         let lower = word.to_lowercase();
 
-        if word != lower && crate::utils::is_title_case(word) || crate::utils::is_uppercase(word) {
+        lazy_static! {
+            static ref IS_ENGLISH: bool = std::env::var("RULE_LANG").unwrap() == "en";
+        }
+
+        if (add_lower || (add_lower_if_empty && tags.is_empty()) || *IS_ENGLISH)
+            && (word != lower
+                && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word)))
+        {
             tags.extend(self.tags.get(&lower).cloned().unwrap_or_else(Vec::new));
         }
 
         tags
     }
 
-    pub fn get_tags(&self, word: &str) -> Vec<WordData> {
-        let mut tags = self.get_strict_tags(word);
+    pub fn get_tags(&self, word: &str, add_lower: bool) -> Vec<WordData> {
+        let mut tags = self.get_strict_tags(word, add_lower, true);
 
         lazy_static! {
             static ref IS_GERMAN: bool = std::env::var("RULE_LANG").unwrap() == "de";
@@ -86,9 +98,13 @@ impl Tagger {
                     .map(|x| x.0);
 
                 for i in indices {
-                    let next =
-                        crate::utils::apply_to_first(&word[i..], |c| c.to_uppercase().collect());
-                    let next_tags = self.get_strict_tags(&next);
+                    let next = if word.chars().next().unwrap().is_uppercase() {
+                        crate::utils::apply_to_first(&word[i..], |c| c.to_uppercase().collect())
+                    } else {
+                        word[i..].to_string()
+                    };
+
+                    let next_tags = self.get_strict_tags(&next, add_lower, false);
 
                     if !next_tags.is_empty() {
                         tags = next_tags

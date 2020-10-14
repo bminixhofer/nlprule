@@ -43,7 +43,7 @@ impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
             tokens.iter().all(|x| {
                 if let Some(captures) = self.regexp.captures(&x.word.text) {
                     // get group 2 because `must_fully_match` adds one group
-                    let tags = TAGGER.get_tags(&captures.at(2).unwrap());
+                    let tags = TAGGER.get_tags(&captures.at(2).unwrap(), false);
 
                     tags.iter().any(|x| self.postag_regexp.is_match(&x.pos))
                 } else {

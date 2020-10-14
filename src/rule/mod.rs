@@ -4,6 +4,7 @@ use crate::tokenizer::{
     disambiguate, disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
 };
 use crate::utils;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{info, warn};
 use onig::{Captures, Regex};
@@ -255,35 +256,32 @@ impl POSFilter {
         POSFilter::String(string)
     }
 
-    fn keep(&self, data: &mut Word) {
-        data.tags.retain(|x| match self {
-            POSFilter::String(string) => &x.pos == string,
-            POSFilter::Regex(regex) => regex.is_match(&x.pos),
-        })
+    fn is_word_data_match(&self, data: &WordData) -> bool {
+        match self {
+            POSFilter::String(string) => &data.pos == string,
+            POSFilter::Regex(regex) => regex.is_match(&data.pos),
+        }
     }
 
-    fn is_match(&self, data: &Word) -> bool {
-        data.tags.iter().any(|x| match self {
-            POSFilter::String(string) => &x.pos == string,
-            POSFilter::Regex(regex) => regex.is_match(&x.pos),
-        })
+    fn keep(&self, data: &mut Word) {
+        data.tags.retain(|x| self.is_word_data_match(x))
     }
 
     fn remove(&self, data: &mut Word) {
-        data.tags.retain(|x| match self {
-            POSFilter::String(string) => &x.pos != string,
-            POSFilter::Regex(regex) => !regex.is_match(&x.pos),
-        })
+        data.tags.retain(|x| !self.is_word_data_match(x))
+    }
+
+    fn and(filters: &[&Self], data: &Word) -> bool {
+        data.tags
+            .iter()
+            .any(|x| filters.iter().all(|filter| filter.is_word_data_match(x)))
     }
 
     fn apply(filters: &[Vec<&Self>], data: &mut Word) {
         data.tags.retain(|x| {
-            filters.iter().all(|filter| {
-                filter.iter().any(|f| match f {
-                    POSFilter::String(string) => &x.pos == string,
-                    POSFilter::Regex(regex) => regex.is_match(&x.pos),
-                })
-            })
+            filters
+                .iter()
+                .any(|filter| filter.iter().all(|f| f.is_word_data_match(x)))
         })
     }
 }
@@ -386,57 +384,54 @@ impl Disambiguation {
                 }
             }
             Disambiguation::Unify(filters, disambigs, mask) => {
-                let mut filter_mask: Vec<_> = filters
-                    .iter()
-                    .map(|x| x.iter().map(|_| true).collect::<Vec<_>>())
-                    .collect();
+                let filters: Vec<_> = filters.iter().multi_cartesian_product().collect();
+
+                let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
 
                 for (group, use_mask_val) in groups.iter().zip(mask) {
                     for token in group.iter() {
                         if *use_mask_val {
                             let finalized: Token = (*token).clone().into();
 
-                            for (mask_val, filter) in filter_mask.iter_mut().zip(filters) {
-                                for (m, f) in mask_val.iter_mut().zip(filter) {
-                                    *m = *m && f.is_match(&finalized.word);
-                                }
+                            for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
+                                *mask_val = *mask_val && POSFilter::and(filter, &finalized.word);
                             }
                         }
                     }
                 }
 
-                if filter_mask.iter().any(|mask| mask.iter().all(|x| !x)) {
+                if !filter_mask.iter().any(|x| *x) {
                     return;
                 }
 
                 let to_apply: Vec<_> = filter_mask
                     .iter()
                     .zip(filters)
-                    .map(|(mask_val, filter)| {
-                        mask_val
-                            .iter()
-                            .zip(filter)
-                            .filter_map(|(m, f)| if *m { Some(f) } else { None })
-                            .collect::<Vec<_>>()
-                    })
+                    .filter_map(
+                        |(mask_val, filter)| {
+                            if *mask_val {
+                                Some(filter)
+                            } else {
+                                None
+                            }
+                        },
+                    )
                     .collect();
 
                 for ((group, disambig), use_mask_val) in groups.into_iter().zip(disambigs).zip(mask)
                 {
                     if *use_mask_val {
                         for token in group.into_iter() {
-                            if !to_apply.is_empty() {
-                                let before = token.word.clone();
+                            let before = token.word.clone();
 
-                                POSFilter::apply(&to_apply, &mut token.word);
+                            POSFilter::apply(&to_apply, &mut token.word);
 
-                                if let Some(disambig) = disambig {
-                                    disambig.keep(&mut token.word);
-                                }
+                            if let Some(disambig) = disambig {
+                                disambig.keep(&mut token.word);
+                            }
 
-                                if token.word.tags.is_empty() {
-                                    token.word = before;
-                                }
+                            if token.word.tags.is_empty() {
+                                token.word = before;
                             }
                         }
                     }
@@ -506,6 +501,10 @@ impl DisambiguationRule {
 
                 all_byte_spans.push(byte_spans);
             }
+        }
+
+        if !all_byte_spans.is_empty() {
+            log::info!("applying {}", self.id);
         }
 
         for byte_spans in all_byte_spans {

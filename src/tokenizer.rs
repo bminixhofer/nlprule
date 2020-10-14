@@ -148,9 +148,9 @@ impl Word {
         Word { text, tags }
     }
 
-    pub fn new(text: String) -> Self {
+    pub fn new(text: String, add_lower: bool) -> Self {
         Word {
-            tags: TAGGER.get_tags(&text),
+            tags: TAGGER.get_tags(&text, add_lower),
             text,
         }
     }
@@ -211,30 +211,34 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
         });
 
     let mut current_char = 0;
-    let mut tokens = Vec::new();
+    let token_strs = get_token_strs(text);
+    let mut tokens: Vec<_> = token_strs
+        .into_iter()
+        .map(|x| {
+            let char_start = current_char;
+            let ptr = x.as_ptr() as usize;
+            current_char += x.chars().count();
 
-    tokens.extend(
-        get_token_strs(text)
-            .into_iter()
-            .map(|x| {
-                let char_start = current_char;
-                let ptr = x.as_ptr() as usize;
-                current_char += x.chars().count();
+            let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
+            let trimmed = x.trim();
 
-                let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
-                let trimmed = x.trim();
+            let is_sentence_start = sentence_indices.0.contains(&ptr);
+            let is_sentence_end = sentence_indices.1.contains(&(ptr + x.len()));
 
-                IncompleteToken {
-                    word: Word::new(trimmed.to_string()),
-                    char_span: (char_start, current_char),
-                    byte_span: (byte_start, byte_start + x.len()),
-                    is_sentence_end: sentence_indices.1.contains(&(ptr + x.len())),
-                    has_space_before: text[..byte_start].ends_with(char::is_whitespace),
-                    chunks: Vec::new(),
-                }
-            })
-            .filter(|token| !token.word.text.is_empty()),
-    );
+            IncompleteToken {
+                word: Word::new(trimmed.to_string(), is_sentence_start),
+                char_span: (char_start, current_char),
+                byte_span: (byte_start, byte_start + x.len()),
+                is_sentence_end,
+                has_space_before: text[..byte_start].ends_with(char::is_whitespace),
+                chunks: Vec::new(),
+            }
+        })
+        .filter(|token| !token.word.text.is_empty())
+        .collect();
+
+    let last_idx = tokens.len() - 1;
+    tokens[last_idx].is_sentence_end = true;
 
     CHUNKER.with(|x| {
         x.apply(&mut tokens).unwrap();
