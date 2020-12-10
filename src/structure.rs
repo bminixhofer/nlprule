@@ -40,11 +40,7 @@ mod preprocess {
             .map(|x| x.expect("error reading XML"))
             .filter(|x| {
                 // processing instructions break the writer and are useless to us
-                if let xml::reader::XmlEvent::ProcessingInstruction { .. } = x {
-                    false
-                } else {
-                    true
-                }
+                !matches!(x, xml::reader::XmlEvent::ProcessingInstruction { .. })
             })
             .collect::<Vec<_>>();
 

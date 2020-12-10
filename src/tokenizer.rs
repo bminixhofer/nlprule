@@ -8,7 +8,7 @@ mod disambiguate;
 mod tag;
 
 use chunk::Chunker;
-use disambiguate::Disambiguator;
+use disambiguate::{Disambiguator, DisambiguatorOptions};
 use tag::Tagger;
 
 // chunker can not be shared across threads, so cant be lazy static
@@ -18,10 +18,14 @@ thread_local! {
 
 lazy_static! {
     pub static ref DISAMBIGUATOR: Disambiguator = {
-        Disambiguator::from_xml(format!(
-            "data/disambiguation.{}.canonic.xml",
-            std::env::var("RULE_LANG").unwrap()
-        ))
+        Disambiguator::from_xml(
+            format!(
+                "data/disambiguation.{}.canonic.xml",
+                std::env::var("RULE_LANG").unwrap()
+            ),
+            DisambiguatorOptions::default(),
+        )
+        .unwrap()
     };
 }
 
@@ -147,13 +151,6 @@ impl Word {
     pub fn new_with_tags(text: String, tags: Vec<WordData>) -> Self {
         Word { text, tags }
     }
-
-    pub fn new(text: String, add_lower: bool) -> Self {
-        Word {
-            tags: TAGGER.get_tags(&text, add_lower),
-            text,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -226,7 +223,10 @@ pub fn tokenize(text: &str) -> Vec<IncompleteToken> {
             let is_sentence_end = sentence_indices.1.contains(&(ptr + x.len()));
 
             IncompleteToken {
-                word: Word::new(trimmed.to_string(), is_sentence_start),
+                word: Word::new_with_tags(
+                    trimmed.to_string(),
+                    TAGGER.get_tags(trimmed, is_sentence_start),
+                ),
                 char_span: (char_start, current_char),
                 byte_span: (byte_start, byte_start + x.len()),
                 is_sentence_end,
