@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use log::warn;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::TryFrom, error::Error, path::Path};
+use std::{collections::HashSet, convert::TryFrom, error::Error, path::Path, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
@@ -153,7 +153,7 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
     chunker: Option<Chunker>,
-    tagger: Tagger,
+    tagger: Arc<Tagger>,
 }
 
 pub struct TokenizerOptions {
@@ -173,7 +173,7 @@ impl Default for TokenizerOptions {
 impl Tokenizer {
     pub fn from_xml<P: AsRef<Path>>(
         path: P,
-        tagger: Tagger,
+        tagger: Arc<Tagger>,
         chunker: Option<Chunker>,
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn Error>> {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use clap::Clap;
 use nlprule::tokenizer::Tokenizer;
 use nlprule::tokenizer::{tag::Tagger, TokenizerOptions};
@@ -38,7 +40,7 @@ fn main() {
             "data/disambiguation.{}.canonic.xml",
             std::env::var("RULE_LANG").unwrap()
         ),
-        tagger,
+        Arc::new(tagger),
         None,
         TokenizerOptions {
             allow_errors: true,
