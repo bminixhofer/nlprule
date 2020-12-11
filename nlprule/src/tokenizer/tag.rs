@@ -1,9 +1,11 @@
 use super::WordData;
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufRead;
 
+#[derive(Serialize, Deserialize)]
 pub struct Tagger {
     tags: HashMap<String, Vec<WordData>>,
 }

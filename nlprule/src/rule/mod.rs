@@ -1,9 +1,10 @@
-use crate::composition::{Composition, MatchGraph};
 use crate::filter::Filter;
-use crate::tokenizer::{
-    disambiguate, disambiguate_up_to_id, finalize, tokenize, IncompleteToken, Token, Word, WordData,
-};
+use crate::tokenizer::{finalize, IncompleteToken, Token, Word, WordData};
 use crate::utils;
+use crate::{
+    composition::{Composition, MatchGraph},
+    tokenizer::Tokenizer,
+};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{info, warn};
@@ -472,7 +473,11 @@ impl DisambiguationRule {
         self.id = id;
     }
 
-    pub fn apply(&self, mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
+    pub fn apply(
+        &self,
+        mut tokens: Vec<IncompleteToken>,
+        tokenizer: &Tokenizer,
+    ) -> Vec<IncompleteToken> {
         let complete_tokens = finalize(tokens.clone());
         let refs: Vec<&Token> = complete_tokens.iter().collect();
 
@@ -481,7 +486,7 @@ impl DisambiguationRule {
         for i in 0..complete_tokens.len() {
             if let Some(graph) = self.get_match(&refs, i, None) {
                 if let Some(filter) = &self.filter {
-                    if !filter.keep(&graph) {
+                    if !filter.keep(&graph, tokenizer) {
                         continue;
                     }
                 }
@@ -530,7 +535,7 @@ impl DisambiguationRule {
         tokens
     }
 
-    pub fn test(&self) -> bool {
+    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
         for test in &self.tests {
@@ -539,9 +544,9 @@ impl DisambiguationRule {
                 DisambiguationTest::Changed(x) => x.text.as_str(),
             };
 
-            let tokens_before = disambiguate_up_to_id(tokenize(text), &self.id);
+            let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
-            tokens_after = self.apply(tokens_after);
+            tokens_after = self.apply(tokens_after, tokenizer);
 
             info!("Tokens: {:#?}", tokens_before);
 
@@ -662,11 +667,11 @@ impl Rule {
         suggestions
     }
 
-    pub fn test(&self) -> bool {
+    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
         for test in &self.tests {
-            let tokens = finalize(disambiguate(tokenize(&test.text)));
+            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
 
