@@ -17,6 +17,18 @@ impl PyTagger {
             tagger: Arc::new(Tagger::from_dumps(&paths, &remove_paths)?),
         })
     }
+
+    fn get_tags(&self, word: &str, add_lower: bool) -> Vec<(String, String)> {
+        self.tagger
+            .get_tags(word, add_lower)
+            .into_iter()
+            .map(|x| (x.lemma, x.pos))
+            .collect()
+    }
+
+    fn get_group_members(&self, word: &str) -> Vec<&str> {
+        self.tagger.get_group_members(word)
+    }
 }
 
 impl PyTagger {
