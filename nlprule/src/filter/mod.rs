@@ -1,11 +1,11 @@
 use crate::composition::MatchGraph;
-use crate::tokenizer::TAGGER;
+use crate::tokenizer::Tokenizer;
 use crate::utils;
 use onig::Regex;
 use std::collections::HashMap;
 
 pub trait Filter: Send + Sync {
-    fn keep(&self, graph: &MatchGraph) -> bool;
+    fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool;
 }
 
 trait FromArgs {
@@ -36,14 +36,14 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
 }
 
 impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
-    fn keep(&self, graph: &MatchGraph) -> bool {
+    fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
         if let Some(group) = graph.by_id(self.index) {
             let tokens = &group.tokens;
 
             tokens.iter().all(|x| {
                 if let Some(captures) = self.regexp.captures(&x.word.text) {
                     // get group 2 because `must_fully_match` adds one group
-                    let tags = TAGGER.get_tags(&captures.at(2).unwrap(), false);
+                    let tags = tokenizer.tagger().get_tags(&captures.at(2).unwrap(), false);
 
                     tags.iter().any(|x| self.postag_regexp.is_match(&x.pos))
                 } else {

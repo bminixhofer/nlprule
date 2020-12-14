@@ -41,6 +41,7 @@ fn get_shape(word: &str) -> String {
     shape.into_iter().collect()
 }
 
+#[allow(clippy::needless_collect)]
 fn tokenize(tokens: &[&str], vocab_lengths: &[u64]) -> Array2<i64> {
     let mut input = ArrayBase::zeros((tokens.len(), 5));
 

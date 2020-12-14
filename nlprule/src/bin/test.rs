@@ -65,10 +65,10 @@ fn main() {
         .collect();
 
     println!("Runnable rules: {}", rules.len());
-    println!(
-        "Rules passing tests: {}",
-        rules
-            .iter()
-            .fold(0, |count, rule| count + rule.test() as usize)
-    );
+    // println!(
+    //     "Rules passing tests: {}",
+    //     rules
+    //         .iter()
+    //         .fold(0, |count, rule| count + rule.test() as usize)
+    // );
 }

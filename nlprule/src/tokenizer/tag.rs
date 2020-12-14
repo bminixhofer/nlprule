@@ -1,16 +1,21 @@
 use super::WordData;
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufRead;
 
+#[derive(Serialize, Deserialize)]
 pub struct Tagger {
     tags: HashMap<String, Vec<WordData>>,
+    groups: HashMap<String, Vec<String>>,
 }
 
 impl Tagger {
     pub fn from_dumps(paths: &[&str], remove_paths: &[&str]) -> std::io::Result<Self> {
         let mut tags = HashMap::new();
+        let mut groups = HashMap::new();
+
         let mut disallowed: Vec<String> = Vec::new();
 
         for path in remove_paths {
@@ -47,13 +52,18 @@ impl Tagger {
                 let inflection = parts[1].to_string();
                 let tag = parts[2].to_string();
 
+                let group = groups.entry(inflection.clone()).or_insert_with(Vec::new);
+                if !group.contains(&word) {
+                    group.push(word.clone());
+                }
+
                 tags.entry(word)
                     .or_insert_with(Vec::new)
                     .push(WordData::new(inflection, tag));
             }
         }
 
-        Ok(Tagger { tags })
+        Ok(Tagger { tags, groups })
     }
 
     fn get_strict_tags(
@@ -121,5 +131,12 @@ impl Tagger {
         }
 
         tags
+    }
+
+    pub fn get_group_members(&self, word: &str) -> Vec<&str> {
+        self.groups
+            .get(word)
+            .map(|vec| vec.iter().map(|x| x.as_str()).collect())
+            .unwrap_or_else(Vec::new)
     }
 }
