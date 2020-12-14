@@ -478,6 +478,10 @@ impl DisambiguationRule {
         mut tokens: Vec<IncompleteToken>,
         tokenizer: &Tokenizer,
     ) -> Vec<IncompleteToken> {
+        if matches!(self.disambiguations, Disambiguation::Nop) {
+            return tokens;
+        }
+
         let complete_tokens = finalize(tokens.clone());
         let refs: Vec<&Token> = complete_tokens.iter().collect();
 
