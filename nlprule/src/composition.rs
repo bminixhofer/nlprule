@@ -1,4 +1,5 @@
 use crate::tokenizer::Token;
+use enum_dispatch::enum_dispatch;
 use onig::Regex;
 use std::collections::HashMap;
 
@@ -110,20 +111,6 @@ impl WordDataMatcher {
     }
 }
 
-pub struct GenericMatcher<T> {
-    value: T,
-}
-
-impl<T: Eq + Send + Sync> GenericMatcher<T> {
-    pub fn is_match(&self, input: &T) -> bool {
-        input == &self.value
-    }
-
-    pub fn new(value: T) -> Self {
-        GenericMatcher { value }
-    }
-}
-
 pub struct Quantifier {
     pub min: usize,
     pub max: usize,
@@ -136,13 +123,114 @@ impl Quantifier {
     }
 }
 
-pub trait Atom: Send + Sync {
+#[enum_dispatch]
+pub trait Atomable: Send + Sync {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool;
+}
+
+#[enum_dispatch(Atomable)]
+pub enum Atom {
+    ChunkAtom(concrete::ChunkAtom),
+    SpaceBeforeAtom(concrete::SpaceBeforeAtom),
+    TextAtom(concrete::TextAtom),
+    WordDataAtom(concrete::WordDataAtom),
+    TrueAtom,
+    AndAtom,
+    OrAtom,
+    NotAtom,
+    OffsetAtom,
+}
+
+pub mod concrete {
+    use super::{Atomable, MatchGraph, Matcher, Token, WordDataMatcher};
+
+    pub struct TextAtom {
+        matcher: Matcher,
+    }
+
+    impl Atomable for TextAtom {
+        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+            self.matcher.is_match(&input[position].word.text, graph)
+        }
+    }
+
+    impl TextAtom {
+        pub fn new(matcher: Matcher) -> Self {
+            TextAtom { matcher }
+        }
+    }
+
+    pub struct ChunkAtom {
+        matcher: Matcher,
+    }
+
+    impl Atomable for ChunkAtom {
+        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+            self.matcher.is_slice_match(&input[position].chunks, graph)
+        }
+    }
+
+    impl ChunkAtom {
+        pub fn new(matcher: Matcher) -> Self {
+            ChunkAtom { matcher }
+        }
+    }
+
+    pub struct SpaceBeforeAtom {
+        value: bool,
+    }
+
+    impl Atomable for SpaceBeforeAtom {
+        fn is_match(&self, input: &[&Token], _graph: &MatchGraph, position: usize) -> bool {
+            input[position].has_space_before == self.value
+        }
+    }
+
+    impl SpaceBeforeAtom {
+        pub fn new(value: bool) -> Self {
+            SpaceBeforeAtom { value }
+        }
+    }
+
+    pub struct WordDataAtom {
+        matcher: WordDataMatcher,
+        case_sensitive: bool,
+    }
+
+    impl Atomable for WordDataAtom {
+        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+            let tags = &input[position].word.tags;
+
+            if self.case_sensitive {
+                self.matcher.is_match(
+                    &tags.iter().map(|x| (&x.pos, &x.lemma)).collect::<Vec<_>>(),
+                    graph,
+                )
+            } else {
+                self.matcher.is_match(
+                    &tags
+                        .iter()
+                        .map(|x| (&x.pos, x.lemma.to_lowercase()))
+                        .collect::<Vec<_>>(),
+                    graph,
+                )
+            }
+        }
+    }
+
+    impl WordDataAtom {
+        pub fn new(matcher: WordDataMatcher, case_sensitive: bool) -> Self {
+            WordDataAtom {
+                matcher,
+                case_sensitive,
+            }
+        }
+    }
 }
 
 pub struct TrueAtom {}
 
-impl Atom for TrueAtom {
+impl Atomable for TrueAtom {
     fn is_match(&self, _input: &[&Token], _graph: &MatchGraph, _position: usize) -> bool {
         true
     }
@@ -161,16 +249,16 @@ impl Default for TrueAtom {
 }
 
 pub struct AndAtom {
-    atoms: Vec<Box<dyn Atom>>,
+    atoms: Vec<Atom>,
 }
 
 impl AndAtom {
-    pub fn new(atoms: Vec<Box<dyn Atom>>) -> Self {
+    pub fn new(atoms: Vec<Atom>) -> Self {
         AndAtom { atoms }
     }
 }
 
-impl Atom for AndAtom {
+impl Atomable for AndAtom {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
         self.atoms
             .iter()
@@ -179,16 +267,16 @@ impl Atom for AndAtom {
 }
 
 pub struct OrAtom {
-    atoms: Vec<Box<dyn Atom>>,
+    atoms: Vec<Atom>,
 }
 
 impl OrAtom {
-    pub fn new(atoms: Vec<Box<dyn Atom>>) -> Self {
+    pub fn new(atoms: Vec<Atom>) -> Self {
         OrAtom { atoms }
     }
 }
 
-impl Atom for OrAtom {
+impl Atomable for OrAtom {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
         self.atoms
             .iter()
@@ -197,27 +285,27 @@ impl Atom for OrAtom {
 }
 
 pub struct NotAtom {
-    atom: Box<dyn Atom>,
+    atom: Box<Atom>,
 }
 
 impl NotAtom {
-    pub fn new(atom: Box<dyn Atom>) -> Self {
+    pub fn new(atom: Box<Atom>) -> Self {
         NotAtom { atom }
     }
 }
 
-impl Atom for NotAtom {
+impl Atomable for NotAtom {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
         !self.atom.is_match(input, graph, position)
     }
 }
 
 pub struct OffsetAtom {
-    atom: Box<dyn Atom>,
+    atom: Box<Atom>,
     offset: isize,
 }
 
-impl Atom for OffsetAtom {
+impl Atomable for OffsetAtom {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
         let new_position = position as isize + self.offset;
 
@@ -230,32 +318,8 @@ impl Atom for OffsetAtom {
 }
 
 impl OffsetAtom {
-    pub fn new(atom: Box<dyn Atom>, offset: isize) -> Self {
+    pub fn new(atom: Box<Atom>, offset: isize) -> Self {
         OffsetAtom { atom, offset }
-    }
-}
-
-pub struct MatchAtom<
-    M: Send + Sync,
-    A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync,
-> {
-    matcher: M,
-    access: A,
-}
-
-impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync> Atom
-    for MatchAtom<M, A>
-{
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
-        (self.access)(input[position], &graph, &self.matcher)
-    }
-}
-
-impl<M: Send + Sync, A: for<'a> Fn(&'a Token, &MatchGraph, &M) -> bool + Send + Sync>
-    MatchAtom<M, A>
-{
-    pub fn new(matcher: M, access: A) -> Self {
-        MatchAtom { matcher, access }
     }
 }
 
@@ -325,13 +389,13 @@ impl<'a> MatchGraph<'a> {
 }
 
 pub struct Part {
-    pub atom: Box<dyn Atom>,
+    pub atom: Atom,
     pub quantifier: Quantifier,
     pub visible: bool,
 }
 
 impl Part {
-    pub fn new(atom: Box<dyn Atom>, quantifier: Quantifier, visible: bool) -> Self {
+    pub fn new(atom: Atom, quantifier: Quantifier, visible: bool) -> Self {
         Part {
             atom,
             quantifier,

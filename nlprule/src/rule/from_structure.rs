@@ -1,6 +1,8 @@
 use crate::composition::{
-    AndAtom, Atom, Composition, GenericMatcher, MatchAtom, Matcher, NotAtom, OffsetAtom, OrAtom,
-    Part, Quantifier, TrueAtom, WordDataMatcher,
+    concrete::ChunkAtom,
+    concrete::{SpaceBeforeAtom, TextAtom, WordDataAtom},
+    AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier, TrueAtom,
+    WordDataMatcher,
 };
 use crate::filter::get_filter;
 use crate::rule;
@@ -20,8 +22,8 @@ fn parse_match_attribs(
     text: Option<&str>,
     case_sensitive: bool,
     text_match_idx: Option<usize>,
-) -> Box<dyn Atom> {
-    let mut atoms: Vec<Box<dyn Atom>> = Vec::new();
+) -> Atom {
+    let mut atoms: Vec<Atom> = Vec::new();
 
     let case_sensitive = if let Some(case_sensitive) = attribs.case_sensitive() {
         match case_sensitive.as_str() {
@@ -93,11 +95,7 @@ fn parse_match_attribs(
         if inflected {
             inflect_matcher = Some(matcher);
         } else {
-            let text_atom: Box<dyn Atom> = Box::new(MatchAtom::new(matcher, |t, g, m| {
-                m.is_match(&t.word.text, g)
-            }));
-
-            atoms.push(text_atom);
+            atoms.push(TextAtom::new(matcher).into());
         }
     }
 
@@ -117,41 +115,18 @@ fn parse_match_attribs(
 
     if pos_matcher.is_some() || inflect_matcher.is_some() {
         let matcher = WordDataMatcher::new(pos_matcher, inflect_matcher);
-
-        let atom: Box<dyn Atom> = if case_sensitive {
-            Box::new(MatchAtom::new(matcher, |t, g, m| {
-                m.is_match(
-                    &t.word
-                        .tags
-                        .iter()
-                        .map(|x| (&x.pos, &x.lemma))
-                        .collect::<Vec<_>>(),
-                    g,
-                )
-            }))
-        } else {
-            Box::new(MatchAtom::new(matcher, |t, g, m| {
-                m.is_match(
-                    &t.word
-                        .tags
-                        .iter()
-                        .map(|x| (&x.pos, x.lemma.to_lowercase()))
-                        .collect::<Vec<_>>(),
-                    g,
-                )
-            }))
-        };
-
-        atoms.push(atom);
+        atoms.push(WordDataAtom::new(matcher, case_sensitive).into());
     }
 
     if let Some(chunk) = attribs.chunk() {
-        let chunk_atom = MatchAtom::new(
-            Matcher::new_string(either::Left(chunk.trim().to_string()), false, true, true),
-            |t, g, m| m.is_slice_match(&t.chunks[..], g),
-        );
+        let chunk_atom = ChunkAtom::new(Matcher::new_string(
+            either::Left(chunk.trim().to_string()),
+            false,
+            true,
+            true,
+        ));
 
-        atoms.push(Box::new(chunk_atom));
+        atoms.push(chunk_atom.into());
     }
 
     if let Some(space_before) = attribs.spacebefore() {
@@ -161,20 +136,13 @@ fn parse_match_attribs(
             _ => panic!("unknown spacebefore value {}", space_before),
         };
 
-        atoms.push(Box::new(MatchAtom::new(
-            GenericMatcher::new(value),
-            |t, _, m| m.is_match(&t.has_space_before),
-        )));
+        atoms.push(SpaceBeforeAtom::new(value).into());
     }
 
-    Box::new(AndAtom::new(atoms))
+    AndAtom::new(atoms).into()
 }
 
-fn get_exceptions(
-    token: &structure::Token,
-    case_sensitive: bool,
-    only_shifted: bool,
-) -> Box<dyn Atom> {
+fn get_exceptions(token: &structure::Token, case_sensitive: bool, only_shifted: bool) -> Atom {
     if let Some(parts) = &token.parts {
         let exceptions = parts
             .iter()
@@ -202,7 +170,7 @@ fn get_exceptions(
                 };
 
                 if offset != 0 {
-                    atom = Box::new(OffsetAtom::new(atom, offset));
+                    atom = OffsetAtom::new(Box::new(atom), offset).into();
                 }
 
                 if !only_shifted || (offset != 0) {
@@ -212,9 +180,9 @@ fn get_exceptions(
                 }
             })
             .collect::<Vec<_>>();
-        Box::new(NotAtom::new(Box::new(OrAtom::new(exceptions))))
+        NotAtom::new(Box::new(OrAtom::new(exceptions).into())).into()
     } else {
-        Box::new(TrueAtom {})
+        (TrueAtom {}).into()
     }
 }
 
@@ -263,11 +231,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
 
     let quantifier = Quantifier::new(min, max);
     let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx);
-
-    atom = Box::new(AndAtom::new(vec![
-        atom,
-        get_exceptions(token, case_sensitive, false),
-    ]));
+    atom = AndAtom::new(vec![atom, get_exceptions(token, case_sensitive, false)]).into();
 
     parts.push(Part::new(atom, quantifier, true));
 
@@ -388,7 +352,7 @@ fn get_last_id(parts: &[Part]) -> isize {
 fn parse_parallel_tokens(
     tokens: &[structure::Token],
     case_sensitive: bool,
-) -> Result<Vec<Box<dyn Atom>>, Error> {
+) -> Result<Vec<Atom>, Error> {
     tokens
         .iter()
         .map(|x| {
@@ -416,11 +380,11 @@ fn parse_unify_tokens(
             structure::UnifyTokenCombination::Token(token) => parse_token(token, case_sensitive),
             structure::UnifyTokenCombination::And(tokens) => {
                 let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
-                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                vec![Part::new(atom.into(), Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Or(tokens) => {
                 let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
-                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                vec![Part::new(atom.into(), Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Feature(_) => vec![],
             structure::UnifyTokenCombination::Ignore(ignore) => {
@@ -443,11 +407,11 @@ fn parse_tokens(
             structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
             structure::TokenCombination::And(tokens) => {
                 let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
-                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                vec![Part::new(atom.into(), Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Or(tokens) => {
                 let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
-                vec![Part::new(Box::new(atom), Quantifier::new(1, 1), true)]
+                vec![Part::new(atom.into(), Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Unify(unify) => {
                 parse_unify_tokens(&unify.tokens, case_sensitive)?
@@ -483,12 +447,12 @@ fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usi
             structure::PatternPart::And(tokens) => {
                 let atom = AndAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
 
-                composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
+                composition_parts.push(Part::new(atom.into(), Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Or(tokens) => {
                 let atom = OrAtom::new(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
 
-                composition_parts.push(Part::new(Box::new(atom), Quantifier::new(1, 1), true));
+                composition_parts.push(Part::new(atom.into(), Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Unify(unify) => {
                 composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive)?)
