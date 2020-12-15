@@ -3,6 +3,7 @@ use enum_dispatch::enum_dispatch;
 use onig::Regex;
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct Matcher {
     matcher: either::Either<either::Either<String, usize>, Regex>,
     negate: bool,
@@ -77,6 +78,7 @@ impl Matcher {
     }
 }
 
+#[derive(Debug)]
 pub struct WordDataMatcher {
     pos_matcher: Option<Matcher>,
     inflect_matcher: Option<Matcher>,
@@ -111,6 +113,7 @@ impl WordDataMatcher {
     }
 }
 
+#[derive(Debug)]
 pub struct Quantifier {
     pub min: usize,
     pub max: usize,
@@ -129,12 +132,14 @@ pub trait Atomable: Send + Sync {
 }
 
 #[enum_dispatch(Atomable)]
+#[derive(Debug)]
 pub enum Atom {
     ChunkAtom(concrete::ChunkAtom),
     SpaceBeforeAtom(concrete::SpaceBeforeAtom),
     TextAtom(concrete::TextAtom),
     WordDataAtom(concrete::WordDataAtom),
     TrueAtom,
+    FalseAtom,
     AndAtom,
     OrAtom,
     NotAtom,
@@ -144,6 +149,7 @@ pub enum Atom {
 pub mod concrete {
     use super::{Atomable, MatchGraph, Matcher, Token, WordDataMatcher};
 
+    #[derive(Debug)]
     pub struct TextAtom {
         matcher: Matcher,
     }
@@ -160,6 +166,7 @@ pub mod concrete {
         }
     }
 
+    #[derive(Debug)]
     pub struct ChunkAtom {
         matcher: Matcher,
     }
@@ -176,6 +183,7 @@ pub mod concrete {
         }
     }
 
+    #[derive(Debug)]
     pub struct SpaceBeforeAtom {
         value: bool,
     }
@@ -192,6 +200,7 @@ pub mod concrete {
         }
     }
 
+    #[derive(Debug)]
     pub struct WordDataAtom {
         matcher: WordDataMatcher,
         case_sensitive: bool,
@@ -228,6 +237,7 @@ pub mod concrete {
     }
 }
 
+#[derive(Debug)]
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
@@ -248,13 +258,46 @@ impl Default for TrueAtom {
     }
 }
 
+#[derive(Debug)]
+pub struct FalseAtom {}
+
+impl Atomable for FalseAtom {
+    fn is_match(&self, _input: &[&Token], _graph: &MatchGraph, _position: usize) -> bool {
+        false
+    }
+}
+
+impl FalseAtom {
+    pub fn new() -> Self {
+        FalseAtom {}
+    }
+}
+
+impl Default for FalseAtom {
+    fn default() -> Self {
+        FalseAtom::new()
+    }
+}
+
+#[derive(Debug)]
 pub struct AndAtom {
     atoms: Vec<Atom>,
 }
 
 impl AndAtom {
-    pub fn new(atoms: Vec<Atom>) -> Self {
-        AndAtom { atoms }
+    pub fn and(atoms: Vec<Atom>) -> Atom {
+        let mut atoms: Vec<_> = atoms
+            .into_iter()
+            .filter(|x| !matches!(x, Atom::TrueAtom { .. }))
+            .collect();
+
+        if atoms.is_empty() {
+            (TrueAtom {}).into()
+        } else if atoms.len() == 1 {
+            atoms.remove(0)
+        } else {
+            (AndAtom { atoms }).into()
+        }
     }
 }
 
@@ -266,13 +309,25 @@ impl Atomable for AndAtom {
     }
 }
 
+#[derive(Debug)]
 pub struct OrAtom {
     atoms: Vec<Atom>,
 }
 
 impl OrAtom {
-    pub fn new(atoms: Vec<Atom>) -> Self {
-        OrAtom { atoms }
+    pub fn or(atoms: Vec<Atom>) -> Atom {
+        let mut atoms: Vec<_> = atoms
+            .into_iter()
+            .filter(|x| !matches!(x, Atom::FalseAtom { .. }))
+            .collect();
+
+        if atoms.is_empty() {
+            (FalseAtom {}).into()
+        } else if atoms.len() == 1 {
+            atoms.remove(0)
+        } else {
+            (OrAtom { atoms }).into()
+        }
     }
 }
 
@@ -284,13 +339,18 @@ impl Atomable for OrAtom {
     }
 }
 
+#[derive(Debug)]
 pub struct NotAtom {
     atom: Box<Atom>,
 }
 
 impl NotAtom {
-    pub fn new(atom: Box<Atom>) -> Self {
-        NotAtom { atom }
+    pub fn not(atom: Atom) -> Atom {
+        match atom {
+            Atom::TrueAtom { .. } => FalseAtom::new().into(),
+            Atom::FalseAtom { .. } => TrueAtom::new().into(),
+            x => (NotAtom { atom: Box::new(x) }).into(),
+        }
     }
 }
 
@@ -300,6 +360,7 @@ impl Atomable for NotAtom {
     }
 }
 
+#[derive(Debug)]
 pub struct OffsetAtom {
     atom: Box<Atom>,
     offset: isize,
@@ -318,8 +379,11 @@ impl Atomable for OffsetAtom {
 }
 
 impl OffsetAtom {
-    pub fn new(atom: Box<Atom>, offset: isize) -> Self {
-        OffsetAtom { atom, offset }
+    pub fn new(atom: Atom, offset: isize) -> Self {
+        OffsetAtom {
+            atom: Box::new(atom),
+            offset,
+        }
     }
 }
 
