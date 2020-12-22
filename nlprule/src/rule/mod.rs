@@ -1,15 +1,23 @@
-use crate::filter::Filter;
-use crate::tokenizer::{finalize, IncompleteToken, Token, Word, WordData};
 use crate::utils;
+use crate::{composition::Atom, filter::Filter};
 use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
+};
+use crate::{
+    structure::read_rules,
+    tokenizer::{finalize, IncompleteToken, Token, Word, WordData},
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{info, warn};
 use onig::{Captures, Regex};
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    path::Path,
+    sync::Arc,
+};
 
 pub mod from_structure;
 
@@ -482,6 +490,19 @@ impl DisambiguationRule {
             return tokens;
         }
 
+        if self.composition.parts[0].quantifier.min > 0 {
+            let graph = MatchGraph::default();
+
+            if let Atom::TextAtom(atom) = &self.composition.parts[0].atom {
+                if !tokens
+                    .iter()
+                    .any(|x| atom.matcher().is_match(&x.word.text, &graph))
+                {
+                    return tokens;
+                }
+            }
+        }
+
         let complete_tokens = finalize(tokens.clone());
         let refs: Vec<&Token> = complete_tokens.iter().collect();
 
@@ -701,5 +722,76 @@ impl Rule {
         }
 
         passes.iter().all(|x| *x)
+    }
+}
+
+pub struct RulesOptions {
+    pub allow_errors: bool,
+    pub ids: Vec<String>,
+}
+
+impl Default for RulesOptions {
+    fn default() -> Self {
+        RulesOptions {
+            allow_errors: true,
+            ids: Vec::new(),
+        }
+    }
+}
+
+pub struct Rules {
+    tokenizer: Arc<Tokenizer>,
+    rules: Vec<Rule>,
+}
+
+impl Rules {
+    pub fn from_xml<P: AsRef<Path>>(
+        path: P,
+        tokenizer: Arc<Tokenizer>,
+        options: RulesOptions,
+    ) -> Self {
+        let rules = read_rules(path);
+        let mut errors: HashMap<String, usize> = HashMap::new();
+
+        let rules: Vec<_> = rules
+            .into_iter()
+            .filter_map(|x| match x {
+                Ok((rule_structure, id)) => match Rule::try_from(rule_structure) {
+                    Ok(mut rule) => {
+                        if options.ids.is_empty() || options.ids.contains(&id) {
+                            rule.set_id(id);
+                            Some(rule)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(x) => {
+                        *errors.entry(format!("[Structure] {}", x)).or_insert(0) += 1;
+                        None
+                    }
+                },
+                Err(x) => {
+                    *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
+                    None
+                }
+            })
+            .collect();
+
+        if !errors.is_empty() {
+            let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
+            errors.sort_by_key(|x| -(x.1 as i32));
+
+            warn!("Errors constructing Rules: {:#?}", &errors);
+        }
+
+        Rules { rules, tokenizer }
+    }
+
+    pub fn rules(&self) -> &Vec<Rule> {
+        &self.rules
+    }
+
+    pub fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
     }
 }

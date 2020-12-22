@@ -164,6 +164,10 @@ pub mod concrete {
         pub fn new(matcher: Matcher) -> Self {
             TextAtom { matcher }
         }
+
+        pub fn matcher(&self) -> &Matcher {
+            &self.matcher
+        }
     }
 
     #[derive(Debug)]
@@ -408,6 +412,15 @@ impl<'a> Group<'a> {
 pub struct MatchGraph<'a> {
     groups: Vec<Group<'a>>,
     id_to_idx: HashMap<usize, usize>,
+}
+
+impl<'a> Default for MatchGraph<'a> {
+    fn default() -> Self {
+        MatchGraph {
+            groups: Vec::new(),
+            id_to_idx: HashMap::new(),
+        }
+    }
 }
 
 impl<'a> MatchGraph<'a> {

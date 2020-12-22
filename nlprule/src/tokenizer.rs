@@ -194,12 +194,12 @@ impl Tokenizer {
                         }
                     }
                     Err(x) => {
-                        error = Some(format!("{}", x));
+                        error = Some(format!("[Structure] {}", x));
                         None
                     }
                 },
                 Err(x) => {
-                    error = Some(format!("{}", x));
+                    error = Some(format!("[Rule] {}", x));
                     None
                 }
             })

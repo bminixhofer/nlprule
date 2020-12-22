@@ -1,7 +1,9 @@
 use clap::Clap;
-use nlprule::rule::Rule;
-use std::collections::HashMap;
-use std::convert::TryFrom;
+use nlprule::{
+    rule::{Rules, RulesOptions},
+    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
+};
+use std::sync::Arc;
 
 #[derive(Clap)]
 #[clap(
@@ -15,60 +17,56 @@ struct Opts {
 fn main() {
     env_logger::init();
     let opts = Opts::parse();
-    let ids = opts.ids.iter().map(|x| x.as_str()).collect::<Vec<_>>();
 
-    let rules = nlprule::structure::read_rules(format!(
-        "data/grammar.{}.canonic.xml",
-        std::env::var("RULE_LANG").unwrap()
-    ));
-    let rules: Vec<_> = rules
-        .into_iter()
-        .filter(|x| match x {
-            Ok((_, id)) => ids.is_empty() || ids.contains(&id.as_str()),
-            Err(_) => true,
-        })
-        .collect();
+    let tagger = Tagger::from_dumps(
+        &[
+            &format!(
+                "data/dumps/{}/output.dump",
+                std::env::var("RULE_LANG").unwrap()
+            ),
+            &format!(
+                "data/dumps/{}/added.txt",
+                std::env::var("RULE_LANG").unwrap()
+            ),
+        ],
+        &[&format!(
+            "data/dumps/{}/removed.txt",
+            std::env::var("RULE_LANG").unwrap()
+        )],
+    )
+    .unwrap();
 
-    let mut errors: HashMap<String, usize> = HashMap::new();
-
-    let rules = rules
-        .into_iter()
-        .filter_map(|x| match x {
-            Ok(rule) => Some(rule),
-            Err(err) => {
-                errors
-                    .entry(format!("{}", err))
-                    .and_modify(|x| *x += 1)
-                    .or_insert(1);
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
-    errors.sort_by_key(|x| -(x.1 as i32));
-
-    println!("Errors: {:#?}", &errors);
-    println!("Parsed rules: {}", rules.len());
-
-    let rules: Vec<_> = rules
-        .into_iter()
-        .filter_map(
-            |(rule_structure, id)| match Rule::try_from(rule_structure) {
-                Ok(mut rule) => {
-                    rule.set_id(id);
-                    Some(rule)
-                }
-                Err(_) => None,
-            },
-        )
-        .collect();
-
+    let tokenizer = Tokenizer::from_xml(
+        format!(
+            "data/disambiguation.{}.canonic.xml",
+            std::env::var("RULE_LANG").unwrap()
+        ),
+        Arc::new(tagger),
+        if std::env::var("RULE_LANG").unwrap() == "en" {
+            Some(Chunker::new().unwrap())
+        } else {
+            None
+        },
+        TokenizerOptions {
+            allow_errors: true,
+            ids: opts.ids,
+        },
+    )
+    .unwrap();
+    let rules_container = Rules::from_xml(
+        format!(
+            "data/grammar.{}.canonic.xml",
+            std::env::var("RULE_LANG").unwrap()
+        ),
+        Arc::new(tokenizer),
+        RulesOptions::default(),
+    );
+    let rules = rules_container.rules();
     println!("Runnable rules: {}", rules.len());
-    // println!(
-    //     "Rules passing tests: {}",
-    //     rules
-    //         .iter()
-    //         .fold(0, |count, rule| count + rule.test() as usize)
-    // );
+
+    println!(
+        "Rules passing tests: {}",
+        rules.iter().fold(0, |count, rule| count
+            + rule.test(rules_container.tokenizer()) as usize)
+    );
 }

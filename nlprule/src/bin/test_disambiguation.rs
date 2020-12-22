@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use clap::Clap;
-use nlprule::tokenizer::Tokenizer;
+use nlprule::tokenizer::{chunk::Chunker, Tokenizer};
 use nlprule::tokenizer::{tag::Tagger, TokenizerOptions};
 
 #[derive(Clap)]
@@ -41,7 +41,11 @@ fn main() {
             std::env::var("RULE_LANG").unwrap()
         ),
         Arc::new(tagger),
-        None,
+        if std::env::var("RULE_LANG").unwrap() == "en" {
+            Some(Chunker::new().unwrap())
+        } else {
+            None
+        },
         TokenizerOptions {
             allow_errors: true,
             ids: opts.ids,
