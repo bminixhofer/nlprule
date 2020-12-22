@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde-xml-rs = { git = "https://github.com/RReverser/serde-xml-rs/" }
 xml-rs = "0.8.3"
 roxmltree = "0.13.0"

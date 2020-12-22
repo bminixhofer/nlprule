@@ -1,9 +1,18 @@
 use crate::composition::MatchGraph;
 use crate::tokenizer::Tokenizer;
 use crate::utils::SerializeRegex;
+use enum_dispatch::enum_dispatch;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub trait Filter: Send + Sync {
+#[enum_dispatch]
+#[derive(Serialize, Deserialize)]
+pub enum Filter {
+    NoDisambiguationEnglishPartialPosTagFilter,
+}
+
+#[enum_dispatch(Filter)]
+pub trait Filterable {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool;
 }
 
@@ -11,7 +20,8 @@ trait FromArgs {
     fn from_args(args: HashMap<String, String>) -> Self;
 }
 
-struct NoDisambiguationEnglishPartialPosTagFilter {
+#[derive(Serialize, Deserialize)]
+pub struct NoDisambiguationEnglishPartialPosTagFilter {
     index: usize,
     regexp: SerializeRegex,
     postag_regexp: SerializeRegex,
@@ -34,7 +44,7 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
     }
 }
 
-impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
+impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
         if let Some(group) = graph.by_id(self.index) {
             let tokens = &group.tokens;
@@ -55,10 +65,10 @@ impl Filter for NoDisambiguationEnglishPartialPosTagFilter {
     }
 }
 
-pub fn get_filter(name: &str, args: HashMap<String, String>) -> Box<dyn Filter> {
+pub fn get_filter(name: &str, args: HashMap<String, String>) -> Filter {
     match name {
         "NoDisambiguationEnglishPartialPosTagFilter" => {
-            Box::new(NoDisambiguationEnglishPartialPosTagFilter::from_args(args))
+            NoDisambiguationEnglishPartialPosTagFilter::from_args(args).into()
         }
         _ => panic!("unsupported filter {}", name),
     }

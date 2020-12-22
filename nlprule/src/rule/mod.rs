@@ -1,5 +1,8 @@
 use crate::utils::{self, SerializeRegex};
-use crate::{composition::Atom, filter::Filter};
+use crate::{
+    composition::Atom,
+    filter::{Filter, Filterable},
+};
 use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
@@ -12,6 +15,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{info, warn};
 use onig::Captures;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -21,7 +25,7 @@ use std::{
 
 pub mod from_structure;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Suggestion {
     pub start: usize,
     pub end: usize,
@@ -37,17 +41,38 @@ impl std::cmp::PartialEq for Suggestion {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Test {
     text: String,
     suggestion: Option<Suggestion>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub enum Conversion {
+    Nop,
+    AllLower,
+    StartLower,
+    AllUpper,
+    StartUpper,
+}
+
+impl Conversion {
+    fn convert(&self, input: &str) -> String {
+        match &self {
+            Conversion::Nop => input.to_string(),
+            Conversion::AllLower => input.to_lowercase(),
+            Conversion::StartLower => utils::apply_to_first(input, |c| c.to_lowercase().collect()),
+            Conversion::AllUpper => input.to_uppercase(),
+            Conversion::StartUpper => utils::apply_to_first(input, |c| c.to_uppercase().collect()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Match {
     id: usize,
-    conversion: Box<dyn Fn(&str) -> String>,
+    conversion: Conversion,
     regex_replacer: Option<(SerializeRegex, String)>,
-    has_conversion: bool,
 }
 
 impl std::fmt::Debug for Match {
@@ -71,37 +96,36 @@ impl Match {
             let replaced = regex.replace_all(text, |caps: &Captures| {
                 utils::dollar_replace(replacement.to_string(), caps)
             });
-            (self.conversion)(replaced.as_ref())
+            self.conversion.convert(replaced.as_ref())
         } else {
-            (self.conversion)(text)
+            self.conversion.convert(text)
         }
     }
 
     fn new(
         id: usize,
-        conversion: Option<Box<dyn Fn(&str) -> String>>,
+        conversion: Conversion,
         regex_replacer: Option<(SerializeRegex, String)>,
     ) -> Self {
         Match {
             id,
-            has_conversion: conversion.is_some(),
-            conversion: conversion.unwrap_or_else(|| Box::new(|x: &str| x.to_string())),
+            conversion,
             regex_replacer,
         }
     }
 
     fn has_conversion(&self) -> bool {
-        self.has_conversion
+        !matches!(self.conversion, Conversion::Nop)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SuggesterPart {
     Text(String),
     Match(Match),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Suggester {
     parts: Vec<SuggesterPart>,
 }
@@ -251,6 +275,7 @@ macro_rules! impl_rule_match {
 impl_rule_match!(Rule);
 impl_rule_match!(DisambiguationRule);
 
+#[derive(Serialize, Deserialize)]
 pub enum POSFilter {
     Regex(SerializeRegex),
     String(String),
@@ -295,6 +320,7 @@ impl POSFilter {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum Disambiguation {
     Remove(Vec<either::Either<WordData, POSFilter>>),
     Add(Vec<WordData>),
@@ -451,7 +477,7 @@ impl Disambiguation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DisambiguationChange {
     text: String,
     char_span: (usize, usize),
@@ -459,18 +485,19 @@ pub struct DisambiguationChange {
     after: Word,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DisambiguationTest {
     Unchanged(String),
     Changed(DisambiguationChange),
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct DisambiguationRule {
     pub id: String,
     composition: Composition,
     antipatterns: Vec<Composition>,
     disambiguations: Disambiguation,
-    filter: Option<Box<dyn Filter>>,
+    filter: Option<Filter>,
     start: usize,
     end: usize,
     tests: Vec<DisambiguationTest>,
@@ -612,6 +639,7 @@ impl DisambiguationRule {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Rule {
     pub id: String,
     composition: Composition,

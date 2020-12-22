@@ -78,7 +78,7 @@ impl Matcher {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WordDataMatcher {
     pos_matcher: Option<Matcher>,
     inflect_matcher: Option<Matcher>,
@@ -113,7 +113,7 @@ impl WordDataMatcher {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Quantifier {
     pub min: usize,
     pub max: usize,
@@ -132,7 +132,7 @@ pub trait Atomable: Send + Sync {
 }
 
 #[enum_dispatch(Atomable)]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Atom {
     ChunkAtom(concrete::ChunkAtom),
     SpaceBeforeAtom(concrete::SpaceBeforeAtom),
@@ -148,8 +148,9 @@ pub enum Atom {
 
 pub mod concrete {
     use super::{Atomable, MatchGraph, Matcher, Token, WordDataMatcher};
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct TextAtom {
         matcher: Matcher,
     }
@@ -170,7 +171,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct ChunkAtom {
         matcher: Matcher,
     }
@@ -187,7 +188,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct SpaceBeforeAtom {
         value: bool,
     }
@@ -204,7 +205,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct WordDataAtom {
         matcher: WordDataMatcher,
         case_sensitive: bool,
@@ -241,7 +242,7 @@ pub mod concrete {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
@@ -262,7 +263,7 @@ impl Default for TrueAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FalseAtom {}
 
 impl Atomable for FalseAtom {
@@ -283,7 +284,7 @@ impl Default for FalseAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AndAtom {
     atoms: Vec<Atom>,
 }
@@ -313,7 +314,7 @@ impl Atomable for AndAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OrAtom {
     atoms: Vec<Atom>,
 }
@@ -343,7 +344,7 @@ impl Atomable for OrAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NotAtom {
     atom: Box<Atom>,
 }
@@ -364,7 +365,7 @@ impl Atomable for NotAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OffsetAtom {
     atom: Box<Atom>,
     offset: isize,
@@ -465,6 +466,7 @@ impl<'a> MatchGraph<'a> {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Part {
     pub atom: Atom,
     pub quantifier: Quantifier,
@@ -481,6 +483,7 @@ impl Part {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Composition {
     pub parts: Vec<Part>,
 }

@@ -68,7 +68,7 @@ impl WordData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Word {
     pub text: String,
     pub tags: Vec<WordData>,

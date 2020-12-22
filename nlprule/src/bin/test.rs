@@ -47,10 +47,7 @@ fn main() {
         } else {
             None
         },
-        TokenizerOptions {
-            allow_errors: true,
-            ids: opts.ids,
-        },
+        TokenizerOptions::default(),
     )
     .unwrap();
     let rules_container = Rules::from_xml(
@@ -59,7 +56,10 @@ fn main() {
             std::env::var("RULE_LANG").unwrap()
         ),
         Arc::new(tokenizer),
-        RulesOptions::default(),
+        RulesOptions {
+            allow_errors: true,
+            ids: opts.ids,
+        },
     );
     let rules = rules_container.rules();
     println!("Runnable rules: {}", rules.len());

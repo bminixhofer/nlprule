@@ -287,7 +287,9 @@ fn parse_suggestion(
                         - 1;
 
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                        index, None, None,
+                        index,
+                        rule::Conversion::Nop,
+                        None,
                     )));
                     end_index = end;
                 }
@@ -324,21 +326,17 @@ fn parse_suggestion(
                 parts.push(rule::SuggesterPart::Match(rule::Match::new(
                     id,
                     match case_conversion {
-                        Some("alllower") => Some(Box::new(|x| x.to_lowercase())),
-                        Some("startlower") => Some(Box::new(|x| {
-                            utils::apply_to_first(x, |c| c.to_lowercase().collect())
-                        })),
-                        Some("startupper") => Some(Box::new(|x| {
-                            utils::apply_to_first(x, |c| c.to_uppercase().collect())
-                        })),
-                        Some("allupper") => Some(Box::new(|x| x.to_uppercase())),
+                        Some("alllower") => rule::Conversion::AllLower,
+                        Some("startlower") => rule::Conversion::StartLower,
+                        Some("startupper") => rule::Conversion::StartUpper,
+                        Some("allupper") => rule::Conversion::AllUpper,
                         Some(x) => {
                             return Err(Error::Unimplemented(format!(
                                 "case conversion {} not supported.",
                                 x
                             )))
                         }
-                        None => None,
+                        None => rule::Conversion::Nop,
                     },
                     replacer,
                 )));
