@@ -1,18 +1,18 @@
-use crate::tokenizer::Token;
+use crate::{tokenizer::Token, utils::SerializeRegex};
 use enum_dispatch::enum_dispatch;
-use onig::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    matcher: either::Either<either::Either<String, usize>, Regex>,
+    matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
     negate: bool,
     case_sensitive: bool,
     empty_always_false: bool,
 }
 
 impl Matcher {
-    pub fn new_regex(regex: Regex, negate: bool, empty_always_false: bool) -> Self {
+    pub fn new_regex(regex: SerializeRegex, negate: bool, empty_always_false: bool) -> Self {
         Matcher {
             matcher: either::Right(regex),
             negate,

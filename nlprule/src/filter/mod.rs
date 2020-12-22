@@ -1,7 +1,6 @@
 use crate::composition::MatchGraph;
 use crate::tokenizer::Tokenizer;
-use crate::utils;
-use onig::Regex;
+use crate::utils::SerializeRegex;
 use std::collections::HashMap;
 
 pub trait Filter: Send + Sync {
@@ -14,8 +13,8 @@ trait FromArgs {
 
 struct NoDisambiguationEnglishPartialPosTagFilter {
     index: usize,
-    regexp: Regex,
-    postag_regexp: Regex,
+    regexp: SerializeRegex,
+    postag_regexp: SerializeRegex,
     #[allow(dead_code)]
     negate_postag: bool,
 }
@@ -28,8 +27,8 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
 
         NoDisambiguationEnglishPartialPosTagFilter {
             index: args.get("no").unwrap().parse::<usize>().unwrap() - 1,
-            regexp: utils::new_regex(&args.get("regexp").unwrap(), true, true),
-            postag_regexp: utils::new_regex(&args.get("postag_regexp").unwrap(), true, true),
+            regexp: SerializeRegex::new(&args.get("regexp").unwrap(), true, true),
+            postag_regexp: SerializeRegex::new(&args.get("postag_regexp").unwrap(), true, true),
             negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),
         }
     }

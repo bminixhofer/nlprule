@@ -18,10 +18,9 @@ unicode-segmentation = "1.6.0"
 thiserror = "1.0.20"
 env_logger = "0.8.1"
 clap = "3.0.0-beta.1"
-either = "1.6"
+either = {version = "1.6", features = ["serde"]}
 itertools = "0.9.0"
 enum_dispatch = "0.3.4"
 
-# model inference, would like to change to tract at some point
 fasthash = "0.4.0"
 tract-onnx = "0.10"

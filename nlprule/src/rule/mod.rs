@@ -1,4 +1,4 @@
-use crate::utils;
+use crate::utils::{self, SerializeRegex};
 use crate::{composition::Atom, filter::Filter};
 use crate::{
     composition::{Composition, MatchGraph},
@@ -11,7 +11,7 @@ use crate::{
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{info, warn};
-use onig::{Captures, Regex};
+use onig::Captures;
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -46,7 +46,7 @@ pub struct Test {
 pub struct Match {
     id: usize,
     conversion: Box<dyn Fn(&str) -> String>,
-    regex_replacer: Option<(Regex, String)>,
+    regex_replacer: Option<(SerializeRegex, String)>,
     has_conversion: bool,
 }
 
@@ -80,7 +80,7 @@ impl Match {
     fn new(
         id: usize,
         conversion: Option<Box<dyn Fn(&str) -> String>>,
-        regex_replacer: Option<(Regex, String)>,
+        regex_replacer: Option<(SerializeRegex, String)>,
     ) -> Self {
         Match {
             id,
@@ -252,12 +252,12 @@ impl_rule_match!(Rule);
 impl_rule_match!(DisambiguationRule);
 
 pub enum POSFilter {
-    Regex(Regex),
+    Regex(SerializeRegex),
     String(String),
 }
 
 impl POSFilter {
-    pub fn regex(regex: Regex) -> Self {
+    pub fn regex(regex: SerializeRegex) -> Self {
         POSFilter::Regex(regex)
     }
 

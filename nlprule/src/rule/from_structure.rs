@@ -1,12 +1,15 @@
-use crate::composition::{
-    concrete::ChunkAtom,
-    concrete::{SpaceBeforeAtom, TextAtom, WordDataAtom},
-    AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier, TrueAtom,
-    WordDataMatcher,
-};
 use crate::filter::get_filter;
 use crate::rule;
 use crate::tokenizer::{Word, WordData};
+use crate::{
+    composition::{
+        concrete::ChunkAtom,
+        concrete::{SpaceBeforeAtom, TextAtom, WordDataAtom},
+        AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier,
+        TrueAtom, WordDataMatcher,
+    },
+    utils::SerializeRegex,
+};
 use crate::{structure, utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
@@ -78,7 +81,7 @@ fn parse_match_attribs(
 
     if text.is_some() || text_match_idx.is_some() {
         let matcher = if is_regex && text_match_idx.is_none() {
-            let regex = utils::new_regex(text.unwrap().trim(), true, case_sensitive);
+            let regex = SerializeRegex::new(text.unwrap().trim(), true, case_sensitive);
             Matcher::new_regex(regex, negate, inflected)
         } else {
             Matcher::new_string(
@@ -101,7 +104,7 @@ fn parse_match_attribs(
 
     if let Some(postag) = attribs.postag() {
         pos_matcher = Some(if is_postag_regexp {
-            let regex = utils::new_regex(&postag.trim(), true, true);
+            let regex = SerializeRegex::new(&postag.trim(), true, true);
             Matcher::new_regex(regex, negate_pos, true)
         } else {
             Matcher::new_string(
@@ -311,9 +314,10 @@ fn parse_suggestion(
                 };
 
                 let replacer = match (m.regexp_match, m.regexp_replace) {
-                    (Some(regex_match), Some(regex_replace)) => {
-                        Some((utils::new_regex(&regex_match, false, true), regex_replace))
-                    }
+                    (Some(regex_match), Some(regex_replace)) => Some((
+                        SerializeRegex::new(&regex_match, false, true),
+                        regex_replace,
+                    )),
                     _ => None,
                 };
 
@@ -610,7 +614,7 @@ impl From<structure::WordData> for WordData {
 
 fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> rule::POSFilter {
     match postag_regexp.as_deref() {
-        Some("yes") => rule::POSFilter::Regex(utils::new_regex(&postag, true, true)),
+        Some("yes") => rule::POSFilter::Regex(SerializeRegex::new(&postag, true, true)),
         Some(_) | None => rule::POSFilter::String(postag.to_string()),
     }
 }
