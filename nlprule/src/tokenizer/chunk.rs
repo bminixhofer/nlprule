@@ -1,177 +1,82 @@
 use super::IncompleteToken;
-use fasthash::{xx::Hash64, FastHash};
-use serde::Deserialize;
-use std::collections::HashMap;
-use tract_ndarray::prelude::*;
-use tract_onnx::prelude::*;
-
-#[derive(Deserialize, Debug)]
-struct JSONVocab(Vec<HashMap<String, String>>);
-
-fn get_shape(word: &str) -> String {
-    let mut shape = Vec::new();
-    let mut prev_char_shape: char;
-    let mut char_shape: char = ' ';
-    let mut consecutive_count = 0;
-
-    for c in word.chars() {
-        prev_char_shape = char_shape;
-
-        char_shape = if c.is_uppercase() {
-            'X'
-        } else if c.is_lowercase() {
-            'x'
-        } else if c.is_digit(10) {
-            'd'
-        } else {
-            c
-        };
-
-        consecutive_count = if char_shape == prev_char_shape {
-            consecutive_count + 1
-        } else {
-            0
-        };
-
-        if consecutive_count < 4 {
-            shape.push(char_shape)
-        }
-    }
-
-    shape.into_iter().collect()
-}
-
-#[allow(clippy::needless_collect)]
-fn tokenize(tokens: &[&str], vocab_lengths: &[u64]) -> Array2<i64> {
-    let mut input = ArrayBase::zeros((tokens.len(), 5));
-
-    for (i, token) in tokens.iter().enumerate() {
-        let lower = token.to_lowercase();
-
-        let ids = vec![
-            1 + token.chars().next().unwrap().is_uppercase() as u64,
-            1 + Hash64::hash_with_seed(&lower, 0) % (vocab_lengths[1] - 1),
-            1 + Hash64::hash_with_seed(get_shape(token), 0) % (vocab_lengths[2] - 1),
-            1 + Hash64::hash_with_seed(lower.chars().take(3).collect::<String>(), 0)
-                % (vocab_lengths[3] - 1),
-            1 + Hash64::hash_with_seed(
-                {
-                    let rev_chars = lower.chars().rev().take(3).collect::<Vec<_>>();
-                    rev_chars.into_iter().rev().collect::<String>()
-                },
-                0,
-            ) % (vocab_lengths[4] - 1),
-        ];
-
-        let ids: Vec<_> = ids.into_iter().map(|x| x as i64).collect();
-
-        input.slice_mut(s![i, ..]).assign(&Array::from(ids));
-    }
-
-    input
-}
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyList, PyModule},
+};
 
 pub struct Chunker {
-    labels: &'static [&'static str],
-    vocab_lengths: &'static [u64],
-    model: TypedModel,
+    module: Py<PyModule>,
+}
+
+impl Default for Chunker {
+    fn default() -> Self {
+        Chunker::new()
+    }
 }
 
 impl Chunker {
-    pub fn new() -> TractResult<Self> {
-        let labels = &[
-            "<pad>", "B-NP", "E-NP", "B-VP", "O", "S-NP", "B-ADVP", "I-VP", "I-NP", "B-PP",
-            "B-PRT", "B-ADJP", "I-ADJP", "B-SBAR", "I-ADVP", "I-SBAR", "B-INTJ", "I-INTJ", "B-LST",
-            "I-PP", "B-CONJP", "I-CONJP", "B-UCP",
-        ];
-
-        let model = onnx()
-            .model_for_path("../chunker/model.onnx")?
-            .with_input_fact(
-                0,
-                InferenceFact::dt_shape(i64::datum_type(), tvec!(1.into(), TDim::s(), 5.into())),
-            )?
-            .into_optimized()?;
-
-        Ok(Chunker {
-            labels,
-            vocab_lengths: &[3, 100_001, 1001, 10_001, 10_001],
-            model,
-        })
+    pub fn new() -> Self {
+        Chunker {
+            module: PyModule::from_code(
+                Python::acquire_gil().python(),
+                include_str!("./chunk.py"),
+                "chunk.py",
+                "chunk",
+            )
+            .map_err(|x| x.print(Python::acquire_gil().python()))
+            .unwrap()
+            .into(),
+        }
     }
 
-    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) -> TractResult<()> {
-        let texts: Vec<_> = tokens.iter().map(|x| x.word.text.as_str()).collect();
+    pub fn apply(&self, text: &str, tokens: &mut Vec<IncompleteToken>) -> PyResult<()> {
+        let guard = Python::acquire_gil();
+        let py = guard.python();
 
-        let input = tokenize(&texts, self.vocab_lengths);
-        let input = input.insert_axis(Axis(0));
+        let out: &PyList = self.module.as_ref(py).call1("chunk", (text,))?.downcast()?;
+        let mut chunks = vec![(String::new(), -1isize); tokens.len()];
 
-        let optimized_model = self
-            .model
-            .concretize_stream_dim(input.shape()[1])?
-            .optimize()?
-            .into_runnable()?;
+        for (token, token_chunk) in tokens.iter().zip(chunks.iter_mut()) {
+            for (i, chunk) in out.iter().enumerate() {
+                let chunk: &PyDict = chunk.downcast()?;
+                let chunk_char_span: (usize, usize) = chunk.get_item("range").unwrap().extract()?;
 
-        let output: ArrayD<f32> = (*optimized_model.run(tvec!(input.into()))?[0])
-            .clone()
-            .into_array()?;
-
-        let chunks = output
-            .axis_iter(Axis(1))
-            .map(|value| {
-                let argmax = value
-                    .iter()
-                    .enumerate()
-                    .fold(None, |m, (i, &x)| {
-                        m.map_or(Some((i, x)), |mv: (usize, f32)| {
-                            Some(if x > mv.1 { (i, x) } else { mv })
-                        })
-                    })
-                    .unwrap()
-                    .0;
-
-                self.labels[argmax]
-            })
-            .collect::<Vec<_>>();
-
-        let mut number_mask: Vec<_> = chunks.iter().map(|_| false).collect();
-
-        for i in 0..chunks.len() {
-            if chunks[i].ends_with("-NP") {
-                let mut end_idx = i;
-
-                for (j, chunk) in chunks.iter().enumerate().skip(i + 1) {
-                    if tokens[j].has_space_before && *chunk != "I-NP" && *chunk != "E-NP" {
-                        break;
-                    }
-
-                    end_idx = j;
-                }
-
-                let is_plural = (i..(end_idx + 1))
-                    .any(|idx| tokens[idx].word.tags.iter().any(|x| x.pos == "NNS"));
-
-                for switch in number_mask[i..(end_idx + 1)].iter_mut() {
-                    if is_plural {
-                        *switch = true;
-                    }
+                // if token span is inside chunk span
+                if token.char_span.0 >= chunk_char_span.0 && token.char_span.1 <= chunk_char_span.1
+                {
+                    token_chunk.0 = chunk.get_item("tag").unwrap().extract()?;
+                    token_chunk.1 = i as isize;
                 }
             }
         }
 
-        for i in 0..chunks.len() {
-            if chunks[i].ends_with("-NP") {
-                let number = if number_mask[i] { "plural" } else { "singular" };
+        for (i, chunk) in chunks.iter().enumerate() {
+            tokens[i].chunks = match chunk.0.as_str() {
+                "PP" => vec!["B-PP".into()],
+                "VP" => {
+                    if i == 0 || chunks[i - 1].1 != chunk.1 {
+                        vec!["B-VP".into()]
+                    } else {
+                        vec!["I-VP".into()]
+                    }
+                }
+                "NP-singular" | "NP-plural" => {
+                    let mut out = Vec::new();
 
-                tokens[i].chunks = match chunks[i] {
-                    "B-NP" => vec![format!("B-NP-{}", number)],
-                    "I-NP" => vec![format!("I-NP-{}", number)],
-                    "E-NP" => vec![format!("E-NP-{}", number)],
-                    "S-NP" => vec![format!("B-NP-{}", number), format!("E-NP-{}", number)],
-                    x => panic!("invalid chunk {}", x),
-                };
-            } else {
-                tokens[i].chunks.push(chunks[i].to_string());
+                    if i == 0 || chunks[i - 1].1 != chunk.1 {
+                        out.push(format!("B-{}", chunk.0));
+                    }
+                    if i == tokens.len() - 1 || chunks[i + 1].1 != chunk.1 {
+                        out.push(format!("E-{}", chunk.0));
+                    }
+
+                    if out.is_empty() {
+                        out.push(format!("I-{}", chunk.0))
+                    }
+
+                    out
+                }
+                _ => Vec::new(),
             }
         }
 

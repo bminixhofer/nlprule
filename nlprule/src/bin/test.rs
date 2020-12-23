@@ -43,7 +43,7 @@ fn main() {
         ),
         Arc::new(tagger),
         if std::env::var("RULE_LANG").unwrap() == "en" {
-            Some(Chunker::new().unwrap())
+            Some(Chunker::new())
         } else {
             None
         },

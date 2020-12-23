@@ -10,7 +10,12 @@ use nlprule::tokenizer::{tag::Tagger, TokenizerOptions};
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
 )]
 struct Opts {
-    ids: Vec<String>,
+    #[clap(long)]
+    ids: Option<String>,
+    #[clap(long)]
+    ignore_ids: Option<String>,
+    #[clap(long)]
+    stop_at_error: bool,
 }
 
 fn main() {
@@ -42,13 +47,20 @@ fn main() {
         ),
         Arc::new(tagger),
         if std::env::var("RULE_LANG").unwrap() == "en" {
-            Some(Chunker::new().unwrap())
+            Some(Chunker::new())
         } else {
             None
         },
         TokenizerOptions {
             allow_errors: true,
-            ids: opts.ids,
+            ids: opts
+                .ids
+                .map(|x| x.split(' ').map(|x| x.to_string()).collect())
+                .unwrap_or_else(Vec::new),
+            ignore_ids: opts
+                .ignore_ids
+                .map(|x| x.split(' ').map(|x| x.to_string()).collect())
+                .unwrap_or_else(Vec::new),
         },
     )
     .unwrap();
@@ -62,7 +74,7 @@ fn main() {
     for rule in rules {
         if rule.test(&tokenizer) {
             passes += 1;
-        } else {
+        } else if opts.stop_at_error {
             break;
         }
     }

@@ -159,6 +159,7 @@ pub struct Tokenizer {
 pub struct TokenizerOptions {
     pub allow_errors: bool,
     pub ids: Vec<String>,
+    pub ignore_ids: Vec<String>,
 }
 
 impl Default for TokenizerOptions {
@@ -166,6 +167,7 @@ impl Default for TokenizerOptions {
         TokenizerOptions {
             allow_errors: false,
             ids: Vec::new(),
+            ignore_ids: Vec::new(),
         }
     }
 }
@@ -185,7 +187,9 @@ impl Tokenizer {
             .filter_map(|x| match x {
                 Ok((rule_structure, id)) => match DisambiguationRule::try_from(rule_structure) {
                     Ok(mut rule) => {
-                        if error.is_none() && (options.ids.is_empty() || options.ids.contains(&id))
+                        if error.is_none()
+                            && (options.ids.is_empty() || options.ids.contains(&id))
+                            && !options.ignore_ids.contains(&id)
                         {
                             rule.set_id(id);
                             Some(rule)
@@ -303,7 +307,7 @@ impl Tokenizer {
         tokens[last_idx].is_sentence_end = true;
 
         if let Some(chunker) = &self.chunker {
-            chunker.apply(&mut tokens).unwrap();
+            chunker.apply(text, &mut tokens).unwrap();
         }
 
         tokens
