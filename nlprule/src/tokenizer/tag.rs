@@ -12,14 +12,17 @@ pub struct Tagger {
 }
 
 impl Tagger {
-    pub fn from_dumps(paths: &[&str], remove_paths: &[&str]) -> std::io::Result<Self> {
+    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
+        paths: &[S1],
+        remove_paths: &[S2],
+    ) -> std::io::Result<Self> {
         let mut tags = HashMap::new();
         let mut groups = HashMap::new();
 
         let mut disallowed: Vec<String> = Vec::new();
 
         for path in remove_paths {
-            let file = File::open(path)?;
+            let file = File::open(path.as_ref())?;
             let reader = std::io::BufReader::new(file);
 
             for line in reader.lines() {
@@ -33,7 +36,7 @@ impl Tagger {
         }
 
         for path in paths {
-            let file = File::open(path)?;
+            let file = File::open(path.as_ref())?;
             let reader = std::io::BufReader::new(file);
 
             for line in reader.lines() {

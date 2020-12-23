@@ -150,15 +150,20 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
     finalized
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
+    #[serde(skip)]
     chunker: Option<Chunker>,
     tagger: Arc<Tagger>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct TokenizerOptions {
     pub allow_errors: bool,
+    #[serde(default)]
     pub ids: Vec<String>,
+    #[serde(default)]
     pub ignore_ids: Vec<String>,
 }
 

@@ -20,7 +20,6 @@ use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
     path::Path,
-    sync::Arc,
 };
 
 pub mod from_structure;
@@ -753,8 +752,10 @@ impl Rule {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct RulesOptions {
     pub allow_errors: bool,
+    #[serde(default)]
     pub ids: Vec<String>,
 }
 
@@ -767,17 +768,13 @@ impl Default for RulesOptions {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Rules {
-    tokenizer: Arc<Tokenizer>,
     rules: Vec<Rule>,
 }
 
 impl Rules {
-    pub fn from_xml<P: AsRef<Path>>(
-        path: P,
-        tokenizer: Arc<Tokenizer>,
-        options: RulesOptions,
-    ) -> Self {
+    pub fn from_xml<P: AsRef<Path>>(path: P, options: RulesOptions) -> Self {
         let rules = read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
 
@@ -812,14 +809,10 @@ impl Rules {
             warn!("Errors constructing Rules: {:#?}", &errors);
         }
 
-        Rules { rules, tokenizer }
+        Rules { rules }
     }
 
     pub fn rules(&self) -> &Vec<Rule> {
         &self.rules
-    }
-
-    pub fn tokenizer(&self) -> &Tokenizer {
-        &self.tokenizer
     }
 }

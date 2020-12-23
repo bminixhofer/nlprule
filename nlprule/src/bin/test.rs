@@ -1,9 +1,6 @@
 use clap::Clap;
-use nlprule::{
-    rule::{Rules, RulesOptions},
-    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
-};
-use std::sync::Arc;
+use nlprule::{rule::Rules, tokenizer::Tokenizer};
+use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]
 #[clap(
@@ -11,62 +8,29 @@ use std::sync::Arc;
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
 )]
 struct Opts {
-    ids: Vec<String>,
+    #[clap(long, short)]
+    tokenizer: String,
+    #[clap(long, short)]
+    rules: String,
 }
 
 fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let tagger = Tagger::from_dumps(
-        &[
-            &format!(
-                "data/dumps/{}/output.dump",
-                std::env::var("RULE_LANG").unwrap()
-            ),
-            &format!(
-                "data/dumps/{}/added.txt",
-                std::env::var("RULE_LANG").unwrap()
-            ),
-        ],
-        &[&format!(
-            "data/dumps/{}/removed.txt",
-            std::env::var("RULE_LANG").unwrap()
-        )],
-    )
-    .unwrap();
+    let reader = BufReader::new(File::open(opts.tokenizer).unwrap());
+    let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
 
-    let tokenizer = Tokenizer::from_xml(
-        format!(
-            "data/disambiguation.{}.canonic.xml",
-            std::env::var("RULE_LANG").unwrap()
-        ),
-        Arc::new(tagger),
-        if std::env::var("RULE_LANG").unwrap() == "en" {
-            Some(Chunker::new())
-        } else {
-            None
-        },
-        TokenizerOptions::default(),
-    )
-    .unwrap();
-    let rules_container = Rules::from_xml(
-        format!(
-            "data/grammar.{}.canonic.xml",
-            std::env::var("RULE_LANG").unwrap()
-        ),
-        Arc::new(tokenizer),
-        RulesOptions {
-            allow_errors: true,
-            ids: opts.ids,
-        },
-    );
+    let reader = BufReader::new(File::open(opts.rules).unwrap());
+    let rules_container: Rules = bincode::deserialize_from(reader).unwrap();
     let rules = rules_container.rules();
+
     println!("Runnable rules: {}", rules.len());
 
     println!(
         "Rules passing tests: {}",
-        rules.iter().fold(0, |count, rule| count
-            + rule.test(rules_container.tokenizer()) as usize)
+        rules
+            .iter()
+            .fold(0, |count, rule| count + rule.test(&tokenizer) as usize)
     );
 }
