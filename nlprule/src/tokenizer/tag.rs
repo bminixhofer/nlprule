@@ -1,5 +1,4 @@
 use super::WordData;
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -78,11 +77,7 @@ impl Tagger {
         let mut tags = self.tags.get(word).cloned().unwrap_or_else(Vec::new);
         let lower = word.to_lowercase();
 
-        lazy_static! {
-            static ref IS_ENGLISH: bool = std::env::var("RULE_LANG").unwrap() == "en";
-        }
-
-        if (add_lower || (add_lower_if_empty && tags.is_empty()) || *IS_ENGLISH)
+        if (add_lower || (add_lower_if_empty && tags.is_empty()))
             && (word != lower
                 && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word)))
         {
@@ -92,15 +87,16 @@ impl Tagger {
         tags
     }
 
-    pub fn get_tags(&self, word: &str, add_lower: bool) -> Vec<WordData> {
+    pub fn get_tags(
+        &self,
+        word: &str,
+        add_lower: bool,
+        use_compound_split_heuristic: bool,
+    ) -> Vec<WordData> {
         let mut tags = self.get_strict_tags(word, add_lower, true);
 
-        lazy_static! {
-            static ref IS_GERMAN: bool = std::env::var("RULE_LANG").unwrap() == "de";
-        }
-
         // compound splitting heuristic, seems to work reasonably well
-        if *IS_GERMAN && tags.is_empty() {
+        if use_compound_split_heuristic && tags.is_empty() {
             let n_chars = word.chars().count() as isize;
 
             if n_chars >= 7 {

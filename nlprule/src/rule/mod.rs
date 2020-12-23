@@ -12,7 +12,6 @@ use crate::{
     tokenizer::{finalize, IncompleteToken, Token, Word, WordData},
 };
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use log::{error, info, warn};
 use onig::Captures;
 use serde::{Deserialize, Serialize};
@@ -330,7 +329,7 @@ pub enum Disambiguation {
 }
 
 impl Disambiguation {
-    fn apply(&self, groups: Vec<Vec<&mut IncompleteToken>>) {
+    fn apply(&self, groups: Vec<Vec<&mut IncompleteToken>>, retain_last: bool) {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
@@ -365,14 +364,9 @@ impl Disambiguation {
 
                                     token.word.tags.retain(|x| x.pos == limit.pos);
 
-                                    lazy_static! {
-                                        static ref IS_ENGLISH: bool =
-                                            std::env::var("RULE_LANG").unwrap() == "en";
-                                    }
-
                                     if token.word.tags.is_empty() {
                                         token.word.tags.push(WordData::new(
-                                            if *IS_ENGLISH {
+                                            if retain_last {
                                                 last
                                             } else {
                                                 token.word.text.to_string()
@@ -580,7 +574,8 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(groups);
+            self.disambiguations
+                .apply(groups, tokenizer.options().retain_last);
         }
 
         tokens

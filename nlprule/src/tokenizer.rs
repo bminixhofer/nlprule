@@ -162,6 +162,9 @@ pub struct Tokenizer {
 #[derive(Serialize, Deserialize)]
 pub struct TokenizerOptions {
     pub allow_errors: bool,
+    pub retain_last: bool,
+    pub use_compound_split_heuristic: bool,
+    pub always_add_lower_tags: bool,
     #[serde(default)]
     pub ids: Vec<String>,
     #[serde(default)]
@@ -174,6 +177,9 @@ impl Default for TokenizerOptions {
     fn default() -> Self {
         TokenizerOptions {
             allow_errors: false,
+            retain_last: false,
+            use_compound_split_heuristic: false,
+            always_add_lower_tags: false,
             ids: Vec::new(),
             ignore_ids: Vec::new(),
             known_failures: Vec::new(),
@@ -305,7 +311,11 @@ impl Tokenizer {
                 IncompleteToken {
                     word: Word::new_with_tags(
                         trimmed.to_string(),
-                        self.tagger.get_tags(trimmed, is_sentence_start),
+                        self.tagger.get_tags(
+                            trimmed,
+                            is_sentence_start || self.options.always_add_lower_tags,
+                            self.options.use_compound_split_heuristic,
+                        ),
                     ),
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),

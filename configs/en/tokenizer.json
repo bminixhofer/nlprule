@@ -1,5 +1,8 @@
 {
     "allow_errors": false,
+    "retain_last": true,
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
     "known_failures": [
         "NUMBER_YEAR_OLD.0:3",
         "NUMBER_YEAR_OLD.1:3",
