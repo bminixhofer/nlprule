@@ -1,6 +1,6 @@
 use clap::Clap;
-use nlprule::tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions};
-use std::sync::Arc;
+use nlprule::tokenizer::Tokenizer;
+use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]
 #[clap(
@@ -9,47 +9,16 @@ use std::sync::Arc;
 )]
 struct Opts {
     text: String,
+    #[clap(long, short)]
+    tokenizer: String,
 }
 
 fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let tagger = Tagger::from_dumps(
-        &[
-            &format!(
-                "data/dumps/{}/output.dump",
-                std::env::var("RULE_LANG").unwrap()
-            ),
-            &format!(
-                "data/dumps/{}/added.txt",
-                std::env::var("RULE_LANG").unwrap()
-            ),
-        ],
-        &[&format!(
-            "data/dumps/{}/removed.txt",
-            std::env::var("RULE_LANG").unwrap()
-        )],
-    )
-    .unwrap();
-
-    let tokenizer = Tokenizer::from_xml(
-        format!(
-            "data/disambiguation.{}.canonic.xml",
-            std::env::var("RULE_LANG").unwrap()
-        ),
-        Arc::new(tagger),
-        if std::env::var("RULE_LANG").unwrap() == "en" {
-            Some(Chunker::new())
-        } else {
-            None
-        },
-        TokenizerOptions {
-            allow_errors: true,
-            ..TokenizerOptions::default()
-        },
-    )
-    .unwrap();
+    let reader = BufReader::new(File::open(opts.tokenizer).unwrap());
+    let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
 
     println!(
         "{:#?}",

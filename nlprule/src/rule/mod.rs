@@ -13,7 +13,7 @@ use crate::{
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use log::{info, warn};
+use log::{error, info, warn};
 use onig::Captures;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -589,7 +589,7 @@ impl DisambiguationRule {
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
-        for test in &self.tests {
+        for (i, test) in self.tests.iter().enumerate() {
             let text = match test {
                 DisambiguationTest::Unchanged(x) => x.as_str(),
                 DisambiguationTest::Changed(x) => x.text.as_str(),
@@ -622,13 +622,23 @@ impl DisambiguationRule {
             };
 
             if !pass {
-                warn!(
+                let error_str = format!(
                     "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
                     self.id,
                     test,
                     tokens_before.into_iter().collect::<Vec<_>>(),
                     tokens_after.into_iter().collect::<Vec<_>>(),
                 );
+
+                if tokenizer
+                    .options()
+                    .known_failures
+                    .contains(&format!("{}:{}", self.id, i))
+                {
+                    warn!("{}", error_str)
+                } else {
+                    error!("{}", error_str)
+                }
             }
 
             passes.push(pass);
@@ -722,7 +732,7 @@ impl Rule {
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
-        for test in &self.tests {
+        for test in self.tests.iter() {
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens);
@@ -757,6 +767,8 @@ pub struct RulesOptions {
     pub allow_errors: bool,
     #[serde(default)]
     pub ids: Vec<String>,
+    #[serde(default)]
+    pub ignore_ids: Vec<String>,
 }
 
 impl Default for RulesOptions {
@@ -764,6 +776,7 @@ impl Default for RulesOptions {
         RulesOptions {
             allow_errors: true,
             ids: Vec::new(),
+            ignore_ids: Vec::new(),
         }
     }
 }
@@ -783,7 +796,9 @@ impl Rules {
             .filter_map(|x| match x {
                 Ok((rule_structure, id)) => match Rule::try_from(rule_structure) {
                     Ok(mut rule) => {
-                        if options.ids.is_empty() || options.ids.contains(&id) {
+                        if (options.ids.is_empty() || options.ids.contains(&id))
+                            && !options.ignore_ids.contains(&id)
+                        {
                             rule.set_id(id);
                             Some(rule)
                         } else {

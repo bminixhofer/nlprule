@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use log::warn;
 use onig::Regex;
+use pyo3::Python;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, convert::TryFrom, error::Error, path::Path, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
@@ -8,7 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub mod chunk;
 pub mod tag;
 
-use chunk::Chunker;
+use chunk::SerializeChunker;
 use tag::Tagger;
 
 use crate::{rule::DisambiguationRule, structure::read_disambiguation_rules};
@@ -153,9 +154,9 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
 #[derive(Serialize, Deserialize)]
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
-    #[serde(skip)]
-    chunker: Option<Chunker>,
+    chunker: Option<SerializeChunker>,
     tagger: Arc<Tagger>,
+    options: TokenizerOptions,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -165,6 +166,8 @@ pub struct TokenizerOptions {
     pub ids: Vec<String>,
     #[serde(default)]
     pub ignore_ids: Vec<String>,
+    #[serde(default)]
+    pub known_failures: Vec<String>,
 }
 
 impl Default for TokenizerOptions {
@@ -173,6 +176,7 @@ impl Default for TokenizerOptions {
             allow_errors: false,
             ids: Vec::new(),
             ignore_ids: Vec::new(),
+            known_failures: Vec::new(),
         }
     }
 }
@@ -181,7 +185,7 @@ impl Tokenizer {
     pub fn from_xml<P: AsRef<Path>>(
         path: P,
         tagger: Arc<Tagger>,
-        chunker: Option<Chunker>,
+        chunker: Option<SerializeChunker>,
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn Error>> {
         let rules = read_disambiguation_rules(path);
@@ -226,6 +230,7 @@ impl Tokenizer {
             tagger,
             chunker,
             rules,
+            options,
         })
     }
 
@@ -237,8 +242,12 @@ impl Tokenizer {
         &self.tagger
     }
 
-    pub fn chunker(&self) -> &Option<Chunker> {
+    pub fn chunker(&self) -> &Option<SerializeChunker> {
         &self.chunker
+    }
+
+    pub fn options(&self) -> &TokenizerOptions {
+        &self.options
     }
 
     pub fn disambiguate_up_to_id(
@@ -312,7 +321,10 @@ impl Tokenizer {
         tokens[last_idx].is_sentence_end = true;
 
         if let Some(chunker) = &self.chunker {
-            chunker.apply(text, &mut tokens).unwrap();
+            chunker
+                .apply(text, &mut tokens)
+                .map_err(|x| x.print(Python::acquire_gil().python()))
+                .unwrap();
         }
 
         tokens

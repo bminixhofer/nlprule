@@ -3,6 +3,30 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList, PyModule},
 };
+use serde::{Deserialize, Serialize};
+use std::ops::Deref;
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializeChunker {
+    #[serde(skip)]
+    chunker: Chunker,
+}
+
+impl Default for SerializeChunker {
+    fn default() -> Self {
+        SerializeChunker {
+            chunker: Chunker::default(),
+        }
+    }
+}
+
+impl Deref for SerializeChunker {
+    type Target = Chunker;
+
+    fn deref(&self) -> &Self::Target {
+        &self.chunker
+    }
+}
 
 pub struct Chunker {
     module: Py<PyModule>,

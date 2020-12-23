@@ -1,7 +1,7 @@
 use clap::Clap;
 use nlprule::{
     rule::Rules,
-    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer},
+    tokenizer::{chunk::SerializeChunker, tag::Tagger, Tokenizer},
 };
 use std::{fs::read_to_string, io::BufWriter};
 use std::{fs::File, sync::Arc};
@@ -37,7 +37,7 @@ fn main() {
         opts.disambiguation_path,
         Arc::new(tagger),
         if opts.use_chunker {
-            Some(Chunker::default())
+            Some(SerializeChunker::default())
         } else {
             None
         },
