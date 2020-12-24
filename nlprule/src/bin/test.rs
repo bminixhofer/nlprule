@@ -26,13 +26,10 @@ fn main() {
     let rules = rules_container.rules();
 
     println!("Runnable rules: {}", rules.len());
-
-    for _ in 0..10 {
-        println!(
-            "Rules passing tests: {}",
-            rules
-                .iter()
-                .fold(0, |count, rule| count + rule.test(&tokenizer) as usize)
-        );
-    }
+    println!(
+        "Rules passing tests: {}",
+        rules
+            .iter()
+            .fold(0, |count, rule| count + rule.test(&tokenizer) as usize)
+    );
 }

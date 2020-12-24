@@ -23,7 +23,7 @@ fn main() {
     let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
     let rules = tokenizer.rules();
 
-    println!("Last ID: {}", rules[rules.len() - 1].id);
+    println!("Last ID: {}", rules[rules.len() - 1].id());
     println!("Runnable rules: {}", rules.len());
 
     let mut passes = 0;

@@ -1,3 +1,4 @@
+use crate::tokenizer::{finalize, IncompleteToken, Token, Word, WordData};
 use crate::utils::{self, SerializeRegex};
 use crate::{
     composition::Atom,
@@ -7,21 +8,14 @@ use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
 };
-use crate::{
-    structure::read_rules,
-    tokenizer::{finalize, IncompleteToken, Token, Word, WordData},
-};
 use itertools::Itertools;
 use log::{error, info, warn};
 use onig::Captures;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    convert::TryFrom,
-    path::Path,
-};
+use std::collections::HashSet;
 
-pub mod from_structure;
+#[cfg(feature = "compile")]
+use crate::from_structure;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Suggestion {
@@ -41,8 +35,8 @@ impl std::cmp::PartialEq for Suggestion {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Test {
-    text: String,
-    suggestion: Option<Suggestion>,
+    pub(crate) text: String,
+    pub(crate) suggestion: Option<Suggestion>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -100,7 +94,7 @@ impl Match {
         }
     }
 
-    fn new(
+    pub fn new(
         id: usize,
         conversion: Conversion,
         regex_replacer: Option<(SerializeRegex, String)>,
@@ -125,7 +119,7 @@ pub enum SuggesterPart {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Suggester {
-    parts: Vec<SuggesterPart>,
+    pub(crate) parts: Vec<SuggesterPart>,
 }
 
 impl Suggester {
@@ -472,10 +466,10 @@ impl Disambiguation {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DisambiguationChange {
-    text: String,
-    char_span: (usize, usize),
-    before: Word,
-    after: Word,
+    pub(crate) text: String,
+    pub(crate) char_span: (usize, usize),
+    pub(crate) before: Word,
+    pub(crate) after: Word,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -486,17 +480,21 @@ pub enum DisambiguationTest {
 
 #[derive(Serialize, Deserialize)]
 pub struct DisambiguationRule {
-    pub id: String,
-    composition: Composition,
-    antipatterns: Vec<Composition>,
-    disambiguations: Disambiguation,
-    filter: Option<Filter>,
-    start: usize,
-    end: usize,
-    tests: Vec<DisambiguationTest>,
+    pub(crate) id: String,
+    pub(crate) composition: Composition,
+    pub(crate) antipatterns: Vec<Composition>,
+    pub(crate) disambiguations: Disambiguation,
+    pub(crate) filter: Option<Filter>,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) tests: Vec<DisambiguationTest>,
 }
 
 impl DisambiguationRule {
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
     pub fn set_id(&mut self, id: String) {
         self.id = id;
     }
@@ -645,16 +643,20 @@ impl DisambiguationRule {
 
 #[derive(Serialize, Deserialize)]
 pub struct Rule {
-    pub id: String,
-    composition: Composition,
-    antipatterns: Vec<Composition>,
-    tests: Vec<Test>,
-    suggesters: Vec<Suggester>,
-    start: usize,
-    end: usize,
+    pub(crate) id: String,
+    pub(crate) composition: Composition,
+    pub(crate) antipatterns: Vec<Composition>,
+    pub(crate) tests: Vec<Test>,
+    pub(crate) suggesters: Vec<Suggester>,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 impl Rule {
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
     pub fn set_id(&mut self, id: String) {
         self.id = id;
     }
@@ -780,10 +782,13 @@ impl Default for RulesOptions {
 pub struct Rules {
     rules: Vec<Rule>,
 }
-
 impl Rules {
-    pub fn from_xml<P: AsRef<Path>>(path: P, options: RulesOptions) -> Self {
-        let rules = read_rules(path);
+    #[cfg(feature = "compile")]
+    pub fn from_xml<P: AsRef<std::path::Path>>(path: P, options: RulesOptions) -> Self {
+        use std::collections::HashMap;
+        use std::convert::TryFrom;
+
+        let rules = from_structure::structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
 
         let rules: Vec<_> = rules

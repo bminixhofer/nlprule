@@ -1,9 +1,8 @@
 use lazy_static::lazy_static;
-use log::warn;
 use onig::Regex;
 use pyo3::Python;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::TryFrom, error::Error, path::Path, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
@@ -12,7 +11,7 @@ pub mod tag;
 use chunk::SerializeChunker;
 use tag::Tagger;
 
-use crate::{rule::DisambiguationRule, structure::read_disambiguation_rules};
+use crate::rule::DisambiguationRule;
 
 // see https://stackoverflow.com/a/40296745
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
@@ -188,13 +187,17 @@ impl Default for TokenizerOptions {
 }
 
 impl Tokenizer {
-    pub fn from_xml<P: AsRef<Path>>(
+    #[cfg(feature = "compile")]
+    pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
         tagger: Arc<Tagger>,
         chunker: Option<SerializeChunker>,
         options: TokenizerOptions,
-    ) -> Result<Self, Box<dyn Error>> {
-        let rules = read_disambiguation_rules(path);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        use log::warn;
+        use std::convert::TryFrom;
+
+        let rules = crate::from_structure::structure::read_disambiguation_rules(path);
         let mut error = None;
 
         let rules: Vec<_> = rules

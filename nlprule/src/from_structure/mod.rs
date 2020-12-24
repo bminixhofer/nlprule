@@ -10,10 +10,12 @@ use crate::{
     },
     utils::SerializeRegex,
 };
-use crate::{structure, utils, Error};
+use crate::{utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
 use std::convert::TryFrom;
+
+pub mod structure;
 
 // TODO: should be an option in config OR restricted to one sentence
 fn max_matches() -> usize {
@@ -601,7 +603,7 @@ fn parse_tag_form(form: &str) -> Word {
         })
         .collect();
 
-    rule::Word::new_with_tags(word, tags)
+    Word::new_with_tags(word, tags)
 }
 
 impl From<structure::WordData> for WordData {
