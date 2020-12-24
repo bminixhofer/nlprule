@@ -1,23 +1,24 @@
 use super::WordData;
+use fst::{raw::Fst, Map};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 
 #[derive(Serialize, Deserialize)]
 pub struct Tagger {
-    tags: HashMap<String, Vec<WordData>>,
-    groups: HashMap<String, Vec<String>>,
+    tags: HashMap<u32, HashMap<u32, Vec<u16>>>,
+    tag_store: Vec<u8>,
+    word_store: Vec<u8>,
+    groups: HashMap<u32, Vec<u32>>,
 }
 
 impl Tagger {
-    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
+    fn get_lines<S1: AsRef<str>, S2: AsRef<str>>(
         paths: &[S1],
         remove_paths: &[S2],
-    ) -> std::io::Result<Self> {
-        let mut tags = HashMap::new();
-        let mut groups = HashMap::new();
-
+    ) -> std::io::Result<Vec<(String, String, String)>> {
+        let mut output = Vec::new();
         let mut disallowed: Vec<String> = Vec::new();
 
         for path in remove_paths {
@@ -54,18 +55,96 @@ impl Tagger {
                 let inflection = parts[1].to_string();
                 let tag = parts[2].to_string();
 
-                let group = groups.entry(inflection.clone()).or_insert_with(Vec::new);
-                if !group.contains(&word) {
-                    group.push(word.clone());
-                }
-
-                tags.entry(word)
-                    .or_insert_with(Vec::new)
-                    .push(WordData::new(inflection, tag));
+                output.push((word, inflection, tag))
             }
         }
 
-        Ok(Tagger { tags, groups })
+        Ok(output)
+    }
+
+    fn map_from_set(set: HashSet<&String>) -> Map<Vec<u8>> {
+        let mut items: Vec<_> = set.into_iter().collect();
+        items.sort_unstable();
+        Map::from_iter(
+            items
+                .iter()
+                .enumerate()
+                .map(|(key, value)| (value, key as u64)),
+        )
+        .unwrap()
+    }
+
+    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
+        paths: &[S1],
+        remove_paths: &[S2],
+    ) -> std::io::Result<Self> {
+        let mut tags = HashMap::new();
+        let mut groups = HashMap::new();
+
+        let mut tag_store = HashSet::new();
+        let mut word_store = HashSet::new();
+
+        let lines = Tagger::get_lines(paths, remove_paths)?;
+
+        for (word, inflection, tag) in lines.iter() {
+            word_store.insert(word);
+            word_store.insert(inflection);
+            tag_store.insert(tag);
+        }
+
+        let word_store = Tagger::map_from_set(word_store);
+        let tag_store = Tagger::map_from_set(tag_store);
+
+        for (word, inflection, tag) in lines.iter() {
+            let word = word.to_string();
+
+            let word_id = word_store.get(word).unwrap();
+            let inflection_id = word_store.get(inflection).unwrap();
+            let tag_id = tag_store.get(tag).unwrap();
+
+            let group = groups.entry(inflection_id as u32).or_insert_with(Vec::new);
+            if !group.contains(&(word_id as u32)) {
+                group.push(word_id as u32);
+            }
+
+            tags.entry(word_id as u32)
+                .or_insert_with(HashMap::new)
+                .entry(inflection_id as u32)
+                .or_insert_with(Vec::new)
+                .push(tag_id as u16);
+        }
+
+        Ok(Tagger {
+            tags,
+            groups,
+            word_store: word_store.as_fst().as_bytes().to_vec(),
+            tag_store: tag_store.as_fst().as_bytes().to_vec(),
+        })
+    }
+
+    fn get_raw(&self, word: &str) -> Vec<WordData> {
+        let tag_store = Fst::new(&self.tag_store).unwrap();
+        let word_store = Fst::new(&self.word_store).unwrap();
+
+        if let Some(map) = word_store
+            .get(word)
+            .and_then(|x| self.tags.get(&(x.value() as u32)))
+        {
+            let mut output = Vec::new();
+
+            for (key, value) in map.iter() {
+                for tag_id in value {
+                    output.push(WordData::new(
+                        String::from_utf8(word_store.get_key(*key as u64).unwrap()).unwrap(),
+                        String::from_utf8(tag_store.get_key(*tag_id as u64).unwrap()).unwrap(),
+                    ))
+                }
+            }
+
+            output
+        } else {
+            Vec::new()
+        }
     }
 
     fn get_strict_tags(
@@ -74,14 +153,14 @@ impl Tagger {
         add_lower: bool,
         add_lower_if_empty: bool,
     ) -> Vec<WordData> {
-        let mut tags = self.tags.get(word).cloned().unwrap_or_else(Vec::new);
+        let mut tags = self.get_raw(word);
         let lower = word.to_lowercase();
 
         if (add_lower || (add_lower_if_empty && tags.is_empty()))
             && (word != lower
                 && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word)))
         {
-            tags.extend(self.tags.get(&lower).cloned().unwrap_or_else(Vec::new));
+            tags.extend(self.get_raw(&lower));
         }
 
         tags
@@ -132,10 +211,17 @@ impl Tagger {
         tags
     }
 
-    pub fn get_group_members(&self, word: &str) -> Vec<&str> {
-        self.groups
+    pub fn get_group_members(&self, word: &str) -> Vec<String> {
+        let word_store = Fst::new(&self.word_store).unwrap();
+
+        word_store
             .get(word)
-            .map(|vec| vec.iter().map(|x| x.as_str()).collect())
+            .and_then(|x| self.groups.get(&(x.value() as u32)))
+            .map(|vec| {
+                vec.iter()
+                    .map(|x| String::from_utf8(word_store.get_key(*x as u64).unwrap()).unwrap())
+                    .collect()
+            })
             .unwrap_or_else(Vec::new)
     }
 }
