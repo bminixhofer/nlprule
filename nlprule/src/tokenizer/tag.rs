@@ -1,5 +1,5 @@
 use super::WordData;
-use fst::{raw::Fst, Map};
+use bimap::BiMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -8,8 +8,8 @@ use std::io::BufRead;
 #[derive(Serialize, Deserialize)]
 pub struct Tagger {
     tags: HashMap<u32, HashMap<u32, Vec<u16>>>,
-    tag_store: Vec<u8>,
-    word_store: Vec<u8>,
+    tag_store: BiMap<String, u16>,
+    word_store: BiMap<String, u32>,
     groups: HashMap<u32, Vec<u32>>,
 }
 
@@ -62,18 +62,6 @@ impl Tagger {
         Ok(output)
     }
 
-    fn map_from_set(set: HashSet<&String>) -> Map<Vec<u8>> {
-        let mut items: Vec<_> = set.into_iter().collect();
-        items.sort_unstable();
-        Map::from_iter(
-            items
-                .iter()
-                .enumerate()
-                .map(|(key, value)| (value, key as u64)),
-        )
-        .unwrap()
-    }
-
     pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
         paths: &[S1],
         remove_paths: &[S2],
@@ -92,51 +80,56 @@ impl Tagger {
             tag_store.insert(tag);
         }
 
-        let word_store = Tagger::map_from_set(word_store);
-        let tag_store = Tagger::map_from_set(tag_store);
+        let word_store: BiMap<_, _> = word_store
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (x.to_string(), i as u32))
+            .collect();
+        let tag_store: BiMap<_, _> = tag_store
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (x.to_string(), i as u16))
+            .collect();
 
         for (word, inflection, tag) in lines.iter() {
-            let word = word.to_string();
+            let word_id = word_store.get_by_left(word).unwrap();
+            let inflection_id = word_store.get_by_left(inflection).unwrap();
+            let tag_id = tag_store.get_by_left(tag).unwrap();
 
-            let word_id = word_store.get(word).unwrap();
-            let inflection_id = word_store.get(inflection).unwrap();
-            let tag_id = tag_store.get(tag).unwrap();
-
-            let group = groups.entry(inflection_id as u32).or_insert_with(Vec::new);
-            if !group.contains(&(word_id as u32)) {
-                group.push(word_id as u32);
+            let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
+            if !group.contains(word_id) {
+                group.push(*word_id);
             }
 
-            tags.entry(word_id as u32)
+            tags.entry(*word_id)
                 .or_insert_with(HashMap::new)
-                .entry(inflection_id as u32)
+                .entry(*inflection_id)
                 .or_insert_with(Vec::new)
-                .push(tag_id as u16);
+                .push(*tag_id);
         }
 
         Ok(Tagger {
             tags,
             groups,
-            word_store: word_store.as_fst().as_bytes().to_vec(),
-            tag_store: tag_store.as_fst().as_bytes().to_vec(),
+            word_store,
+            tag_store,
         })
     }
 
-    fn get_raw(&self, word: &str) -> Vec<WordData> {
-        let tag_store = Fst::new(&self.tag_store).unwrap();
-        let word_store = Fst::new(&self.word_store).unwrap();
-
-        if let Some(map) = word_store
-            .get(word)
-            .and_then(|x| self.tags.get(&(x.value() as u32)))
+    #[allow(clippy::clippy::ptr_arg)]
+    fn get_raw(&self, word: &String) -> Vec<WordData> {
+        if let Some(map) = self
+            .word_store
+            .get_by_left(word)
+            .and_then(|x| self.tags.get(x))
         {
             let mut output = Vec::new();
 
             for (key, value) in map.iter() {
                 for tag_id in value {
                     output.push(WordData::new(
-                        String::from_utf8(word_store.get_key(*key as u64).unwrap()).unwrap(),
-                        String::from_utf8(tag_store.get_key(*tag_id as u64).unwrap()).unwrap(),
+                        self.word_store.get_by_right(key).unwrap().to_string(),
+                        self.tag_store.get_by_right(tag_id).unwrap().to_string(),
                     ))
                 }
             }
@@ -153,7 +146,7 @@ impl Tagger {
         add_lower: bool,
         add_lower_if_empty: bool,
     ) -> Vec<WordData> {
-        let mut tags = self.get_raw(word);
+        let mut tags = self.get_raw(&word.to_string());
         let lower = word.to_lowercase();
 
         if (add_lower || (add_lower_if_empty && tags.is_empty()))
@@ -211,15 +204,14 @@ impl Tagger {
         tags
     }
 
-    pub fn get_group_members(&self, word: &str) -> Vec<String> {
-        let word_store = Fst::new(&self.word_store).unwrap();
-
-        word_store
-            .get(word)
-            .and_then(|x| self.groups.get(&(x.value() as u32)))
+    #[allow(clippy::clippy::ptr_arg)]
+    pub fn get_group_members(&self, word: &String) -> Vec<&str> {
+        self.word_store
+            .get_by_left(word)
+            .and_then(|x| self.groups.get(x))
             .map(|vec| {
                 vec.iter()
-                    .map(|x| String::from_utf8(word_store.get_key(*x as u64).unwrap()).unwrap())
+                    .map(|x| self.word_store.get_by_right(x).unwrap().as_str())
                     .collect()
             })
             .unwrap_or_else(Vec::new)
