@@ -759,7 +759,7 @@ impl Rule {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RulesOptions {
     pub allow_errors: bool,
     #[serde(default)]
@@ -806,12 +806,12 @@ impl Rules {
                         }
                     }
                     Err(x) => {
-                        *errors.entry(format!("[Structure] {}", x)).or_insert(0) += 1;
+                        *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
                         None
                     }
                 },
                 Err(x) => {
-                    *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
+                    *errors.entry(format!("[Structure] {}", x)).or_insert(0) += 1;
                     None
                 }
             })
@@ -829,5 +829,15 @@ impl Rules {
 
     pub fn rules(&self) -> &Vec<Rule> {
         &self.rules
+    }
+
+    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
+        let mut output = Vec::new();
+
+        for rule in &self.rules {
+            output.extend(rule.apply(tokens));
+        }
+
+        output
     }
 }

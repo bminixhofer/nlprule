@@ -1,5 +1,5 @@
 use clap::Clap;
-use nlprule::{rule::Rules, tokenizer::Tokenizer};
+use nlprule_core::{rule::Rules, tokenizer::Tokenizer};
 use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]

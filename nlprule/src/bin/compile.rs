@@ -1,5 +1,5 @@
 use clap::Clap;
-use nlprule::{
+use nlprule_core::{
     rule::Rules,
     tokenizer::{chunk::SerializeChunker, tag::Tagger, Tokenizer},
 };

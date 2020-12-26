@@ -38,8 +38,8 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
 
     lazy_static! {
-        // see https://stackoverflow.com/a/3809435 and https://regexr.com/3e6m0
-        static ref URL_REGEX: Regex = Regex::new(r"(http(s)?://.)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)").unwrap();
+        // see https://stackoverflow.com/a/17773849
+        static ref URL_REGEX: Regex = Regex::new(r"(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})").unwrap();
     }
 
     let mut prev = 0;
@@ -158,7 +158,7 @@ pub struct Tokenizer {
     options: TokenizerOptions,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TokenizerOptions {
     pub allow_errors: bool,
     pub retain_last: bool,
@@ -216,12 +216,12 @@ impl Tokenizer {
                         }
                     }
                     Err(x) => {
-                        error = Some(format!("[Structure] {}", x));
+                        error = Some(format!("[Rule] {}", x));
                         None
                     }
                 },
                 Err(x) => {
-                    error = Some(format!("[Rule] {}", x));
+                    error = Some(format!("[Structure] {}", x));
                     None
                 }
             })
@@ -247,7 +247,7 @@ impl Tokenizer {
         &self.rules
     }
 
-    pub fn tagger(&self) -> &Tagger {
+    pub fn tagger(&self) -> &Arc<Tagger> {
         &self.tagger
     }
 

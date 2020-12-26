@@ -1,22 +1,17 @@
-[workspace]
-
 [package]
-name = "pynlprule"
+name = "nlprule"
 version = "0.1.0"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 
 [lib]
-name = "pynlprule"
+name = "nlprule"
 crate-type = ["cdylib"]
 
 [dependencies]
-nlprule = { path = "../../nlprule" }
+bincode = "1.2"
+nlprule_core = { path = "../../nlprule" }
 
 [dependencies.pyo3]
 version = "=0.11.1"
 features = ["extension-module"]
-
-[profile.release]
-lto = "fat"
-codegen-units = 1

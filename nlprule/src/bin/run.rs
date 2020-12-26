@@ -1,5 +1,8 @@
 use clap::Clap;
-use nlprule::tokenizer::Tokenizer;
+use nlprule_core::{
+    rule::Rules,
+    tokenizer::{finalize, Tokenizer},
+};
 use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]
@@ -11,6 +14,8 @@ struct Opts {
     text: String,
     #[clap(long, short)]
     tokenizer: String,
+    #[clap(long, short)]
+    rules: String,
 }
 
 fn main() {
@@ -20,8 +25,14 @@ fn main() {
     let reader = BufReader::new(File::open(opts.tokenizer).unwrap());
     let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
 
+    let reader = BufReader::new(File::open(opts.rules).unwrap());
+    let rules: Rules = bincode::deserialize_from(reader).unwrap();
+
+    let incomplete_tokens = tokenizer.disambiguate(tokenizer.tokenize(&opts.text));
+
+    println!("Tokens: {:#?}", incomplete_tokens);
     println!(
-        "{:#?}",
-        tokenizer.disambiguate(tokenizer.tokenize(&opts.text))
+        "Suggestions: {:#?}",
+        rules.apply(&finalize(incomplete_tokens))
     );
 }

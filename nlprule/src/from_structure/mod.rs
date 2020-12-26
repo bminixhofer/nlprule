@@ -301,6 +301,23 @@ fn parse_suggestion(
                 }
             }
             structure::SuggestionPart::Match(m) => {
+                if m.postag.is_some()
+                    || m.postag_regex.is_some()
+                    || m.postag_replace.is_some()
+                    || m.text.is_some()
+                {
+                    return Err(Error::Unimplemented(
+                        "postag, postag_regexp, postag_replace and text in `match` are not implemented."
+                            .into(),
+                    ));
+                }
+
+                if m.include_skipped.is_some() {
+                    return Err(Error::Unimplemented(
+                        "include_skipped in `match` is not implemented.".into(),
+                    ));
+                }
+
                 let last_id = get_last_id(&composition.parts) as usize;
                 let mut id =
                     m.no.parse::<usize>()
@@ -476,7 +493,24 @@ impl TryFrom<structure::Rule> for rule::Rule {
     type Error = Error;
 
     fn try_from(data: structure::Rule) -> Result<rule::Rule, Self::Error> {
-        let (composition, start, end) = parse_pattern(data.pattern)?;
+        if data.filter.is_some() {
+            return Err(Error::Unimplemented(
+                "rules with filter are not implemented.".into(),
+            ));
+        }
+
+        let (composition, start, end) = match (data.pattern, data.regex) {
+            (Some(_), Some(_)) => Err(Error::Unexpected(
+                "must not contain both `pattern` and `regexp`.".into(),
+            )),
+            (None, None) => Err(Error::Unexpected(
+                "either `pattern` or `regexp` must be supplied.".into(),
+            )),
+            (Some(pattern), None) => parse_pattern(pattern),
+            (None, Some(_)) => Err(Error::Unimplemented(
+                "Regex rules are not implemented.".into(),
+            )),
+        }?;
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
@@ -507,11 +541,19 @@ impl TryFrom<structure::Rule> for rule::Rule {
             .collect::<Result<Vec<rule::Suggester>, Error>>()?;
 
         if suggesters.is_empty() {
-            return Err(Error::Unimplemented("rule with no suggestion".into()));
+            return Err(Error::Unimplemented(
+                "rules with no suggestion are not implemented.".into(),
+            ));
         }
 
         let mut tests = Vec::new();
         for example in &data.examples {
+            if example.kind.is_some() {
+                return Err(Error::Unimplemented(
+                    "examples with `type` (i. e. 'triggers_error') are not implemented.".into(),
+                ));
+            }
+
             let mut texts = Vec::new();
             let mut char_length = 0;
             let mut suggestion: Option<rule::Suggestion> = None;

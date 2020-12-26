@@ -175,6 +175,12 @@ impl std::convert::Into<String> for XMLText {
 #[serde(deny_unknown_fields)]
 pub struct Match {
     pub no: String,
+    pub postag: Option<String>,
+    #[serde(rename = "postag_regexp")]
+    pub postag_regex: Option<String>,
+    pub postag_replace: Option<String>,
+    pub text: Option<XMLString>,
+    pub include_skipped: Option<String>,
     pub case_conversion: Option<String>,
     pub regexp_match: Option<String>,
     pub regexp_replace: Option<String>,
@@ -228,6 +234,8 @@ pub struct Example {
     pub correction: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Vec<ExamplePart>,
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -418,7 +426,9 @@ pub struct Pattern {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
-    pub pattern: Pattern,
+    pub pattern: Option<Pattern>,
+    #[serde(rename = "regexp")]
+    pub regex: Option<XMLText>,
     #[serde(rename = "antipattern")]
     pub antipatterns: Option<Vec<Pattern>>,
     pub message: Message,
@@ -431,6 +441,7 @@ pub struct Rule {
     pub short: Option<XMLText>,
     pub url: Option<XMLText>,
     pub default: Option<String>,
+    pub filter: Option<Filter>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
