@@ -1,9 +1,12 @@
 use clap::Clap;
 use nlprule_core::{
     rule::Rules,
-    tokenizer::{chunk::SerializeChunker, tag::Tagger, Tokenizer},
+    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer},
 };
-use std::{fs::read_to_string, io::BufWriter};
+use std::{
+    fs::read_to_string,
+    io::{BufReader, BufWriter},
+};
 use std::{fs::File, sync::Arc};
 
 #[derive(Clap)]
@@ -25,7 +28,7 @@ struct Opts {
     #[clap(long)]
     rules_config_path: String,
     #[clap(long)]
-    use_chunker: bool,
+    chunker_path: Option<String>,
 }
 
 fn main() {
@@ -36,8 +39,10 @@ fn main() {
     let tokenizer = Tokenizer::from_xml(
         opts.disambiguation_path,
         Arc::new(tagger),
-        if opts.use_chunker {
-            Some(SerializeChunker::default())
+        if let Some(path) = opts.chunker_path {
+            let reader = BufReader::new(File::open(path).unwrap());
+            let chunker: Chunker = serde_json::from_reader(reader).unwrap();
+            Some(chunker)
         } else {
             None
         },

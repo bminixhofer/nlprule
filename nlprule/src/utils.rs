@@ -50,6 +50,11 @@ impl SerializeRegex {
         let mut fixed = unescape(unescape(unescape(regex_str, "!"), ","), "/");
         let mut case_sensitive = case_sensitive;
 
+        fixed = fixed
+            .replace("$+", "$")
+            .replace("$?", "$")
+            .replace("$*", "$");
+
         for pattern in &["(?iu)", "(?i)"] {
             if fixed.contains(pattern) {
                 case_sensitive = false;

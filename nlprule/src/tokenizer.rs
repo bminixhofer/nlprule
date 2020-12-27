@@ -1,6 +1,5 @@
 use lazy_static::lazy_static;
 use onig::Regex;
-use pyo3::Python;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
@@ -8,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub mod chunk;
 pub mod tag;
 
-use chunk::SerializeChunker;
+use chunk::Chunker;
 use tag::Tagger;
 
 use crate::rule::DisambiguationRule;
@@ -153,7 +152,7 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
 #[derive(Serialize, Deserialize)]
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
-    chunker: Option<SerializeChunker>,
+    chunker: Option<Chunker>,
     tagger: Arc<Tagger>,
     options: TokenizerOptions,
 }
@@ -191,7 +190,7 @@ impl Tokenizer {
     pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
         tagger: Arc<Tagger>,
-        chunker: Option<SerializeChunker>,
+        chunker: Option<Chunker>,
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         use log::warn;
@@ -251,7 +250,7 @@ impl Tokenizer {
         &self.tagger
     }
 
-    pub fn chunker(&self) -> &Option<SerializeChunker> {
+    pub fn chunker(&self) -> &Option<Chunker> {
         &self.chunker
     }
 
@@ -305,7 +304,7 @@ impl Tokenizer {
                 let ptr = x.as_ptr() as usize;
                 current_char += x.chars().count();
 
-                let byte_start = x.as_ptr() as usize - text.as_ptr() as usize;
+                let byte_start = ptr - text.as_ptr() as usize;
                 let trimmed = x.trim();
 
                 let is_sentence_start = sentence_indices.0.contains(&ptr);
@@ -334,10 +333,7 @@ impl Tokenizer {
         tokens[last_idx].is_sentence_end = true;
 
         if let Some(chunker) = &self.chunker {
-            chunker
-                .apply(text, &mut tokens)
-                .map_err(|x| x.print(Python::acquire_gil().python()))
-                .unwrap();
+            chunker.apply(text, &mut tokens, &self);
         }
 
         tokens
