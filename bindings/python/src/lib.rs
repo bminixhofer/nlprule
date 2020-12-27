@@ -94,6 +94,7 @@ impl PyToken {
             .collect()
     }
 }
+
 #[pyclass(name = Suggestion)]
 struct PySuggestion {
     suggestion: Suggestion,
@@ -198,6 +199,16 @@ impl PyRules {
             .into_iter()
             .map(|x| x.into())
             .collect()
+    }
+
+    fn correct(&self, py: Python, text: &str) -> String {
+        let tokenizer = self.tokenizer.borrow(py);
+        let tokenizer = tokenizer.tokenizer();
+
+        let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(text)));
+        let suggestions = self.rules.apply(&tokens);
+
+        Rules::correct(text, &suggestions)
     }
 }
 

@@ -1,13 +1,8 @@
 # type: ignore
 
-import pynlprule
+import nlprule
 
-tagger = pynlprule.Tagger(
-    ["../../data/dumps/de/output.dump", "../../data/dumps/de/output.dump"],
-    ["../../data/dumps/de/added.txt"],
-)
-tokenizer = pynlprule.Tokenizer("../../data/disambiguation.de.canonic.xml", tagger)
-tokens = tokenizer.apply("Das ist ein Test.")
+tokenizer = nlprule.Tokenizer("../../tokenizer.bin")
+rules = nlprule.Rules("../../rules.bin", tokenizer)
 
-print(tokens)
-print([x.text for x in tokens])
+print(rules.correct("He wants that you send him an email."))
