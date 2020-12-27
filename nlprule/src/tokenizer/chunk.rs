@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{IncompleteToken, Tokenizer};
+use super::IncompleteToken;
 
 fn softmax(vec: &mut Vec<f32>) {
     for x in vec.iter_mut() {
@@ -498,8 +498,10 @@ pub struct Chunker {
 }
 
 impl Chunker {
-    pub fn apply(&self, text: &str, tokens: &mut Vec<IncompleteToken>, tokenizer: &Tokenizer) {
+    pub fn apply(&self, text: &str, tokens: &mut Vec<IncompleteToken>) {
+        // replacements must not change char indices
         let text = text.replace('’', "\'");
+
         let mut byte_to_char_idx: HashMap<usize, usize> = text
             .char_indices()
             .enumerate()
@@ -517,89 +519,68 @@ impl Chunker {
                 .collect::<Vec<_>>(),
         );
 
-        let internal_chunks = chunks.outcomes();
-        let mut chunks = Vec::new();
-
-        for token in tokens.iter() {
-            let mut token_chunk = None;
-
-            for (i, (internal_token, chunk)) in internal_tokens
-                .iter()
-                .zip(internal_chunks.iter())
-                .enumerate()
-            {
-                let byte_start = internal_token.as_ptr() as usize - text.as_ptr() as usize;
+        let internal_chunks: Vec<_> = chunks
+            .outcomes()
+            .iter()
+            .zip(internal_tokens)
+            .map(|(chunk, token)| {
+                let byte_start = token.as_ptr() as usize - text.as_ptr() as usize;
                 let char_start = *byte_to_char_idx.get(&byte_start).unwrap();
-                let char_end = *byte_to_char_idx
-                    .get(&(byte_start + internal_token.len()))
-                    .unwrap();
+                let char_end = *byte_to_char_idx.get(&(byte_start + token.len())).unwrap();
 
-                if (char_start, char_end) == token.char_span {
-                    let is_noun_end =
-                        i + 1 >= internal_chunks.len() || internal_chunks[i + 1] != "I-NP";
-                    if is_noun_end && *chunk == "I-NP" {
-                        token_chunk = Some("E-NP");
-                    } else if is_noun_end && *chunk == "B-NP" {
-                        token_chunk = Some("S-NP");
-                    } else if *chunk != "O" {
-                        token_chunk = Some(chunk);
+                (*chunk, (char_start, char_end))
+            })
+            .collect();
+        let mut chunks = Vec::new();
+        let mut number = "singular";
+
+        for i in 0..internal_chunks.len() {
+            let chunk = internal_chunks[i].0;
+
+            if chunk == "B-NP" {
+                number = "singular";
+
+                for (next_chunk, char_span) in internal_chunks[i..].iter().cloned() {
+                    if next_chunk != "I-NP" && next_chunk != "B-NP" {
+                        break;
+                    }
+
+                    if tokens
+                        .iter()
+                        .find(|token| token.char_span == char_span)
+                        .map(|token| token.word.tags.iter().any(|tag| tag.pos == "NNS"))
+                        .unwrap_or(false)
+                    {
+                        number = "plural";
                     }
                 }
             }
 
-            chunks.push(token_chunk);
+            let is_noun_end = i + 1 >= internal_chunks.len() || internal_chunks[i + 1].0 != "I-NP";
+            let mut to_push = Vec::new();
+
+            if chunk == "B-NP" {
+                to_push.push(format!("B-NP-{}", number));
+                if is_noun_end {
+                    to_push.push(format!("E-NP-{}", number));
+                }
+            } else if chunk == "I-NP" {
+                if is_noun_end {
+                    to_push.push(format!("E-NP-{}", number));
+                } else {
+                    to_push.push(format!("I-NP-{}", number));
+                }
+            } else {
+                to_push.push(chunk.into())
+            }
+
+            chunks.push(to_push);
         }
 
-        let mut current_number = None;
-        for i in 0..tokens.len() {
-            if let Some(chunk) = chunks[i] {
-                if chunk == "B-NP"
-                    || chunk == "S-NP"
-                    || (chunk == "E-NP" && current_number.is_none())
-                {
-                    current_number = Some("singular");
-
-                    for j in i..chunks.len() {
-                        if j > i
-                            && !chunks[j]
-                                .map(|x| x == "B-NP" || x == "I-NP" || x == "E-NP")
-                                .unwrap_or(false)
-                        {
-                            break;
-                        }
-
-                        if tokenizer
-                            .tagger()
-                            .get_tags(
-                                &tokens[j].word.text,
-                                tokenizer.options().always_add_lower_tags,
-                                tokenizer.options().use_compound_split_heuristic,
-                            )
-                            .iter()
-                            .any(|x| x.pos == "NNS")
-                        {
-                            current_number = Some("plural");
-                        }
-                    }
-                }
-
-                match (chunk, current_number) {
-                    ("B-NP", Some(x)) => {
-                        tokens[i].chunks.push(format!("B-NP-{}", x));
-                    }
-                    ("E-NP", Some(x)) => {
-                        tokens[i].chunks.push(format!("E-NP-{}", x));
-                    }
-                    ("S-NP", Some(x)) => {
-                        tokens[i].chunks.push(format!("B-NP-{}", x));
-                        tokens[i].chunks.push(format!("E-NP-{}", x));
-                    }
-                    ("I-NP", Some(x)) => {
-                        tokens[i].chunks.push(format!("I-NP-{}", x));
-                    }
-                    (x, _) => {
-                        tokens[i].chunks.push(x.into());
-                    }
+        for token in tokens.iter_mut() {
+            for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
+                if *char_span == token.char_span {
+                    token.chunks = (*chunk).clone();
                 }
             }
         }

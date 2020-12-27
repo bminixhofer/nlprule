@@ -333,7 +333,7 @@ impl Tokenizer {
         tokens[last_idx].is_sentence_end = true;
 
         if let Some(chunker) = &self.chunker {
-            chunker.apply(text, &mut tokens, &self);
+            chunker.apply(text, &mut tokens);
         }
 
         tokens
