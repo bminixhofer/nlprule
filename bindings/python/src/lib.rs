@@ -1,5 +1,4 @@
-use std::{fs::File, io::BufReader, sync::Arc};
-
+use flate2::read::GzDecoder;
 use nlprule_core::{
     rule::Rules,
     tokenizer::{finalize, tag::Tagger, Token},
@@ -8,7 +7,60 @@ use nlprule_core::{
     rule::Suggestion,
     tokenizer::{IncompleteToken, Tokenizer, TokenizerOptions},
 };
+use pyo3::exceptions::ValueError;
 use pyo3::prelude::*;
+use std::{
+    fs::{self, File},
+    io::{BufReader, Cursor, Read},
+    path::PathBuf,
+    sync::Arc,
+};
+
+fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
+    let version = env!("CARGO_PKG_VERSION");
+    let mut cache_path: Option<PathBuf> = None;
+
+    // try to find a file at which to cache the data
+    if let Some(project_dirs) = directories::ProjectDirs::from("", "", "nlprule") {
+        let cache_dir = project_dirs.cache_dir();
+
+        cache_path = Some(
+            cache_dir.join(version).join(code).join(
+                name.strip_suffix(".gz")
+                    .expect("resource name must have .gz ending."),
+            ),
+        );
+    }
+
+    // if the file can be read, the data is already cached
+    if let Some(path) = &cache_path {
+        if let Ok(bytes) = fs::read(path) {
+            return Ok(Cursor::new(bytes));
+        }
+    }
+
+    // ... otherwise, request the data from the URL ...
+    let bytes = reqwest::blocking::get(&format!(
+        "https://github.com/bminixhofer/nlprule/raw/{}/storage/{}/{}",
+        env!("CARGO_PKG_VERSION"),
+        code,
+        name
+    ))
+    .and_then(|x| x.bytes())
+    .map_err(|x| ValueError::py_err(format!("{}", x)))?;
+
+    let mut gz = GzDecoder::new(&bytes[..]);
+    let mut buffer = Vec::new();
+    gz.read_to_end(&mut buffer).expect("gunzipping failed");
+
+    // ... and then cache the data at the provided file, if one was found
+    if let Some(path) = &cache_path {
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, &buffer)?;
+    }
+
+    Ok(Cursor::new(buffer))
+}
 
 #[pyclass(name = Tagger)]
 pub struct PyTagger {
@@ -137,6 +189,15 @@ impl PyTokenizer {
 
 #[pymethods]
 impl PyTokenizer {
+    #[staticmethod]
+    fn load(code: &str) -> PyResult<Self> {
+        let bytes = get_resource(code, "tokenizer.bin.gz")?;
+
+        let tokenizer: Tokenizer =
+            bincode::deserialize_from(bytes).map_err(|x| ValueError::py_err(format!("{}", x)))?;
+        Ok(PyTokenizer { tokenizer })
+    }
+
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         let reader = BufReader::new(File::open(path).unwrap());
@@ -181,6 +242,15 @@ struct PyRules {
 
 #[pymethods]
 impl PyRules {
+    #[staticmethod]
+    fn load(code: &str, tokenizer: Py<PyTokenizer>) -> PyResult<Self> {
+        let bytes = get_resource(code, "rules.bin.gz")?;
+
+        let rules: Rules =
+            bincode::deserialize_from(bytes).map_err(|x| ValueError::py_err(format!("{}", x)))?;
+        Ok(PyRules { rules, tokenizer })
+    }
+
     #[new]
     fn new(path: &str, tokenizer: Py<PyTokenizer>) -> PyResult<Self> {
         let reader = BufReader::new(File::open(path).unwrap());
