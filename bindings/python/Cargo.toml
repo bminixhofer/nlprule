@@ -10,6 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 bincode = "1.2"
+reqwest = { version = "0.10", features = ["blocking"]}
+flate2 = "1"
+directories = "3"
 nlprule_core = { path = "../../nlprule" }
 
 [dependencies.pyo3]
