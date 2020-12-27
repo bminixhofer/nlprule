@@ -149,7 +149,7 @@ fn parse_match_attribs(
 
 fn get_exceptions(token: &structure::Token, case_sensitive: bool, only_shifted: bool) -> Atom {
     if let Some(parts) = &token.parts {
-        let exceptions = parts
+        let exceptions: Vec<Atom> = parts
             .iter()
             .filter_map(|x| match x {
                 structure::TokenPart::Exception(x) => Some(x),

@@ -51,9 +51,11 @@ impl SerializeRegex {
         let mut case_sensitive = case_sensitive;
 
         fixed = fixed
+            .replace("\\$", "###escaped_dollar###")
             .replace("$+", "$")
             .replace("$?", "$")
-            .replace("$*", "$");
+            .replace("$*", "$")
+            .replace("###escaped_dollar###", "\\$");
 
         for pattern in &["(?iu)", "(?i)"] {
             if fixed.contains(pattern) {

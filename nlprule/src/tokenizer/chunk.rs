@@ -480,12 +480,7 @@ impl MaxentChunker {
 
     fn chunk(&self, input: &[(&str, &str)]) -> Sequence {
         self.model
-            .beam_search(
-                input,
-                Self::context,
-                |a, b, c, d| self.valid(a, b, c, d),
-                10,
-            )
+            .beam_search(input, Self::context, |a, b, c, d| self.valid(a, b, c, d), 8)
             .remove(0)
     }
 }
