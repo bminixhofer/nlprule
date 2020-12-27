@@ -1,5 +1,6 @@
 use super::WordData;
 use bimap::BiMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -7,7 +8,7 @@ use std::io::BufRead;
 
 #[derive(Serialize, Deserialize)]
 pub struct Tagger {
-    tags: HashMap<u32, HashMap<u32, Vec<u16>>>,
+    tags: HashMap<u32, IndexMap<u32, Vec<u16>>>,
     tag_store: BiMap<String, u16>,
     word_store: BiMap<String, u32>,
     groups: HashMap<u32, Vec<u32>>,
@@ -102,7 +103,7 @@ impl Tagger {
             }
 
             tags.entry(*word_id)
-                .or_insert_with(HashMap::new)
+                .or_insert_with(IndexMap::new)
                 .entry(*inflection_id)
                 .or_insert_with(Vec::new)
                 .push(*tag_id);

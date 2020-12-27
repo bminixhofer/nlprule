@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap},
+};
 
 use super::IncompleteToken;
 
@@ -24,6 +29,27 @@ struct Context {
 struct Sequence<'a> {
     outcomes: Vec<&'a str>,
     probs: Vec<f32>,
+    log_prob: f32,
+}
+
+impl<'a> Eq for Sequence<'a> {}
+
+impl<'a> PartialEq for Sequence<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        other.outcomes == self.outcomes
+    }
+}
+
+impl<'a> Ord for Sequence<'a> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(&other).unwrap()
+    }
+}
+
+impl<'a> PartialOrd for Sequence<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        other.log_prob.partial_cmp(&self.log_prob)
+    }
 }
 
 impl<'a> Default for Sequence<'a> {
@@ -31,17 +57,19 @@ impl<'a> Default for Sequence<'a> {
         Sequence {
             outcomes: Vec::new(),
             probs: Vec::new(),
+            log_prob: 0.,
         }
     }
 }
 
 impl<'a> Sequence<'a> {
     pub fn new(outcomes: Vec<&'a str>, probs: Vec<f32>) -> Self {
-        Sequence { outcomes, probs }
-    }
-
-    pub fn log_prob(&self) -> f32 {
-        self.probs.iter().fold(0., |a, b| a + b.ln())
+        let log_prob = probs.iter().fold(0., |a, b| a + b.ln());
+        Sequence {
+            outcomes,
+            probs,
+            log_prob,
+        }
     }
 
     #[inline]
@@ -93,24 +121,34 @@ impl Model {
     fn beam_search<
         S,
         C: Fn(&[S], &[&str], usize) -> Vec<String>,
+        H: Fn(&[&str], usize) -> u64,
         V: Fn(&[S], &[&str], usize, &str) -> bool,
     >(
         &self,
         tokens: &[S],
         context_fn: C,
+        hash_fn: H,
         valid_fn: V,
         size: usize,
     ) -> Vec<Sequence> {
-        let mut prev: Vec<Sequence> = vec![Sequence::default()];
-        let mut next: Vec<Sequence> = Vec::with_capacity(size);
+        let mut prev: BinaryHeap<Sequence> = BinaryHeap::new();
+        let mut next: BinaryHeap<Sequence> = BinaryHeap::new();
+        prev.push(Sequence::default());
+
+        let mut cache: HashMap<u64, Vec<f32>> = HashMap::new();
 
         for i in 0..tokens.len() {
-            prev.sort_by(|a, b| b.log_prob().partial_cmp(&a.log_prob()).unwrap());
-            prev = prev.into_iter().take(size).collect();
+            while prev.len() > size {
+                prev.pop();
+            }
 
             for seq in prev.iter() {
-                let context = context_fn(tokens, &seq.outcomes(), i);
-                let scores = self.eval(&context);
+                let hash = hash_fn(seq.outcomes(), i);
+                if cache.get(&hash).is_none() {
+                    let context = context_fn(tokens, seq.outcomes(), i);
+                    cache.insert(hash, self.eval(&context));
+                }
+                let scores = cache.get(&hash).unwrap();
 
                 for (_, p, pred) in self.get_top_n(&scores, scores.len()) {
                     if valid_fn(tokens, &seq.outcomes(), i, pred) {
@@ -129,7 +167,9 @@ impl Model {
             next.clear();
         }
 
-        prev
+        let mut out: Vec<_> = prev.drain().collect();
+        out.sort();
+        out
     }
 }
 
@@ -283,6 +323,18 @@ impl MaxentPosTagger {
         output
     }
 
+    fn hash(tags: &[&str], i: usize) -> u64 {
+        let mut s = DefaultHasher::new();
+        if i >= 1 {
+            tags[i - 1].hash(&mut s);
+        }
+        if i >= 2 {
+            tags[i - 2].hash(&mut s);
+        }
+        i.hash(&mut s);
+        s.finish()
+    }
+
     fn context(tokens: &[&str], tags: &[&str], i: usize) -> Vec<String> {
         let mut context = Vec::new();
 
@@ -357,6 +409,7 @@ impl MaxentPosTagger {
             .beam_search(
                 tokens,
                 Self::context,
+                Self::hash,
                 |a, b, c, d| self.valid(a, b, c, d),
                 3,
             )
@@ -382,6 +435,18 @@ impl MaxentChunker {
         } else {
             true
         }
+    }
+
+    fn hash(preds: &[&str], i: usize) -> u64 {
+        let mut s = DefaultHasher::new();
+        if i >= 1 {
+            preds[i - 1].hash(&mut s);
+        }
+        if i >= 2 {
+            preds[i - 2].hash(&mut s);
+        }
+        i.hash(&mut s);
+        s.finish()
     }
 
     fn context(input: &[(&str, &str)], preds: &[&str], i: usize) -> Vec<String> {
@@ -480,7 +545,13 @@ impl MaxentChunker {
 
     fn chunk(&self, input: &[(&str, &str)]) -> Sequence {
         self.model
-            .beam_search(input, Self::context, |a, b, c, d| self.valid(a, b, c, d), 8)
+            .beam_search(
+                input,
+                Self::context,
+                Self::hash,
+                |a, b, c, d| self.valid(a, b, c, d),
+                7,
+            )
             .remove(0)
     }
 }
