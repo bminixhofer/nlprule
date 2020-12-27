@@ -1,4 +1,0 @@
-- LT has a schema for grammar.xml in https://github.com/languagetool-org/languagetool/blob/master/languagetool-core/src/main/resources/org/languagetool/rules/rules.xsd
-- Antipatterns can be defined for a rule group instead of rule (anything else?)
-- There are some "funny" rules which are disabled by default via "default=off"
-- Noticing contraction disambiguations: <token regexp="yes">['’`´‘]</token>
