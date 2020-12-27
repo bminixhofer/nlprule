@@ -1,4 +1,7 @@
-use crate::{tokenizer::Token, utils::SerializeRegex};
+use crate::{
+    tokenizer::{IncompleteToken, Token},
+    utils::SerializeRegex,
+};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -491,6 +494,22 @@ pub struct Composition {
 impl Composition {
     pub fn new(parts: Vec<Part>) -> Self {
         Composition { parts }
+    }
+
+    pub fn impossible(&self, tokens: &[IncompleteToken]) -> bool {
+        if self.parts[0].quantifier.min > 0 {
+            let graph = MatchGraph::default();
+
+            if let Atom::TextAtom(atom) = &self.parts[0].atom {
+                if !tokens
+                    .iter()
+                    .any(|x| atom.matcher().is_match(&x.word.text, &graph))
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn next_can_match(

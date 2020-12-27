@@ -1,9 +1,6 @@
+use crate::filter::{Filter, Filterable};
 use crate::tokenizer::{finalize, IncompleteToken, Token, Word, WordData};
 use crate::utils::{self, SerializeRegex};
-use crate::{
-    composition::Atom,
-    filter::{Filter, Filterable},
-};
 use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
@@ -503,25 +500,21 @@ impl DisambiguationRule {
         &self,
         mut tokens: Vec<IncompleteToken>,
         tokenizer: &Tokenizer,
-    ) -> Vec<IncompleteToken> {
+        complete_tokens: Option<Vec<Token>>,
+    ) -> (Vec<IncompleteToken>, Option<Vec<Token>>) {
         if matches!(self.disambiguations, Disambiguation::Nop) {
-            return tokens;
+            return (tokens, None);
         }
 
-        if self.composition.parts[0].quantifier.min > 0 {
-            let graph = MatchGraph::default();
-
-            if let Atom::TextAtom(atom) = &self.composition.parts[0].atom {
-                if !tokens
-                    .iter()
-                    .any(|x| atom.matcher().is_match(&x.word.text, &graph))
-                {
-                    return tokens;
-                }
-            }
+        if self.composition.impossible(&tokens) {
+            return (tokens, None);
         }
 
-        let complete_tokens = finalize(tokens.clone());
+        let complete_tokens = if let Some(complete_tokens) = complete_tokens {
+            complete_tokens
+        } else {
+            finalize(tokens.clone())
+        };
         let refs: Vec<&Token> = complete_tokens.iter().collect();
 
         let mut all_byte_spans = Vec::new();
@@ -551,9 +544,11 @@ impl DisambiguationRule {
             }
         }
 
-        if !all_byte_spans.is_empty() {
-            log::info!("applying {}", self.id);
+        if all_byte_spans.is_empty() {
+            return (tokens, Some(complete_tokens));
         }
+
+        log::info!("applying {}", self.id);
 
         for byte_spans in all_byte_spans {
             let mut groups = Vec::new();
@@ -576,7 +571,7 @@ impl DisambiguationRule {
                 .apply(groups, tokenizer.options().retain_last);
         }
 
-        tokens
+        (tokens, None)
     }
 
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
@@ -590,7 +585,7 @@ impl DisambiguationRule {
 
             let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
-            tokens_after = self.apply(tokens_after, tokenizer);
+            tokens_after = self.apply(tokens_after, tokenizer, None).0;
 
             info!("Tokens: {:#?}", tokens_before);
 

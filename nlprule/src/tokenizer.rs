@@ -263,20 +263,28 @@ impl Tokenizer {
         mut tokens: Vec<IncompleteToken>,
         id: &str,
     ) -> Vec<IncompleteToken> {
+        let mut previously_computed_tokens = None;
+
         for rule in &self.rules {
             if rule.id == id {
                 break;
             }
 
-            tokens = rule.apply(tokens, &self);
+            let x = rule.apply(tokens, &self, previously_computed_tokens);
+            tokens = x.0;
+            previously_computed_tokens = x.1;
         }
 
         tokens
     }
 
     pub fn disambiguate(&self, mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
+        let mut previously_computed_tokens = None;
+
         for rule in &self.rules {
-            tokens = rule.apply(tokens, &self);
+            let x = rule.apply(tokens, &self, previously_computed_tokens);
+            tokens = x.0;
+            previously_computed_tokens = x.1;
         }
 
         tokens
