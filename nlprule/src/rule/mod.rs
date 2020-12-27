@@ -827,12 +827,44 @@ impl Rules {
     }
 
     pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
-        let mut output = Vec::new();
-
-        for rule in &self.rules {
-            output.extend(rule.apply(tokens));
+        if tokens.is_empty() {
+            return Vec::new();
         }
 
+        let mut output = Vec::new();
+        let mut mask = vec![false; tokens[tokens.len() - 1].char_span.1];
+
+        for rule in &self.rules {
+            for suggestion in rule.apply(tokens) {
+                if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
+                    mask[suggestion.start..suggestion.end]
+                        .iter_mut()
+                        .for_each(|x| *x = true);
+
+                    output.push(suggestion);
+                }
+            }
+        }
+
+        output.sort_by(|a, b| a.start.cmp(&b.start));
         output
+    }
+
+    pub fn correct(text: &str, suggestions: &[Suggestion]) -> String {
+        let mut offset: isize = 0;
+        let mut chars: Vec<_> = text.chars().collect();
+
+        for suggestion in suggestions {
+            let replacement: Vec<_> = suggestion.text[0].chars().collect();
+            chars.splice(
+                (suggestion.start as isize + offset) as usize
+                    ..(suggestion.end as isize + offset) as usize,
+                replacement.iter().cloned(),
+            );
+            offset =
+                offset + replacement.len() as isize - (suggestion.end - suggestion.start) as isize;
+        }
+
+        chars.into_iter().collect()
     }
 }

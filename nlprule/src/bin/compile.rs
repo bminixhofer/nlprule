@@ -29,6 +29,10 @@ struct Opts {
     rules_config_path: String,
     #[clap(long)]
     chunker_path: Option<String>,
+    #[clap(long)]
+    out_tokenizer_path: String,
+    #[clap(long)]
+    out_rules_path: String,
 }
 
 fn main() {
@@ -50,7 +54,7 @@ fn main() {
     )
     .unwrap();
 
-    let f = BufWriter::new(File::create("tokenizer.bin").unwrap());
+    let f = BufWriter::new(File::create(&opts.out_tokenizer_path).unwrap());
     bincode::serialize_into(f, &tokenizer).unwrap();
 
     let rules = Rules::from_xml(
@@ -58,6 +62,6 @@ fn main() {
         serde_json::from_str(&read_to_string(opts.rules_config_path).unwrap()).unwrap(),
     );
 
-    let f = BufWriter::new(File::create("rules.bin").unwrap());
+    let f = BufWriter::new(File::create(&opts.out_rules_path).unwrap());
     bincode::serialize_into(f, &rules).unwrap();
 }
