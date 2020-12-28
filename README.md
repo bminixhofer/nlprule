@@ -99,7 +99,11 @@ for token in tokens:
 
 ## Maintenance disclaimer
 
-I started NLPRule because I wanted to check if it was feasible to write a parser for LanguageTool rules from scratch. I didn't really intend to publish it. I had the core logic lying around some time before I decided to finish and Open Source it. __As such, NLPRule will not always be kept up to date with new rules in LanguageTool and will not get support for new languages unless someone else implements them.__ I will however fix bugs and discrepancies between NLPRule and LanguageTool behaviour.
+I started NLPRule because I wanted to check if it was feasible to write a parser for LanguageTool rules from scratch. I didn't really intend to publish it. I had the core logic lying around some time before I decided to finish and Open Source it. 
+
+__As such, NLPRule will not always be kept up to date with new rules in LanguageTool and will not get support for new languages unless someone else implements them.__ 
+
+I will however fix bugs and discrepancies between NLPRule and LanguageTool behaviour.
 
 ## License
 
