@@ -337,13 +337,38 @@ impl Tokenizer {
             .filter(|token| !token.word.text.is_empty())
             .collect();
 
-        let last_idx = tokens.len() - 1;
-        tokens[last_idx].is_sentence_end = true;
+        if !tokens.is_empty() {
+            let last_idx = tokens.len() - 1;
+            tokens[last_idx].is_sentence_end = true;
 
-        if let Some(chunker) = &self.chunker {
-            chunker.apply(text, &mut tokens);
+            if let Some(chunker) = &self.chunker {
+                chunker.apply(text, &mut tokens);
+            }
         }
 
         tokens
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tokenizer;
+    use lazy_static::lazy_static;
+    use quickcheck_macros::quickcheck;
+    use std::fs::File;
+
+    #[quickcheck]
+    fn can_tokenize_anything(text: String) -> bool {
+        lazy_static! {
+            static ref TOKENIZER: Tokenizer = {
+                let reader = flate2::read::GzDecoder::new(
+                    File::open("../storage/en/tokenizer.bin.gz").unwrap(),
+                );
+                bincode::deserialize_from(reader).unwrap()
+            };
+        }
+
+        TOKENIZER.tokenize(&text);
+        true
     }
 }
