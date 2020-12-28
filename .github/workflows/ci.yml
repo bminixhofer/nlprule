@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  release:
+    types: [published]
+  push:
+  pull_request:
+
+test:
+  runs-on: ubuntu-18.04
+  env:
+    working-directory: nlprule
+  steps:
+    - uses: actions/checkout@v2
+    - name: Cache cargo registry
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      working-directory: ${{env.working-directory}}
+    - name: Cache cargo index
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+      working-directory: ${{env.working-directory}}
+    - uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --verbose
+      working-directory: ${{env.working-directory}}
+    - run: rustup component add clippy
+    - uses: actions-rs/clippy-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        args: --all-features
+      working-directory: ${{env.working-directory}}
+    - uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --verbose --all-features --release
+      working-directory: ${{env.working-directory}}
