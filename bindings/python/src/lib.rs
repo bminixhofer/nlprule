@@ -5,7 +5,7 @@ use nlprule_core::{
 };
 use nlprule_core::{
     rule::Suggestion,
-    tokenizer::{IncompleteToken, Tokenizer, TokenizerOptions},
+    tokenizer::{Tokenizer, TokenizerOptions},
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -63,7 +63,81 @@ fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
     Ok(Cursor::new(buffer))
 }
 
+fn sentence_guard<F, O>(py: Python, sentence_or_sentences: PyObject, f: F) -> PyResult<PyObject>
+where
+    F: Fn(String) -> PyResult<O>,
+    O: ToPyObject,
+{
+    let sentence_or_sentences = sentence_or_sentences.as_ref(py);
+    let is_iterable = sentence_or_sentences.hasattr("__iter__")?
+        && !sentence_or_sentences.is_instance::<PyString>()?;
+
+    let sentences: Vec<String> = if is_iterable {
+        sentence_or_sentences.extract()?
+    } else {
+        vec![sentence_or_sentences.extract()?]
+    };
+
+    let mut output = Vec::new();
+
+    for sentence in sentences {
+        output.push(f(sentence)?);
+    }
+
+    Ok(if is_iterable {
+        output.to_object(py)
+    } else {
+        output[0].to_object(py)
+    })
+}
+
+fn text_guard<F, O>(
+    py: Python,
+    text_or_texts: PyObject,
+    sentence_splitter: &Option<PyObject>,
+    sentence_equivalent_name: &str,
+    f: F,
+) -> PyResult<PyObject>
+where
+    F: Fn(Vec<String>) -> PyResult<O>,
+    O: ToPyObject,
+{
+    let text_or_texts = text_or_texts.as_ref(py);
+    let is_iterable =
+        text_or_texts.hasattr("__iter__")? && !text_or_texts.is_instance::<PyString>()?;
+
+    let texts: Vec<String> = if is_iterable {
+        text_or_texts.extract()?
+    } else {
+        vec![text_or_texts.extract()?]
+    };
+
+    if let Some(sentence_splitter) = sentence_splitter {
+        let mut output = Vec::new();
+
+        for sentences in sentence_splitter
+            .as_ref(py)
+            .call1((texts,))?
+            .extract::<Vec<Vec<String>>>()?
+        {
+            output.push(f(sentences)?);
+        }
+
+        Ok(if is_iterable {
+            output.to_object(py)
+        } else {
+            output[0].to_object(py)
+        })
+    } else {
+        Err(PyValueError::new_err(format!(
+            "sentence_splitter must be set. Use {} to correct one sentence.",
+            sentence_equivalent_name
+        )))
+    }
+}
+
 #[pyclass()]
+#[text_signature = "(split_chars)"]
 pub struct SplitOn {
     split_chars: Vec<char>,
 }
@@ -148,24 +222,6 @@ impl PyTagger {
     }
 }
 
-#[pyclass(name = "IncompleteTokens")]
-#[derive(Clone)]
-pub struct PyIncompleteTokens {
-    tokens: Vec<IncompleteToken>,
-}
-
-impl From<Vec<IncompleteToken>> for PyIncompleteTokens {
-    fn from(tokens: Vec<IncompleteToken>) -> Self {
-        PyIncompleteTokens { tokens }
-    }
-}
-
-impl From<PyIncompleteTokens> for Vec<IncompleteToken> {
-    fn from(token: PyIncompleteTokens) -> Self {
-        token.tokens
-    }
-}
-
 #[pyclass(name = "Token")]
 pub struct PyToken {
     token: Token,
@@ -190,13 +246,58 @@ impl PyToken {
     }
 
     #[getter]
-    fn tags(&self) -> Vec<(&str, &str)> {
+    fn data(&self) -> Vec<(&str, &str)> {
         self.token
             .word
             .tags
             .iter()
             .map(|x| (x.lemma.as_str(), x.pos.as_str()))
             .collect()
+    }
+
+    #[getter]
+    fn lemmas(&self) -> Vec<&str> {
+        let mut lemmas: Vec<_> = self
+            .token
+            .word
+            .tags
+            .iter()
+            .filter_map(|x| {
+                if x.lemma.is_empty() {
+                    None
+                } else {
+                    Some(x.lemma.as_str())
+                }
+            })
+            .collect();
+        lemmas.sort_unstable();
+        lemmas.dedup();
+        lemmas
+    }
+
+    #[getter]
+    fn tags(&self) -> Vec<&str> {
+        let mut tags: Vec<_> = self
+            .token
+            .word
+            .tags
+            .iter()
+            .filter_map(|x| {
+                if x.pos.is_empty() {
+                    None
+                } else {
+                    Some(x.pos.as_str())
+                }
+            })
+            .collect();
+        tags.sort_unstable();
+        tags.dedup();
+        tags
+    }
+
+    #[getter]
+    fn chunks(&self) -> Vec<&str> {
+        self.token.chunks.iter().map(|x| x.as_str()).collect()
     }
 }
 
@@ -230,8 +331,10 @@ impl From<Suggestion> for PySuggestion {
 }
 
 #[pyclass(name = "Tokenizer")]
+#[text_signature = "(path, sentence_splitter=None)"]
 pub struct PyTokenizer {
     tokenizer: Tokenizer,
+    sentence_splitter: Option<PyObject>,
 }
 
 impl PyTokenizer {
@@ -242,21 +345,28 @@ impl PyTokenizer {
 
 #[pymethods]
 impl PyTokenizer {
+    #[text_signature = "(code, sentence_splitter=None)"]
     #[staticmethod]
-    fn load(code: &str) -> PyResult<Self> {
+    fn load(code: &str, sentence_splitter: Option<PyObject>) -> PyResult<Self> {
         let bytes = get_resource(code, "tokenizer.bin.gz")?;
 
         let tokenizer: Tokenizer = bincode::deserialize_from(bytes)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
-        Ok(PyTokenizer { tokenizer })
+        Ok(PyTokenizer {
+            tokenizer,
+            sentence_splitter,
+        })
     }
 
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
+    fn new(path: &str, sentence_splitter: Option<PyObject>) -> PyResult<Self> {
         let reader = BufReader::new(File::open(path).unwrap());
         let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
 
-        Ok(PyTokenizer { tokenizer })
+        Ok(PyTokenizer {
+            tokenizer,
+            sentence_splitter,
+        })
     }
 
     #[getter]
@@ -267,27 +377,48 @@ impl PyTokenizer {
         )
     }
 
-    fn tokenize(&self, text: &str) -> PyIncompleteTokens {
-        self.tokenizer.tokenize(text).into()
+    #[text_signature = "(text_or_texts)"]
+    fn tokenize(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
+        text_guard(
+            py,
+            text_or_texts,
+            &self.sentence_splitter,
+            ".apply_sentence",
+            |sentences| {
+                let mut output = Vec::new();
+
+                for sentence in sentences {
+                    let tokens = finalize(
+                        self.tokenizer
+                            .disambiguate(self.tokenizer.tokenize(&sentence)),
+                    )
+                    .into_iter()
+                    .map(|x| PyCell::new(py, PyToken::from(x)))
+                    .collect::<PyResult<Vec<_>>>()?;
+                    output.extend(tokens);
+                }
+
+                Ok(output)
+            },
+        )
     }
 
-    fn disambiguate(&self, tokens: PyIncompleteTokens) -> PyIncompleteTokens {
-        self.tokenizer.disambiguate(tokens.into()).into()
-    }
-
-    fn finalize(&self, tokens: PyIncompleteTokens) -> Vec<PyToken> {
-        finalize(tokens.into())
+    #[text_signature = "(sentence_or_sentences)"]
+    fn tokenize_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
+        sentence_guard(py, sentence_or_sentences, |sentence| {
+            finalize(
+                self.tokenizer
+                    .disambiguate(self.tokenizer.tokenize(&sentence)),
+            )
             .into_iter()
-            .map(|x| x.into())
-            .collect()
-    }
-
-    fn apply(&self, text: &str) -> Vec<PyToken> {
-        self.finalize(self.disambiguate(self.tokenize(text)))
+            .map(|x| PyCell::new(py, PyToken::from(x)))
+            .collect::<PyResult<Vec<_>>>()
+        })
     }
 }
 
 #[pyclass(name = "Rules")]
+#[text_signature = "(path, tokenizer, sentence_splitter=None)"]
 struct PyRules {
     rules: Rules,
     tokenizer: Py<PyTokenizer>,
@@ -296,6 +427,7 @@ struct PyRules {
 
 #[pymethods]
 impl PyRules {
+    #[text_signature = "(code, tokenizer, sentence_splitter=None)"]
     #[staticmethod]
     fn load(
         code: &str,
@@ -329,63 +461,90 @@ impl PyRules {
         })
     }
 
-    fn suggest(&self, py: Python, text: &str) -> Vec<PySuggestion> {
-        let tokenizer = self.tokenizer.borrow(py);
-        let tokenizer = tokenizer.tokenizer();
-
-        let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(text)));
-        self.rules
-            .apply(&tokens)
-            .into_iter()
-            .map(|x| x.into())
-            .collect()
-    }
-
-    fn correct(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
-        let text_or_texts = text_or_texts.as_ref(py);
-        let is_iterable =
-            text_or_texts.hasattr("__iter__")? && !text_or_texts.is_instance::<PyString>()?;
-
-        let texts: Vec<String> = if is_iterable {
-            text_or_texts.extract()?
-        } else {
-            vec![text_or_texts.extract()?]
-        };
-
-        if let Some(sentence_splitter) = &self.sentence_splitter {
+    #[text_signature = "(sentence_or_sentences)"]
+    fn suggest_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
+        sentence_guard(py, sentence_or_sentences, |sentence| {
             let tokenizer = self.tokenizer.borrow(py);
             let tokenizer = tokenizer.tokenizer();
 
-            let mut output = Vec::new();
+            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
+            self.rules
+                .apply(&tokens)
+                .into_iter()
+                .map(|x| PyCell::new(py, PySuggestion::from(x)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+    }
 
-            for sentences in sentence_splitter
-                .as_ref(py)
-                .call1((texts,))?
-                .extract::<Vec<Vec<String>>>()?
-            {
-                output.push(
-                    sentences
-                        .iter()
-                        .map(|x| {
-                            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
-                            let suggestions = self.rules.apply(&tokens);
-                            Rules::correct(x, &suggestions)
+    #[text_signature = "(text_or_texts)"]
+    fn suggest(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
+        text_guard(
+            py,
+            text_or_texts,
+            &self.sentence_splitter,
+            ".suggest_sentence",
+            |sentences| {
+                let tokenizer = self.tokenizer.borrow(py);
+                let tokenizer = tokenizer.tokenizer();
+
+                let mut output = Vec::new();
+                let mut offset = 0;
+
+                for sentence in sentences.iter() {
+                    let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(sentence)));
+                    let suggestions = self
+                        .rules
+                        .apply(&tokens)
+                        .into_iter()
+                        .map(|mut x| {
+                            x.start += offset;
+                            x.end += offset;
+                            PyCell::new(py, PySuggestion::from(x))
                         })
-                        .collect::<Vec<_>>()
-                        .join(""),
-                );
-            }
+                        .collect::<PyResult<Vec<_>>>()?;
+                    output.extend(suggestions);
+                    offset += sentence.chars().count();
+                }
 
-            Ok(if is_iterable {
-                output.to_object(py)
-            } else {
-                output[0].to_object(py)
-            })
-        } else {
-            Err(PyValueError::new_err(
-                "sentence_splitter must be set. Use .correct_sentence to correct one sentence.",
-            ))
-        }
+                Ok(output)
+            },
+        )
+    }
+
+    #[text_signature = "(sentence_or_sentences)"]
+    fn correct_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
+        sentence_guard(py, sentence_or_sentences, |sentence| {
+            let tokenizer = self.tokenizer.borrow(py);
+            let tokenizer = tokenizer.tokenizer();
+
+            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
+            let suggestions = self.rules.apply(&tokens);
+            Ok(Rules::correct(&sentence, &suggestions))
+        })
+    }
+
+    #[text_signature = "(text_or_texts)"]
+    fn correct(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
+        text_guard(
+            py,
+            text_or_texts,
+            &self.sentence_splitter,
+            ".correct_sentence",
+            |sentences| {
+                let tokenizer = self.tokenizer.borrow(py);
+                let tokenizer = tokenizer.tokenizer();
+
+                Ok(sentences
+                    .iter()
+                    .map(|x| {
+                        let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
+                        let suggestions = self.rules.apply(&tokens);
+                        Rules::correct(x, &suggestions)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(""))
+            },
+        )
     }
 }
 
@@ -394,6 +553,8 @@ fn nlprule(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyTokenizer>()?;
     m.add_class::<PyRules>()?;
+    m.add_class::<PySuggestion>()?;
+    m.add_class::<PyToken>()?;
     m.add_class::<SplitOn>()?;
 
     Ok(())

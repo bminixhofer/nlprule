@@ -28,6 +28,11 @@ xml-rs = { version = "0.8.3", optional = true }
 roxmltree = { version = "0.14.0", optional = true }
 serde_json = { version = "1", optional = true }
 
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
+flate2 = "1"
+
 [features]
 compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json"]
 bin = ["clap", "env_logger"]
