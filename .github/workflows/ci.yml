@@ -68,4 +68,38 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: python-wheel
-          path: ${{env.working-directory}}/target/wheels/*
+          path: target/wheels/*
+  
+  publish:
+    runs-on: ubuntu-18.04
+    needs: [test, build-python]
+    if: github.event_name == 'release'
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.8
+      - uses: actions/download-artifact@v2
+        with:
+          name: python-wheel
+          path: python-wheel
+      - name: Update version
+        run: |
+          bash scripts/set_version.sh ${{ github.event.release.tag_name }}
+      - name: Run release script
+        run: |
+          pip install twine==3.3
+          twine upload python-wheel/*
+        env:
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+          TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
+      - run: |
+          rm -r python-wheel
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: v${{ github.event.release.tag_name }}
+          branch: master
