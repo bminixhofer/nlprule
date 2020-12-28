@@ -78,7 +78,7 @@ for s in suggestions:
 
 __Bonus: Analyze text with the `tokenizer`:__
 
-NLPRule does rule and dictionary-based part-of-speech tagging and lemmatization as well as chunking with a model ported from [OpenNLP](https://opennlp.apache.org/). It is not as fancy as spaCy but could be useful anyway, and had to be done anyway to apply the rules so I thought I might as well add a public API:
+NLPRule does rule + dictionary-based part-of-speech tagging and lemmatization as well as chunking with a model ported from [OpenNLP](https://opennlp.apache.org/). It's not as fancy as spaCy but could be faster and had to be done anyway to apply the rules so I thought I might as well add a public API:
 
 ```python
 tokens = tokenizer.tokenize_sentence("She was not been here since Monday.")
@@ -96,3 +96,11 @@ for token in tokens:
 # Monday (28, 34) ['NNP'] ['Monday'] ['B-NP-singular', 'E-NP-singular']
 # . (34, 35) ['.', 'PCT', 'SENT_END'] ['.'] ['O']
 ```
+
+## Maintenance disclaimer
+
+I started NLPRule because I wanted to check if it was feasible to write a parser for LanguageTool rules from scratch. I didn't really intend to publish it. I had the core logic lying around some time before I decided to finish and Open Source it. __As such, NLPRule will not always be kept up to date with new rules in LanguageTool and will not get support for new languages unless someone else implements them.__ I will however fix bugs and discrepancies between NLPRule and LanguageTool behaviour.
+
+## License
+
+NLPRule is licensed under the MIT license.
