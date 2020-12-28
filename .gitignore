@@ -2,5 +2,4 @@ __pycache__
 target
 Cargo.lock
 data/
-scripts
 .vscode
