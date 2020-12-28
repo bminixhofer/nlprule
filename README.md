@@ -48,8 +48,8 @@ Pro tip: You can use [NNSplit](https://github.com/bminixhofer/nnsplit) for more 
 ```python
 from nnsplit import NNSplit
 
-splitter = nnsplit.NNSplit.load("en")
-rules = nlprule.Rules.load(
+splitter = NNSplit.load("en")
+rules = Rules.load(
     "en",
     tokenizer,
     lambda texts: [[str(s) for s in text] for text in splitter.split(texts)],
