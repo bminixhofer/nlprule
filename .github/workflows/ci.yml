@@ -34,3 +34,37 @@ jobs:
         with:
           command: test
           args: --verbose --all-features --release -p nlprule_core
+
+  build-python:
+    runs-on: ${{ matrix.os }}
+    env:
+      working-directory: bindings/python
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, windows-latest, macos-latest]
+        python-version: [3.6, 3.7, 3.8]
+    
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install GSED (if needed) # needed by set_version.sh
+        if: github.event_name == 'release' && matrix.os == 'macos-latest'
+        run: |
+          brew install gnu-sed
+      - name: Update version (if release)
+        if: github.event_name == 'release'
+        run: |
+          bash scripts/set_version.sh ${{ github.event.release.tag_name }}
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip
+          maturin build --interpreter python --release --manylinux 1
+        working-directory: ${{env.working-directory}}
+      - name: Upload wheel as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: python-wheel
+          path: ${{env.working-directory}}/target/wheels/*
