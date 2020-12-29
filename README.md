@@ -2,7 +2,7 @@
 
 NLPRule is a library for rule-based grammatical error correction written in pure Rust with bindings for Python. Rules are sourced from [LanguageTool](https://github.com/languagetool-org/languagetool). 
 
-My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed implications) and without all the extra stuff LanguageTool does (such as spellchecking, n-gram based error detection, etc.).
+My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed implications) and without all the extra stuff LanguageTool does such as spellchecking, n-gram based error detection, etc.
 
 NLPRule currently supports English and German.
 
@@ -13,9 +13,10 @@ NLPRule currently supports English and German.
 
 ## Usage
 
-__1. Install:__ `pip install nlprule`
+1. Install: `pip install nlprule`
 
-__2. Create a `tokenizer` and `rules` object:__
+<details><summary>2. Create a `tokenizer` and `rules` object:</summary>
+<p>
 
 ```python
 from nlprule import Tokenizer, Rules
@@ -26,8 +27,12 @@ rules = Rules.load("en", tokenizer) # or 'de'
 
 The objects will be downloaded the first time, then cached.
 
-__3a. Correct your text:__
+</p>
+</details>
 
+<details><summary>3a. Correct your text:</summary>
+<p>
+    
 ```python
 rules.correct_sentence("He wants that you send him an email.")
 # prints: 'He wants you to send him an email.'
@@ -63,7 +68,12 @@ rules.correct("He wants that you send him an email. She was not been here since 
 # prints: 'He wants you to send him an email. She was not been here since Monday.'
 ```
 
-__3b. Get suggestions:__
+</p>
+</details>
+
+<details><summary>3b. Get suggestions:</summary>
+<p>
+    
 
 ```python
 suggestions = rules.suggest_sentence("She was not been here since Monday.")
@@ -75,8 +85,12 @@ for s in suggestions:
 ```
 
 `.suggest_sentence` also has a multi-sentence counterpart in `.suggest`.
+    
+</p>
+</details>
 
-__Bonus: Analyze text with the `tokenizer`:__
+<details><summary>Bonus: Analyze text with the `tokenizer`:</summary>
+<p>
 
 NLPRule does rule + dictionary-based part-of-speech tagging and lemmatization as well as chunking with a model ported from [OpenNLP](https://opennlp.apache.org/). It's not as fancy as spaCy but could be faster and had to be done anyway to apply the rules so I thought I might as well add a public API:
 
@@ -97,13 +111,14 @@ for token in tokens:
 # . (34, 35) ['.', 'PCT', 'SENT_END'] ['.'] ['O']
 ```
 
+</p>
+</details>
+
 ## Maintenance disclaimer
 
-I started NLPRule because I wanted to check if it was feasible to write a parser for LanguageTool rules from scratch. I didn't really intend to publish it. I had the core logic lying around some time before I decided to finish and Open Source it. 
+NLPRule is currently pretty bare bones in terms of API and documentation. I will definitely fix bugs, but adding new functionality and improving API / docs will depend on interest by the community.
 
-__As such, NLPRule will not always be kept up to date with new rules in LanguageTool and will not get support for new languages unless someone else implements them.__ 
-
-I will however fix bugs and discrepancies between NLPRule and LanguageTool behaviour.
+Fixing discrepancies between NLPRule and LanguageTool behaviour will have high priority if any are found.
 
 ## License
 
