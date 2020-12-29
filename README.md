@@ -65,7 +65,7 @@ If a sentence splitter is set, you can call `.correct`:
 
 ```python
 rules.correct("He wants that you send him an email. She was not been here since Monday.")
-# prints: 'He wants you to send him an email. She was not been here since Monday.'
+# prints: 'He wants you to send him an email. She was not here since Monday.'
 ```
 
 </p>
