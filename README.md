@@ -15,7 +15,7 @@ NLPRule currently supports English and German.
 
 1. Install: `pip install nlprule`
 
-<details><summary>2. Create a `tokenizer` and `rules` object:</summary>
+<details><summary>2. Create a `tokenizer` and `rules` object</summary>
 <p>
 
 ```python
@@ -30,7 +30,7 @@ The objects will be downloaded the first time, then cached.
 </p>
 </details>
 
-<details><summary>3a. Correct your text:</summary>
+<details><summary>3a. Correct your text</summary>
 <p>
     
 ```python
@@ -71,7 +71,7 @@ rules.correct("He wants that you send him an email. She was not been here since 
 </p>
 </details>
 
-<details><summary>3b. Get suggestions:</summary>
+<details><summary>3b. Get suggestions</summary>
 <p>
     
 
@@ -89,7 +89,7 @@ for s in suggestions:
 </p>
 </details>
 
-<details><summary>Bonus: Analyze text with the `tokenizer`:</summary>
+<details><summary>Bonus: Analyze text with the `tokenizer`</summary>
 <p>
 
 NLPRule does rule + dictionary-based part-of-speech tagging and lemmatization as well as chunking with a model ported from [OpenNLP](https://opennlp.apache.org/). It's not as fancy as spaCy but could be faster and had to be done anyway to apply the rules so I thought I might as well add a public API:
@@ -116,7 +116,7 @@ for token in tokens:
 
 ## Maintenance disclaimer
 
-NLPRule is currently pretty bare bones in terms of API and documentation. I will definitely fix bugs, but adding new functionality and improving API / docs will depend on interest by the community.
+NLPRule is currently pretty bare bones in terms of API and documentation. I will definitely fix bugs, but adding new functionality (especially new languages) and improving API / docs will depend on interest by the community.
 
 Fixing discrepancies between NLPRule and LanguageTool behaviour will have high priority if any are found.
 
