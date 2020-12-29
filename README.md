@@ -35,7 +35,7 @@ The objects will be downloaded the first time, then cached.
     
 ```python
 rules.correct_sentence("He wants that you send him an email.")
-# prints: 'He wants you to send him an email.'
+# returns: 'He wants you to send him an email.'
 ```
 
 `correct_sentence` expects a single sentence as input. 
@@ -65,7 +65,7 @@ If a sentence splitter is set, you can call `.correct`:
 
 ```python
 rules.correct("He wants that you send him an email. She was not been here since Monday.")
-# prints: 'He wants you to send him an email. She was not here since Monday.'
+# returns: 'He wants you to send him an email. She was not here since Monday.'
 ```
 
 </p>
