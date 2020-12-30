@@ -356,6 +356,11 @@ impl PySuggestion {
     fn text(&self) -> Vec<&str> {
         self.suggestion.text.iter().map(|x| x.as_str()).collect()
     }
+
+    #[getter]
+    fn source(&self) -> &str {
+        &self.suggestion.source
+    }
 }
 
 impl From<Suggestion> for PySuggestion {
@@ -600,6 +605,30 @@ impl PyRules {
             let suggestions = self.rules.apply(&tokens);
             Ok(Rules::correct(&sentence, &suggestions))
         })
+    }
+
+    #[text_signature = "(text, suggestions)"]
+    fn apply_suggestions(
+        &self,
+        py: Python,
+        text: &str,
+        suggestions: Vec<Py<PySuggestion>>,
+    ) -> String {
+        let suggestions: Vec<Suggestion> = suggestions
+            .into_iter()
+            .map(|x| {
+                let x = x.borrow(py);
+
+                Suggestion {
+                    source: x.source().to_string(),
+                    text: x.text().iter().map(|x| x.to_string()).collect(),
+                    start: x.start(),
+                    end: x.end(),
+                }
+            })
+            .collect();
+
+        Rules::correct(text, &suggestions)
     }
 
     #[text_signature = "(text_or_texts)"]

@@ -3,26 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use xml::reader::EventReader;
 
-#[derive(Debug, Clone)]
-pub struct Id {
-    name: String,
-    num: usize,
-}
-
-impl Id {
-    fn new(name: String, num: usize) -> Self {
-        Id { name, num }
-    }
-}
-
-impl std::string::ToString for Id {
-    fn to_string(&self) -> String {
-        format!("{}.{}", self.name, self.num)
-    }
-}
-
 mod preprocess {
-    use super::Id;
     use xml::reader::EventReader;
     use xml::writer::EmitterConfig;
 
@@ -95,7 +76,7 @@ mod preprocess {
             .to_string()
     }
 
-    pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, Id)> {
+    pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, bool)> {
         let mut string = String::new();
         xml.read_to_string(&mut string)
             .expect("error writing to string.");
@@ -118,16 +99,12 @@ mod preprocess {
             })
             .map(|x| {
                 let xml = string[x.range()].to_string();
-                let id = Id::new(
-                    x.parent_element()
-                        .expect("must have parent")
-                        .attribute("id")
-                        .unwrap_or("")
-                        .to_string(),
-                    0,
-                );
+                let parent = x.parent_element().expect("must have parent");
 
-                (xml, id)
+                (
+                    xml,
+                    parent.attribute("default").map_or(true, |x| x != "off"),
+                )
             })
             .collect()
     }
@@ -534,6 +511,7 @@ pub struct DisambiguationRule {
     pub filter: Option<Filter>,
     #[serde(rename = "__unused_unifications")]
     pub unifications: Option<Vec<Unification>>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -545,6 +523,7 @@ pub struct DisambiguationRuleGroup {
     pub name: Option<String>,
     #[serde(rename = "rule")]
     pub rules: Vec<DisambiguationRule>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -580,7 +559,7 @@ pub enum DisambiguationRuleContainer {
 }
 
 macro_rules! flatten_group {
-    ($group:expr) => {{
+    ($group:expr, $category_on:expr) => {{
         let rule_group_id = $group.id.clone();
         let group_antipatterns = if let Some(antipatterns) = $group.antipatterns {
             antipatterns
@@ -588,19 +567,22 @@ macro_rules! flatten_group {
             Vec::new()
         };
 
+        let group_on = $group.default.as_ref().map_or(true, |x| x != "off");
+
         $group
             .rules
             .into_iter()
             .enumerate()
             .map(|(i, mut rule)| {
-                let id = Id::new(rule_group_id.clone(), i);
                 if let Some(antipatterns) = &mut rule.antipatterns {
                     antipatterns.extend(group_antipatterns.clone());
                 } else {
                     rule.antipatterns = Some(group_antipatterns.clone());
                 }
+                let on =
+                    group_on && $category_on && rule.default.as_ref().map_or(true, |x| x != "off");
 
-                (rule, id.to_string())
+                (rule, format!("{}.{}", rule_group_id, i), on)
             })
             .collect::<Vec<_>>()
     }};
@@ -608,7 +590,7 @@ macro_rules! flatten_group {
 
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
-) -> Vec<Result<(Rule, String), serde_xml_rs::Error>> {
+) -> Vec<Result<(Rule, String, bool), serde_xml_rs::Error>> {
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
@@ -617,22 +599,24 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
 
     rules
         .into_iter()
-        .map(|x| {
+        .map(|(xml, category_on)| {
             let mut out = Vec::new();
 
             let deseralized = RuleContainer::deserialize(&mut serde_xml_rs::Deserializer::new(
-                EventReader::new(x.0.as_bytes()),
+                EventReader::new(xml.as_bytes()),
             ));
 
             out.extend(match deseralized {
                 Ok(rule_container) => match rule_container {
                     RuleContainer::Rule(rule) => {
                         let id = rule.id.clone().unwrap_or_else(String::new);
-                        vec![Ok((rule, id))]
+                        let on = category_on && rule.default.as_ref().map_or(true, |x| x != "off");
+                        vec![Ok((rule, id, on))]
                     }
-                    RuleContainer::RuleGroup(rule_group) => {
-                        flatten_group!(rule_group).into_iter().map(Ok).collect()
-                    }
+                    RuleContainer::RuleGroup(rule_group) => flatten_group!(rule_group, category_on)
+                        .into_iter()
+                        .map(Ok)
+                        .collect(),
                 },
                 Err(err) => vec![Err(err)],
             });
@@ -655,11 +639,11 @@ pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
 
     let rules: Vec<_> = rules
         .into_iter()
-        .map(|x| {
+        .map(|(xml, _)| {
             let mut out = Vec::new();
 
             let deseralized = DisambiguationRuleContainer::deserialize(
-                &mut serde_xml_rs::Deserializer::new(EventReader::new(x.0.as_bytes())),
+                &mut serde_xml_rs::Deserializer::new(EventReader::new(xml.as_bytes())),
             );
 
             out.extend(match deseralized {
@@ -669,7 +653,10 @@ pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
                         vec![Ok((rule, id))]
                     }
                     DisambiguationRuleContainer::RuleGroup(rule_group) => {
-                        flatten_group!(rule_group).into_iter().map(Ok).collect()
+                        flatten_group!(rule_group, true)
+                            .into_iter()
+                            .map(|x| (Ok((x.0, x.1))))
+                            .collect()
                     }
                     DisambiguationRuleContainer::Unification(unification) => {
                         unifications.push(unification);
