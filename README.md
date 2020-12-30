@@ -135,6 +135,10 @@ NLPRule is currently pretty bare bones in terms of API and documentation. I will
 
 Fixing discrepancies between NLPRule and LanguageTool behaviour will have high priority if any are found.
 
+## Acknowledgements
+
+All credit for the rule content goes to [LanguageTool](https://github.com/languagetool-org/languagetool) who have made a Herculean effort to create high-quality grammar correction rules. This library is just a parser and reimplementation of the rule logic.
+
 ## License
 
 NLPRule is licensed under the MIT license.
