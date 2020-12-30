@@ -34,6 +34,27 @@ jobs:
         with:
           command: test
           args: --verbose --all-features --release -p nlprule_core
+      - run: |
+          gunzip storage/en/rules.bin.gz
+          gunzip storage/en/tokenizer.bin.gz
+          gunzip storage/de/rules.bin.gz
+          gunzip storage/de/tokenizer.bin.gz
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/de/tokenizer.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/en/tokenizer.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test -- --tokenizer storage/de/tokenizer.bin --rules storage/de/rules.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test -- --tokenizer storage/en/tokenizer.bin --rules storage/en/rules.bin
 
   build-python:
     runs-on: ${{ matrix.os }}
@@ -69,7 +90,7 @@ jobs:
         with:
           name: python-wheel
           path: target/wheels/*
-  
+
   publish:
     runs-on: ubuntu-18.04
     needs: [test, build-python]

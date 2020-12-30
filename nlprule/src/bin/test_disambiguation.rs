@@ -37,4 +37,9 @@ fn main() {
     }
 
     println!("Rules passing tests: {}", passes);
+    if passes == rules.len() {
+        std::process::exit(0);
+    } else {
+        std::process::exit(1);
+    }
 }
