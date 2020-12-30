@@ -28,14 +28,18 @@ fn main() {
     let rules = rules_container.rules();
 
     println!("Runnable rules: {}", rules.len());
-    println!(
-        "Rules passing tests: {}",
-        rules.iter().fold(0, |count, rule| {
-            if opts.ids.is_empty() || opts.ids.contains(&rule.id().to_string()) {
-                count + rule.test(&tokenizer) as usize
-            } else {
-                count
-            }
-        })
-    );
+
+    let mut passes = 0;
+    for rule in rules {
+        if opts.ids.is_empty() || opts.ids.contains(&rule.id().to_string()) {
+            passes += rule.test(&tokenizer) as usize;
+        }
+    }
+
+    println!("Rules passing tests: {}", passes);
+    if passes == rules.len() {
+        std::process::exit(0);
+    } else {
+        std::process::exit(1);
+    }
 }
