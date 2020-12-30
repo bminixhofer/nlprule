@@ -72,22 +72,28 @@ impl std::fmt::Debug for Match {
 }
 
 impl Match {
-    fn apply(&self, graph: &MatchGraph) -> String {
+    fn apply(&self, graph: &MatchGraph) -> Option<String> {
         let text = graph
             .by_id(self.id)
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
             .tokens
             .get(0)
-            .map(|x| x.word.text.as_str())
-            .unwrap_or("");
+            .map(|x| {
+                if x.word.text.is_empty() {
+                    None
+                } else {
+                    Some(x.word.text.as_str())
+                }
+            })
+            .unwrap_or(Some(""))?;
 
         if let Some((regex, replacement)) = &self.regex_replacer {
             let replaced = regex.replace_all(text, |caps: &Captures| {
                 utils::dollar_replace(replacement.to_string(), caps)
             });
-            self.conversion.convert(replaced.as_ref())
+            Some(self.conversion.convert(replaced.as_ref()))
         } else {
-            self.conversion.convert(text)
+            Some(self.conversion.convert(text))
         }
     }
 
@@ -120,7 +126,7 @@ pub struct Suggester {
 }
 
 impl Suggester {
-    fn apply(&self, groups: &MatchGraph, start: usize, _end: usize) -> String {
+    fn apply(&self, groups: &MatchGraph, start: usize, _end: usize) -> Option<String> {
         let mut output = Vec::new();
 
         let starts_with_conversion = match &self.parts[..] {
@@ -132,7 +138,7 @@ impl Suggester {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
                 SuggesterPart::Match(m) => {
-                    output.push(m.apply(groups));
+                    output.push(m.apply(groups)?);
                 }
             }
         }
@@ -158,9 +164,11 @@ impl Suggester {
                 .is_uppercase()
                 || first_token.byte_span.0 == 0)
         {
-            utils::apply_to_first(&suggestion, |x| x.to_uppercase().collect())
+            Some(utils::apply_to_first(&suggestion, |x| {
+                x.to_uppercase().collect()
+            }))
         } else {
-            suggestion
+            Some(suggestion)
         }
     }
 }
@@ -680,7 +688,7 @@ impl Rule {
                 let text: Vec<String> = self
                     .suggesters
                     .iter()
-                    .map(|x| x.apply(&graph, self.start, self.end))
+                    .filter_map(|x| x.apply(&graph, self.start, self.end))
                     .collect();
 
                 let start = if text
@@ -709,12 +717,14 @@ impl Rule {
                 let end = end_group.char_end;
 
                 // fix e. g. "Super , dass"
-                let text = text
+                let text: Vec<String> = text
                     .into_iter()
                     .map(|x| utils::fix_nospace_chars(&x))
                     .collect();
 
-                suggestions.push(Suggestion { start, end, text });
+                if !text.is_empty() {
+                    suggestions.push(Suggestion { start, end, text });
+                }
             }
         }
 
@@ -773,10 +783,11 @@ impl Default for RulesOptions {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     rules: Vec<Rule>,
 }
+
 impl Rules {
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(path: P, options: RulesOptions) -> Self {

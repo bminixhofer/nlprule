@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Tagger {
     tags: HashMap<u32, IndexMap<u32, Vec<u16>>>,
     tag_store: BiMap<String, u16>,
