@@ -2,6 +2,21 @@
 
 NLPRule is a library for rule-based grammatical error correction written in pure Rust with bindings for Python. Rules are sourced from [LanguageTool](https://github.com/languagetool-org/languagetool). 
 
+```python
+from nlprule import Tokenizer, Rules, SplitOn
+
+tokenizer = Tokenizer.load("en")
+rules = Rules.load("en", tokenizer, SplitOn([".", "?", "!"]))
+
+rules.correct(
+    "NLPRule can correct grammatical errors through a large number of rules ported from LanguageTool. "
+    "Their are many rules which are too obscure for all intensive purposes, but the bulk of them cold be useful."
+)
+# returns: 
+# 'NLPRule can correct grammatical errors through many rules ported from LanguageTool. '
+# 'There are many rules which are too obscure for all intents and purposes, but the bulk of them could be useful.'
+```
+
 My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed implications) and without all the extra stuff LanguageTool does such as spellchecking, n-gram based error detection, etc.
 
 NLPRule currently supports English and German.
