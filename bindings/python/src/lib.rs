@@ -7,15 +7,29 @@ use nlprule_core::{
     rule::Suggestion,
     tokenizer::{Tokenizer, TokenizerOptions},
 };
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyString;
+use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{
     fs::{self, File},
     io::{BufReader, Cursor, Read},
     path::PathBuf,
     sync::Arc,
 };
+
+fn serialize_splitter(py: Python, obj: &Option<PyObject>) -> PyResult<Vec<u8>> {
+    let bytes: &PyBytes = py
+        .import("pickle")?
+        .call_method1("dumps", (obj.to_object(py),))?
+        .downcast()?;
+    Ok(bytes.as_bytes().to_vec())
+}
+
+fn deserialize_splitter(py: Python, bytes: Vec<u8>) -> PyResult<Option<PyObject>> {
+    let pybytes = PyBytes::new(py, &bytes);
+    let obj: &PyAny = py.import("pickle")?.call_method1("loads", (pybytes,))?;
+    Ok(obj.extract::<Option<_>>()?)
+}
 
 fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
     let version = env!("CARGO_PKG_VERSION");
@@ -136,8 +150,9 @@ where
     }
 }
 
-#[pyclass()]
+#[pyclass(module = "nlprule")]
 #[text_signature = "(split_chars)"]
+#[derive(Default)]
 pub struct SplitOn {
     split_chars: Vec<char>,
 }
@@ -145,9 +160,10 @@ pub struct SplitOn {
 #[pymethods]
 impl SplitOn {
     #[new]
-    fn new(split_chars: Vec<&str>) -> PyResult<Self> {
+    fn new(split_chars: Option<Vec<&str>>) -> PyResult<Self> {
         Ok(SplitOn {
             split_chars: split_chars
+                .unwrap_or_else(Vec::new)
                 .iter()
                 .map(|x| {
                     let chars: Vec<_> = x.chars().collect();
@@ -187,9 +203,27 @@ impl SplitOn {
 
         output
     }
+
+    pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
+        match state.extract::<&PyBytes>(py) {
+            Ok(s) => {
+                let state: Vec<char> = bincode::deserialize(s.as_bytes()).unwrap();
+                self.split_chars = state;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
+        let state = &self.split_chars;
+
+        Ok(PyBytes::new(py, &bincode::serialize(&state).unwrap()).to_object(py))
+    }
 }
 
-#[pyclass(name = "Tagger")]
+#[pyclass(name = "Tagger", module = "nlprule")]
+#[derive(Default)]
 pub struct PyTagger {
     tagger: Arc<Tagger>,
     options: TokenizerOptions,
@@ -222,7 +256,7 @@ impl PyTagger {
     }
 }
 
-#[pyclass(name = "Token")]
+#[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
     token: Token,
 }
@@ -301,7 +335,7 @@ impl PyToken {
     }
 }
 
-#[pyclass(name = "Suggestion")]
+#[pyclass(name = "Suggestion", module = "nlprule")]
 struct PySuggestion {
     suggestion: Suggestion,
 }
@@ -330,8 +364,9 @@ impl From<Suggestion> for PySuggestion {
     }
 }
 
-#[pyclass(name = "Tokenizer")]
+#[pyclass(name = "Tokenizer", module = "nlprule")]
 #[text_signature = "(path, sentence_splitter=None)"]
+#[derive(Default)]
 pub struct PyTokenizer {
     tokenizer: Tokenizer,
     sentence_splitter: Option<PyObject>,
@@ -359,9 +394,13 @@ impl PyTokenizer {
     }
 
     #[new]
-    fn new(path: &str, sentence_splitter: Option<PyObject>) -> PyResult<Self> {
-        let reader = BufReader::new(File::open(path).unwrap());
-        let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
+    fn new(path: Option<&str>, sentence_splitter: Option<PyObject>) -> PyResult<Self> {
+        let tokenizer = if let Some(path) = path {
+            let reader = BufReader::new(File::open(path).unwrap());
+            bincode::deserialize_from(reader).unwrap()
+        } else {
+            Tokenizer::default()
+        };
 
         Ok(PyTokenizer {
             tokenizer,
@@ -415,9 +454,39 @@ impl PyTokenizer {
             .collect::<PyResult<Vec<_>>>()
         })
     }
+
+    pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
+        match state.extract::<&PyBytes>(py) {
+            Ok(s) => {
+                let state: (Tokenizer, Vec<u8>) = bincode::deserialize(s.as_bytes()).unwrap();
+                self.tokenizer = state.0;
+                self.sentence_splitter = deserialize_splitter(py, state.1)?;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
+        let state = (
+            &self.tokenizer,
+            serialize_splitter(py, &self.sentence_splitter)?,
+        );
+
+        Ok(PyBytes::new(py, &bincode::serialize(&state).unwrap()).to_object(py))
+    }
 }
 
-#[pyclass(name = "Rules")]
+impl PyTokenizer {
+    fn from_tokenizer(tokenizer: Tokenizer, sentence_splitter: Option<PyObject>) -> Self {
+        PyTokenizer {
+            tokenizer,
+            sentence_splitter,
+        }
+    }
+}
+
+#[pyclass(name = "Rules", module = "nlprule")]
 #[text_signature = "(path, tokenizer, sentence_splitter=None)"]
 struct PyRules {
     rules: Rules,
@@ -447,12 +516,22 @@ impl PyRules {
 
     #[new]
     fn new(
-        path: &str,
-        tokenizer: Py<PyTokenizer>,
+        py: Python,
+        path: Option<&str>,
+        tokenizer: Option<Py<PyTokenizer>>,
         sentence_splitter: Option<PyObject>,
     ) -> PyResult<Self> {
-        let reader = BufReader::new(File::open(path).unwrap());
-        let rules: Rules = bincode::deserialize_from(reader).unwrap();
+        let rules = if let Some(path) = path {
+            let reader = BufReader::new(File::open(path).unwrap());
+            bincode::deserialize_from(reader).unwrap()
+        } else {
+            Rules::default()
+        };
+        let tokenizer = if let Some(tokenizer) = tokenizer {
+            tokenizer
+        } else {
+            Py::new(py, PyTokenizer::default())?
+        };
 
         Ok(PyRules {
             rules,
@@ -545,6 +624,35 @@ impl PyRules {
                     .join(""))
             },
         )
+    }
+
+    pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
+        match state.extract::<&PyBytes>(py) {
+            Ok(s) => {
+                let state: (Rules, Tokenizer, Vec<u8>, Vec<u8>) =
+                    bincode::deserialize(s.as_bytes()).unwrap();
+                self.rules = state.0;
+                self.sentence_splitter = deserialize_splitter(py, state.2)?;
+                self.tokenizer = Py::new(
+                    py,
+                    PyTokenizer::from_tokenizer(state.1, deserialize_splitter(py, state.3)?),
+                )?;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
+        let tokenizer = self.tokenizer.borrow(py);
+        let state = (
+            &self.rules,
+            tokenizer.tokenizer(),
+            serialize_splitter(py, &self.sentence_splitter)?,
+            serialize_splitter(py, &self.tokenizer.borrow(py).sentence_splitter)?,
+        );
+
+        Ok(PyBytes::new(py, &bincode::serialize(&state).unwrap()).to_object(py))
     }
 }
 

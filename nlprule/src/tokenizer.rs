@@ -149,14 +149,6 @@ pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
     finalized
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Tokenizer {
-    rules: Vec<DisambiguationRule>,
-    chunker: Option<Chunker>,
-    tagger: Arc<Tagger>,
-    options: TokenizerOptions,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TokenizerOptions {
     pub allow_errors: bool,
@@ -183,6 +175,14 @@ impl Default for TokenizerOptions {
             known_failures: Vec::new(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Tokenizer {
+    rules: Vec<DisambiguationRule>,
+    chunker: Option<Chunker>,
+    tagger: Arc<Tagger>,
+    options: TokenizerOptions,
 }
 
 impl Tokenizer {
