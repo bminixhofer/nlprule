@@ -16,6 +16,7 @@ use crate::from_structure;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Suggestion {
+    pub source: String,
     pub start: usize,
     pub end: usize,
     pub text: Vec<String>,
@@ -653,6 +654,7 @@ pub struct Rule {
     pub(crate) suggesters: Vec<Suggester>,
     pub(crate) start: usize,
     pub(crate) end: usize,
+    pub(crate) on: bool,
 }
 
 impl Rule {
@@ -662,6 +664,14 @@ impl Rule {
 
     pub fn set_id(&mut self, id: String) {
         self.id = id;
+    }
+
+    pub fn on(&self) -> bool {
+        self.on
+    }
+
+    pub fn set_on(&mut self, on: bool) {
+        self.on = on;
     }
 
     pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
@@ -723,7 +733,12 @@ impl Rule {
                     .collect();
 
                 if !text.is_empty() {
-                    suggestions.push(Suggestion { start, end, text });
+                    suggestions.push(Suggestion {
+                        source: self.id.to_string(),
+                        start,
+                        end,
+                        text,
+                    });
                 }
             }
         }
@@ -800,12 +815,13 @@ impl Rules {
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
-                Ok((rule_structure, id)) => match Rule::try_from(rule_structure) {
+                Ok((rule_structure, id, on)) => match Rule::try_from(rule_structure) {
                     Ok(mut rule) => {
                         if (options.ids.is_empty() || options.ids.contains(&id))
                             && !options.ignore_ids.contains(&id)
                         {
                             rule.set_id(id);
+                            rule.set_on(on);
                             Some(rule)
                         } else {
                             None
@@ -845,7 +861,7 @@ impl Rules {
         let mut output = Vec::new();
         let mut mask = vec![false; tokens[tokens.len() - 1].char_span.1];
 
-        for rule in &self.rules {
+        for rule in self.rules.iter().filter(|x| x.on()) {
             for suggestion in rule.apply(tokens) {
                 if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
                     mask[suggestion.start..suggestion.end]

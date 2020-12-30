@@ -590,6 +590,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                             };
 
                             suggestion = Some(rule::Suggestion {
+                                source: "_Test".to_string(),
                                 start: char_length,
                                 end: char_length + length,
                                 text,
@@ -615,6 +616,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
             start,
             end,
             id: String::new(),
+            on: data.default.map_or(true, |x| x != "off"),
         })
     }
 }
