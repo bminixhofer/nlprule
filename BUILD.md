@@ -13,7 +13,7 @@ RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths da
 
 or for German (no chunker):
 ```bash
-RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/dumps/de/output.dump data/dumps/de/added.txt --tag-remove-paths data/dumps/de/removed.txt --disambiguation-path data/disambiguation.de.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/grammar.de.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/en_common.txt --out-tokenizer-path storage/de/tokenizer.bin --out-rules-path storage/de/rules.bin
+RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/dumps/de/output.dump data/dumps/de/added.txt --tag-remove-paths data/dumps/de/removed.txt --disambiguation-path data/disambiguation.de.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/grammar.de.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de_common.txt --out-tokenizer-path storage/de/tokenizer.bin --out-rules-path storage/de/rules.bin
 ```
 
 ## Testing
