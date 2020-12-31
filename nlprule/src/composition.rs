@@ -1,8 +1,6 @@
-use crate::{
-    tokenizer::{IncompleteToken, Token},
-    utils::SerializeRegex,
-};
+use crate::{tokenizer::Token, utils::SerializeRegex};
 use enum_dispatch::enum_dispatch;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -395,52 +393,34 @@ impl OffsetAtom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct Group<'a> {
     pub char_start: usize,
     pub char_end: usize,
     pub tokens: Vec<&'a Token>,
 }
 
-impl<'a> Group<'a> {
-    fn empty() -> Self {
-        Group {
-            char_start: 0,
-            char_end: 0,
-            tokens: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct MatchGraph<'a> {
     groups: Vec<Group<'a>>,
-    id_to_idx: HashMap<usize, usize>,
+    id_to_idx: &'a HashMap<usize, usize>,
+}
+
+lazy_static! {
+    static ref EMPTY_MAP: HashMap<usize, usize> = HashMap::new();
 }
 
 impl<'a> Default for MatchGraph<'a> {
     fn default() -> Self {
         MatchGraph {
             groups: Vec::new(),
-            id_to_idx: HashMap::new(),
+            id_to_idx: &(*EMPTY_MAP),
         }
     }
 }
 
 impl<'a> MatchGraph<'a> {
-    fn empty_from_parts(parts: &[Part]) -> Self {
-        let mut groups = Vec::new();
-        let mut id_to_idx = HashMap::new();
-        let mut current_id = 0;
-
-        for (i, part) in parts.iter().enumerate() {
-            if part.visible {
-                id_to_idx.insert(current_id, i);
-                current_id += 1;
-            }
-            groups.push(Group::empty());
-        }
-
+    fn new(groups: Vec<Group<'a>>, id_to_idx: &'a HashMap<usize, usize>) -> Self {
         MatchGraph { groups, id_to_idx }
     }
 
@@ -489,27 +469,46 @@ impl Part {
 #[derive(Serialize, Deserialize)]
 pub struct Composition {
     pub parts: Vec<Part>,
+    group_ids_to_idx: HashMap<usize, usize>,
 }
 
 impl Composition {
     pub fn new(parts: Vec<Part>) -> Self {
-        Composition { parts }
-    }
+        let mut group_ids_to_idx = HashMap::new();
+        let mut current_id = 0;
 
-    pub fn impossible(&self, tokens: &[IncompleteToken]) -> bool {
-        if self.parts[0].quantifier.min > 0 {
-            let graph = MatchGraph::default();
-
-            if let Atom::TextAtom(atom) = &self.parts[0].atom {
-                if !tokens
-                    .iter()
-                    .any(|x| atom.matcher().is_match(&x.word.text, &graph))
-                {
-                    return true;
-                }
+        for (i, part) in parts.iter().enumerate() {
+            if part.visible {
+                group_ids_to_idx.insert(current_id, i);
+                current_id += 1;
             }
         }
-        false
+
+        Composition {
+            parts,
+            group_ids_to_idx,
+        }
+    }
+
+    pub fn simple_text_atom(&self) -> Option<&concrete::TextAtom> {
+        if self.parts[0].quantifier.min > 0 {
+            if let Atom::TextAtom(atom) = &self.parts[0].atom {
+                Some(atom)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn can_not_match(&self, text: &str) -> bool {
+        if let Some(atom) = self.simple_text_atom() {
+            let graph = MatchGraph::default();
+            !atom.matcher().is_match(text, &graph)
+        } else {
+            false
+        }
     }
 
     fn next_can_match(
@@ -536,14 +535,16 @@ impl Composition {
             .any(|x| x.atom.is_match(tokens, graph, position))
     }
 
-    pub fn apply<'a>(&self, tokens: &[&'a Token], start: usize) -> Option<MatchGraph<'a>> {
+    pub fn apply<'a>(&'a self, tokens: &[&'a Token], start: usize) -> Option<MatchGraph<'a>> {
         let mut position = start;
 
         let mut cur_count = 0;
         let mut cur_atom_idx = 0;
 
-        // NB: if this impacts performance: could be moved to constructor, then cloned (but maybe lifetime issue)
-        let mut graph = MatchGraph::empty_from_parts(&self.parts);
+        let mut graph = MatchGraph::new(
+            vec![Group::default(); self.parts.len()],
+            &self.group_ids_to_idx,
+        );
 
         let mut is_match = loop {
             if cur_atom_idx >= self.parts.len() {
