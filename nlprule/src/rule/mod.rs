@@ -9,7 +9,7 @@ use itertools::Itertools;
 use log::{error, info, warn};
 use onig::Captures;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "compile")]
 use crate::from_structure;
@@ -182,7 +182,7 @@ trait RuleMatch {
     fn end(&self) -> usize;
 
     fn get_match<'a>(
-        &self,
+        &'a self,
         tokens: &'a [&Token],
         i: usize,
         mask: Option<&mut Vec<bool>>,
@@ -509,13 +509,18 @@ impl DisambiguationRule {
         &self,
         mut tokens: Vec<IncompleteToken>,
         tokenizer: &Tokenizer,
+        mut skip_mask: Vec<bool>,
         complete_tokens: Option<Vec<Token>>,
     ) -> (Vec<IncompleteToken>, Option<Vec<Token>>) {
         if matches!(self.disambiguations, Disambiguation::Nop) {
             return (tokens, None);
         }
 
-        if self.composition.impossible(&tokens) {
+        for (i, val) in skip_mask.iter_mut().enumerate().filter(|(_, x)| !**x) {
+            *val = self.composition.can_not_match(tokens[i].as_ref());
+        }
+
+        if skip_mask.iter().all(|x| *x) {
             return (tokens, None);
         }
 
@@ -524,11 +529,18 @@ impl DisambiguationRule {
         } else {
             finalize(tokens.clone())
         };
+        // this assumes that finalizing only ever inserts the SENT_START token
+        // works at the moment but not very clean
+        skip_mask.insert(0, false);
         let refs: Vec<&Token> = complete_tokens.iter().collect();
 
         let mut all_byte_spans = Vec::new();
 
-        for i in 0..complete_tokens.len() {
+        for (i, skip_val) in skip_mask.iter().enumerate() {
+            if *skip_val {
+                continue;
+            }
+
             if let Some(graph) = self.get_match(&refs, i, None) {
                 if let Some(filter) = &self.filter {
                     if !filter.keep(&graph, tokenizer) {
@@ -594,7 +606,14 @@ impl DisambiguationRule {
 
             let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
-            tokens_after = self.apply(tokens_after, tokenizer, None).0;
+            tokens_after = self
+                .apply(
+                    tokens_after,
+                    tokenizer,
+                    vec![false; tokens_before.len()],
+                    None,
+                )
+                .0;
 
             info!("Tokens: {:#?}", tokens_before);
 
@@ -674,7 +693,7 @@ impl Rule {
         self.on = on;
     }
 
-    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token], skip_mask: Option<&[bool]>) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
@@ -687,6 +706,12 @@ impl Rule {
         ];
 
         for i in 0..tokens.len() {
+            if let Some(skip_mask) = skip_mask {
+                if skip_mask[i] {
+                    continue;
+                }
+            }
+
             if let Some(graph) = self.get_match(&refs, i, Some(&mut mask)) {
                 let start_group = graph.by_id(self.start).unwrap_or_else(|| {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
@@ -752,7 +777,7 @@ impl Rule {
         for test in self.tests.iter() {
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens);
+            let suggestions = self.apply(&tokens, None);
 
             let pass = if suggestions.len() > 1 {
                 false
@@ -799,14 +824,44 @@ impl Default for RulesOptions {
 }
 
 #[derive(Serialize, Deserialize, Default)]
+pub struct Cache {
+    cache: HashMap<String, Vec<bool>>,
+}
+
+impl Cache {
+    pub fn get_skip_mask<S: AsRef<str>>(&self, texts: &[S], i: usize) -> Vec<bool> {
+        texts
+            .iter()
+            .map(|x| {
+                self.cache
+                    .get(x.as_ref())
+                    .map(|mask| mask[i])
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    pub fn populate(&mut self, common_words: &HashSet<String>, compositions: &[&Composition]) {
+        for composition in compositions {
+            for word in common_words {
+                self.cache
+                    .entry(word.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(composition.can_not_match(&word));
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     rules: Vec<Rule>,
+    cache: Cache,
 }
 
 impl Rules {
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(path: P, options: RulesOptions) -> Self {
-        use std::collections::HashMap;
         use std::convert::TryFrom;
 
         let rules = from_structure::structure::read_rules(path);
@@ -846,7 +901,21 @@ impl Rules {
             warn!("Errors constructing Rules: {:#?}", &errors);
         }
 
-        Rules { rules }
+        Rules {
+            rules,
+            cache: Cache::default(),
+        }
+    }
+
+    pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
+        self.cache.populate(
+            common_words,
+            &self
+                .rules
+                .iter()
+                .map(|x| &x.composition)
+                .collect::<Vec<_>>(),
+        );
     }
 
     pub fn rules(&self) -> &Vec<Rule> {
@@ -861,8 +930,9 @@ impl Rules {
         let mut output = Vec::new();
         let mut mask = vec![false; tokens[tokens.len() - 1].char_span.1];
 
-        for rule in self.rules.iter().filter(|x| x.on()) {
-            for suggestion in rule.apply(tokens) {
+        for (i, rule) in self.rules.iter().enumerate().filter(|(_, x)| x.on()) {
+            let skip_mask = self.cache.get_skip_mask(tokens, i);
+            for suggestion in rule.apply(tokens, Some(&skip_mask)) {
                 if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
                     mask[suggestion.start..suggestion.end]
                         .iter_mut()

@@ -10,7 +10,7 @@ pub mod tag;
 use chunk::Chunker;
 use tag::Tagger;
 
-use crate::rule::DisambiguationRule;
+use crate::rule::{Cache, DisambiguationRule};
 
 // see https://stackoverflow.com/a/40296745
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
@@ -83,6 +83,12 @@ pub struct IncompleteToken {
     pub chunks: Vec<String>,
 }
 
+impl AsRef<str> for IncompleteToken {
+    fn as_ref(&self) -> &str {
+        self.word.text.as_str()
+    }
+}
+
 impl<'a> From<IncompleteToken> for Token {
     fn from(data: IncompleteToken) -> Token {
         let mut word = data.word.clone();
@@ -123,6 +129,12 @@ pub struct Token {
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
     pub chunks: Vec<String>,
+}
+
+impl AsRef<str> for Token {
+    fn as_ref(&self) -> &str {
+        self.word.text.as_str()
+    }
 }
 
 impl<'a> Token {
@@ -183,6 +195,7 @@ pub struct Tokenizer {
     chunker: Option<Chunker>,
     tagger: Arc<Tagger>,
     options: TokenizerOptions,
+    cache: Cache,
 }
 
 impl Tokenizer {
@@ -239,7 +252,19 @@ impl Tokenizer {
             chunker,
             rules,
             options,
+            cache: Cache::default(),
         })
+    }
+
+    pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
+        self.cache.populate(
+            common_words,
+            &self
+                .rules
+                .iter()
+                .map(|x| &x.composition)
+                .collect::<Vec<_>>(),
+        );
     }
 
     pub fn rules(&self) -> &Vec<DisambiguationRule> {
@@ -265,12 +290,14 @@ impl Tokenizer {
     ) -> Vec<IncompleteToken> {
         let mut previously_computed_tokens = None;
 
-        for rule in &self.rules {
+        for (i, rule) in self.rules.iter().enumerate() {
             if rule.id == id {
                 break;
             }
 
-            let x = rule.apply(tokens, &self, previously_computed_tokens);
+            let skip_mask = self.cache.get_skip_mask(&tokens, i);
+            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
+
             tokens = x.0;
             previously_computed_tokens = x.1;
         }
@@ -281,8 +308,9 @@ impl Tokenizer {
     pub fn disambiguate(&self, mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
         let mut previously_computed_tokens = None;
 
-        for rule in &self.rules {
-            let x = rule.apply(tokens, &self, previously_computed_tokens);
+        for (i, rule) in self.rules.iter().enumerate() {
+            let skip_mask = self.cache.get_skip_mask(&tokens, i);
+            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
             tokens = x.0;
             previously_computed_tokens = x.1;
         }
