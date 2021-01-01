@@ -28,11 +28,11 @@ fn main() {
     let reader = BufReader::new(File::open(opts.rules).unwrap());
     let rules: Rules = bincode::deserialize_from(reader).unwrap();
 
-    let incomplete_tokens = tokenizer.disambiguate(tokenizer.tokenize(&opts.text), &opts.text);
+    let incomplete_tokens = tokenizer.disambiguate(tokenizer.tokenize(&opts.text));
 
     println!("Tokens: {:#?}", incomplete_tokens);
     println!(
         "Suggestions: {:#?}",
-        rules.apply(&finalize(incomplete_tokens), &opts.text)
+        rules.apply(&finalize(incomplete_tokens))
     );
 }

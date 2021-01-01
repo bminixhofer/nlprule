@@ -1,15 +1,21 @@
-use crate::filter::{Filter, Filterable};
-use crate::tokenizer::{finalize, IncompleteToken, Token, Word, WordData};
+use crate::tokenizer::{finalize, IncompleteToken, OwnedWord, Token, Word, WordData};
 use crate::utils::{self, SerializeRegex};
 use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
 };
+use crate::{
+    filter::{Filter, Filterable},
+    tokenizer::OwnedWordData,
+};
 use itertools::Itertools;
 use log::{error, info, warn};
 use onig::Captures;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 #[cfg(feature = "compile")]
 use crate::from_structure;
@@ -83,7 +89,7 @@ impl Match {
                 if x.word.text.is_empty() {
                     None
                 } else {
-                    Some(x.word.text.as_str())
+                    Some(x.word.text)
                 }
             })
             .unwrap_or(Some(""))?;
@@ -191,7 +197,7 @@ impl POSFilter {
 
     fn is_word_data_match(&self, data: &WordData) -> bool {
         match self {
-            POSFilter::String(string) => &data.pos == string,
+            POSFilter::String(string) => data.pos == string,
             POSFilter::Regex(regex) => regex.is_match(&data.pos),
         }
     }
@@ -221,16 +227,16 @@ impl POSFilter {
 
 #[derive(Serialize, Deserialize)]
 pub enum Disambiguation {
-    Remove(Vec<either::Either<WordData, POSFilter>>),
-    Add(Vec<WordData>),
-    Replace(Vec<WordData>),
-    Filter(Vec<Option<either::Either<WordData, POSFilter>>>),
+    Remove(Vec<either::Either<OwnedWordData, POSFilter>>),
+    Add(Vec<OwnedWordData>),
+    Replace(Vec<OwnedWordData>),
+    Filter(Vec<Option<either::Either<OwnedWordData, POSFilter>>>),
     Unify(Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>),
     Nop,
 }
 
 impl Disambiguation {
-    fn apply(&self, groups: Vec<Vec<&mut IncompleteToken>>, retain_last: bool) {
+    fn apply<'t>(&'t self, groups: Vec<Vec<&mut IncompleteToken<'t>>>, retain_last: bool) {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
@@ -259,20 +265,19 @@ impl Disambiguation {
                                         .word
                                         .tags
                                         .get(0)
-                                        .map_or(token.word.text.to_string(), |x| {
-                                            x.lemma.to_string()
-                                        });
+                                        .map_or(token.word.text, |x| x.lemma.as_ref())
+                                        .to_string();
 
                                     token.word.tags.retain(|x| x.pos == limit.pos);
 
                                     if token.word.tags.is_empty() {
                                         token.word.tags.push(WordData::new(
                                             if retain_last {
-                                                last
+                                                Cow::Owned(last)
                                             } else {
-                                                token.word.text.to_string()
+                                                token.word.text.into()
                                             },
-                                            limit.pos.to_string(),
+                                            limit.pos.as_str(),
                                         ));
                                     }
                                 }
@@ -289,10 +294,14 @@ impl Disambiguation {
             Disambiguation::Add(datas) => {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
-                        let mut data = data.clone();
-                        if data.lemma.is_empty() {
-                            data.lemma = token.word.text.to_string();
-                        }
+                        let data = WordData::new(
+                            if data.lemma.is_empty() {
+                                token.word.text
+                            } else {
+                                data.lemma.as_str()
+                            },
+                            data.pos.as_str(),
+                        );
 
                         token.word.tags.push(data);
                         token.word.tags.retain(|x| !x.pos.is_empty());
@@ -302,10 +311,14 @@ impl Disambiguation {
             Disambiguation::Replace(datas) => {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
-                        let mut data = data.clone();
-                        if data.lemma.is_empty() {
-                            data.lemma = token.word.text.to_string();
-                        }
+                        let data = WordData::new(
+                            if data.lemma.is_empty() {
+                                token.word.text
+                            } else {
+                                data.lemma.as_str()
+                            },
+                            data.pos.as_str(),
+                        );
 
                         token.word.tags.clear();
                         token.word.tags.push(data);
@@ -375,8 +388,8 @@ impl Disambiguation {
 pub struct DisambiguationChange {
     pub(crate) text: String,
     pub(crate) char_span: (usize, usize),
-    pub(crate) before: Word,
-    pub(crate) after: Word,
+    pub(crate) before: OwnedWord,
+    pub(crate) after: OwnedWord,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -405,14 +418,13 @@ impl DisambiguationRule {
         self.id = id;
     }
 
-    pub fn apply(
-        &self,
-        mut tokens: Vec<IncompleteToken>,
-        text: &str,
+    pub fn apply<'t>(
+        &'t self,
+        mut tokens: Vec<IncompleteToken<'t>>,
         tokenizer: &Tokenizer,
         mut skip_mask: Vec<bool>,
-        complete_tokens: Option<Vec<Token>>,
-    ) -> (Vec<IncompleteToken>, Option<Vec<Token>>) {
+        complete_tokens: Option<Vec<Token<'t>>>,
+    ) -> (Vec<IncompleteToken<'t>>, Option<Vec<Token<'t>>>) {
         if matches!(self.disambiguations, Disambiguation::Nop) {
             return (tokens, None);
         }
@@ -441,7 +453,7 @@ impl DisambiguationRule {
 
         let mut all_byte_spans = Vec::new();
 
-        for graph in self.engine.get_matches(&refs, text, None, Some(&skip_mask)) {
+        for graph in self.engine.get_matches(&refs, None, Some(&skip_mask)) {
             if let Some(filter) = &self.filter {
                 if !filter.keep(&graph, tokenizer) {
                     continue;
@@ -503,13 +515,11 @@ impl DisambiguationRule {
                 DisambiguationTest::Changed(x) => x.text.as_str(),
             };
 
-            let tokens_before =
-                tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), text, &self.id);
+            let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
             let mut tokens_after = tokens_before.clone();
             tokens_after = self
                 .apply(
                     tokens_after,
-                    text,
                     tokenizer,
                     vec![false; tokens_before.len()],
                     None,
@@ -531,8 +541,19 @@ impl DisambiguationRule {
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
 
-                    let unordered_tags = after.word.tags.iter().collect::<HashSet<_>>();
-                    let unordered_tags_change = change.after.tags.iter().collect::<HashSet<_>>();
+                    let unordered_tags = after
+                        .word
+                        .tags
+                        .iter()
+                        .map(|x| x.to_owned_word_data())
+                        .collect::<HashSet<OwnedWordData>>();
+                    // need references to compare
+                    let unordered_tags: HashSet<_> = unordered_tags.iter().collect();
+                    let unordered_tags_change = change
+                        .after
+                        .tags
+                        .iter()
+                        .collect::<HashSet<&OwnedWordData>>();
 
                     after.word.text == change.after.text && unordered_tags == unordered_tags_change
                 }
@@ -574,12 +595,12 @@ pub struct TokenEngine {
 }
 
 impl TokenEngine {
-    fn get_match<'a>(
-        &'a self,
-        tokens: &'a [&'a Token],
+    fn get_match<'t>(
+        &'t self,
+        tokens: &'t [&'t Token],
         i: usize,
         mask: &mut Option<Vec<bool>>,
-    ) -> Option<MatchGraph<'a>> {
+    ) -> Option<MatchGraph<'t>> {
         if let Some(graph) = self.composition.apply(tokens, i) {
             let start_group = graph
                 .by_id(self.start)
@@ -640,13 +661,12 @@ pub enum Engine {
 }
 
 impl Engine {
-    fn get_matches<'a>(
-        &'a self,
-        tokens: &'a [&'a Token],
-        text: &str,
+    fn get_matches<'t>(
+        &'t self,
+        tokens: &'t [&'t Token],
         mut mask: Option<Vec<bool>>,
         skip_mask: Option<&[bool]>,
-    ) -> Vec<MatchGraph<'a>> {
+    ) -> Vec<MatchGraph<'t>> {
         let mut graphs = Vec::new();
 
         match &self {
@@ -661,7 +681,7 @@ impl Engine {
                     graphs.extend(engine.get_match(&tokens, i, &mut mask));
                 }
             }
-            Engine::Text(regex) => {
+            Engine::Text(_regex) => {
                 // for cap in regex.captures_iter(text) {
 
                 // }
@@ -701,12 +721,7 @@ impl Rule {
         self.on = on;
     }
 
-    pub fn apply(
-        &self,
-        tokens: &[Token],
-        text: &str,
-        skip_mask: Option<&[bool]>,
-    ) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token], skip_mask: Option<&[bool]>) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
@@ -718,7 +733,7 @@ impl Rule {
                 .unwrap_or(0)
         ]);
 
-        for graph in self.engine.get_matches(&refs, text, mask, skip_mask) {
+        for graph in self.engine.get_matches(&refs, mask, skip_mask) {
             let start_group = graph
                 .by_id(self.start)
                 .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));
@@ -780,10 +795,9 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in self.tests.iter() {
-            let tokens =
-                finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text), &test.text));
+            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens, &test.text, None);
+            let suggestions = self.apply(&tokens, None);
 
             let pass = if suggestions.len() > 1 {
                 false
@@ -930,7 +944,7 @@ impl Rules {
         &self.rules
     }
 
-    pub fn apply(&self, tokens: &[Token], text: &str) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -940,7 +954,7 @@ impl Rules {
 
         for (i, rule) in self.rules.iter().enumerate().filter(|(_, x)| x.on()) {
             let skip_mask = self.cache.get_skip_mask(tokens, i);
-            for suggestion in rule.apply(tokens, text, Some(&skip_mask)) {
+            for suggestion in rule.apply(tokens, Some(&skip_mask)) {
                 if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
                     mask[suggestion.start..suggestion.end]
                         .iter_mut()

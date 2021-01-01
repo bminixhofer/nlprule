@@ -1,6 +1,3 @@
-use crate::filter::get_filter;
-use crate::rule;
-use crate::tokenizer::{Word, WordData};
 use crate::{
     composition::{
         concrete::ChunkAtom,
@@ -10,6 +7,8 @@ use crate::{
     },
     utils::SerializeRegex,
 };
+use crate::{filter::get_filter, tokenizer::OwnedWordData};
+use crate::{rule, tokenizer::OwnedWord};
 use crate::{utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
@@ -535,11 +534,14 @@ impl TryFrom<structure::Rule> for rule::Rule {
                     end,
                 ))
             }
-            (None, Some(regex)) => Ok((
-                rule::Engine::Text(SerializeRegex::new(&regex, false, false)?),
-                0,
-                0,
-            )),
+            (None, Some(_regex)) => {
+                Err(Error::Unimplemented("regex".into()))
+                // Ok((
+                //     rule::Engine::Text(SerializeRegex::new(&regex, false, false)?),
+                //     0,
+                //     0,
+                // ))
+            }
         }?;
 
         let maybe_composition = if let rule::Engine::Token(engine) = &engine {
@@ -647,13 +649,13 @@ impl TryFrom<structure::Rule> for rule::Rule {
     }
 }
 
-fn parse_tag_form(form: &str) -> Word {
+fn parse_tag_form(form: &str) -> OwnedWord {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
     }
 
     let captures = REGEX.captures(form).unwrap();
-    let word = captures.at(1).unwrap().to_string();
+    let text = captures.at(1).unwrap().to_string();
     let tags = captures.at(2).unwrap();
 
     let tags = tags
@@ -668,17 +670,20 @@ fn parse_tag_form(form: &str) -> Word {
             if parts.len() < 2 {
                 None
             } else {
-                Some(WordData::new(parts[0].to_string(), parts[1].to_string()))
+                Some(OwnedWordData::new(
+                    parts[0].to_string(),
+                    parts[1].to_string(),
+                ))
             }
         })
         .collect();
 
-    Word::new_with_tags(word, tags)
+    OwnedWord { text, tags }
 }
 
-impl From<structure::WordData> for WordData {
+impl From<structure::WordData> for OwnedWordData {
     fn from(data: structure::WordData) -> Self {
-        WordData::new(data.lemma.unwrap_or_else(String::new), data.pos)
+        OwnedWordData::new(data.lemma.unwrap_or_else(String::new), data.pos)
     }
 }
 
@@ -945,7 +950,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(rule::Disambiguation::Filter(vec![Some(either::Left(
-                        WordData::new(String::new(), postag.to_string()),
+                        OwnedWordData::new(String::new(), postag.to_string()),
                     ))]))
                 } else {
                     Ok(rule::Disambiguation::Filter(

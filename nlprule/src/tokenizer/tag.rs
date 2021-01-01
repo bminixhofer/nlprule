@@ -129,8 +129,8 @@ impl Tagger {
             for (key, value) in map.iter() {
                 for tag_id in value {
                     output.push(WordData::new(
-                        self.word_store.get_by_right(key).unwrap().to_string(),
-                        self.tag_store.get_by_right(tag_id).unwrap().to_string(),
+                        self.word_store.get_by_right(key).unwrap(),
+                        self.tag_store.get_by_right(tag_id).unwrap(),
                     ))
                 }
             }
@@ -192,7 +192,8 @@ impl Tagger {
                         tags = next_tags
                             .into_iter()
                             .map(|mut x| {
-                                x.lemma = format!("{}{}", &word[..i], x.lemma.to_lowercase());
+                                x.lemma =
+                                    format!("{}{}", &word[..i], x.lemma.to_lowercase()).into();
                                 x
                             })
                             .collect();

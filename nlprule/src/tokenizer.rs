@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
@@ -55,55 +55,126 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     tokens
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WordData {
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordData<'t> {
+    pub lemma: Cow<'t, str>,
+    pub pos: &'t str,
+}
+
+impl<'t> WordData<'t> {
+    pub fn new<S: Into<Cow<'t, str>>>(lemma: S, pos: &'t str) -> Self {
+        WordData {
+            lemma: lemma.into(),
+            pos,
+        }
+    }
+
+    pub fn to_owned_word_data(&self) -> OwnedWordData {
+        OwnedWordData {
+            lemma: self.lemma.to_string(),
+            pos: self.pos.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+pub struct OwnedWordData {
     pub lemma: String,
     pub pos: String,
 }
 
-impl WordData {
+impl OwnedWordData {
     pub fn new(lemma: String, pos: String) -> Self {
-        WordData { lemma, pos }
+        OwnedWordData { lemma, pos }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Word {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Word<'t> {
+    pub text: &'t str,
+    pub tags: Vec<WordData<'t>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OwnedWord {
     pub text: String,
-    pub tags: Vec<WordData>,
+    pub tags: Vec<OwnedWordData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IncompleteToken {
-    pub word: Word,
+pub struct IncompleteToken<'t> {
+    pub word: Word<'t>,
     pub byte_span: (usize, usize),
     pub char_span: (usize, usize),
     pub is_sentence_end: bool,
     pub has_space_before: bool,
     pub chunks: Vec<String>,
+    pub text: &'t str,
 }
 
-impl AsRef<str> for IncompleteToken {
+impl<'t> AsRef<str> for IncompleteToken<'t> {
     fn as_ref(&self) -> &str {
-        self.word.text.as_str()
+        self.word.text
     }
 }
 
-impl<'a> From<IncompleteToken> for Token {
-    fn from(data: IncompleteToken) -> Token {
+impl<'t> Word<'t> {
+    pub fn new_with_tags(text: &'t str, tags: Vec<WordData<'t>>) -> Self {
+        Word { text, tags }
+    }
+
+    pub fn to_owned_word(&self) -> OwnedWord {
+        OwnedWord {
+            text: self.text.to_string(),
+            tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Token<'t> {
+    pub word: Word<'t>,
+    pub char_span: (usize, usize),
+    pub byte_span: (usize, usize),
+    pub has_space_before: bool,
+    pub chunks: Vec<String>,
+    pub text: &'t str,
+}
+
+impl<'t> AsRef<str> for Token<'t> {
+    fn as_ref(&self) -> &str {
+        self.word.text
+    }
+}
+
+impl<'t> Token<'t> {
+    fn sent_start(text: &'t str) -> Self {
+        Token {
+            word: Word::new_with_tags(
+                "",
+                vec![WordData::new("", "SENT_START")].into_iter().collect(),
+            ),
+            char_span: (0, 0),
+            byte_span: (0, 0),
+            has_space_before: false,
+            chunks: Vec::new(),
+            text,
+        }
+    }
+}
+
+impl<'t> From<IncompleteToken<'t>> for Token<'t> {
+    fn from(data: IncompleteToken<'t>) -> Self {
         let mut word = data.word.clone();
 
-        word.tags
-            .push(WordData::new(data.word.text.to_string(), String::new()));
+        word.tags.push(WordData::new(data.word.text, ""));
 
         if word.tags.iter().all(|x| x.pos.is_empty()) {
-            word.tags
-                .push(WordData::new(data.word.text.to_string(), "UNKNOWN".into()));
+            word.tags.push(WordData::new(data.word.text, "UNKNOWN"));
         }
 
         if data.is_sentence_end {
-            word.tags
-                .push(WordData::new(data.word.text.to_string(), "SENT_END".into()));
+            word.tags.push(WordData::new(data.word.text, "SENT_END"));
         }
 
         Token {
@@ -112,50 +183,17 @@ impl<'a> From<IncompleteToken> for Token {
             char_span: data.char_span,
             has_space_before: data.has_space_before,
             chunks: data.chunks,
+            text: data.text,
         }
     }
 }
 
-impl Word {
-    pub fn new_with_tags(text: String, tags: Vec<WordData>) -> Self {
-        Word { text, tags }
+pub fn finalize<'t>(tokens: Vec<IncompleteToken<'t>>) -> Vec<Token<'t>> {
+    if tokens.is_empty() {
+        return Vec::new();
     }
-}
 
-#[derive(Debug)]
-pub struct Token {
-    pub word: Word,
-    pub char_span: (usize, usize),
-    pub byte_span: (usize, usize),
-    pub has_space_before: bool,
-    pub chunks: Vec<String>,
-}
-
-impl AsRef<str> for Token {
-    fn as_ref(&self) -> &str {
-        self.word.text.as_str()
-    }
-}
-
-impl<'a> Token {
-    fn sent_start() -> Token {
-        Token {
-            word: Word::new_with_tags(
-                String::new(),
-                vec![WordData::new(String::new(), "SENT_START".into())]
-                    .into_iter()
-                    .collect(),
-            ),
-            char_span: (0, 0),
-            byte_span: (0, 0),
-            has_space_before: false,
-            chunks: Vec::new(),
-        }
-    }
-}
-
-pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
-    let mut finalized = vec![Token::sent_start()];
+    let mut finalized = vec![Token::sent_start(tokens[0].text)];
     finalized.extend(tokens.into_iter().map(|x| x.into()));
 
     finalized
@@ -279,12 +317,11 @@ impl Tokenizer {
         &self.options
     }
 
-    pub fn disambiguate_up_to_id(
-        &self,
-        mut tokens: Vec<IncompleteToken>,
-        text: &str,
+    pub fn disambiguate_up_to_id<'t>(
+        &'t self,
+        mut tokens: Vec<IncompleteToken<'t>>,
         id: &str,
-    ) -> Vec<IncompleteToken> {
+    ) -> Vec<IncompleteToken<'t>> {
         let mut previously_computed_tokens = None;
 
         for (i, rule) in self.rules.iter().enumerate() {
@@ -293,7 +330,7 @@ impl Tokenizer {
             }
 
             let skip_mask = self.cache.get_skip_mask(&tokens, i);
-            let x = rule.apply(tokens, text, &self, skip_mask, previously_computed_tokens);
+            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
 
             tokens = x.0;
             previously_computed_tokens = x.1;
@@ -302,16 +339,16 @@ impl Tokenizer {
         tokens
     }
 
-    pub fn disambiguate(
-        &self,
-        mut tokens: Vec<IncompleteToken>,
-        text: &str,
-    ) -> Vec<IncompleteToken> {
+    pub fn disambiguate<'t>(
+        &'t self,
+        mut tokens: Vec<IncompleteToken<'t>>,
+    ) -> Vec<IncompleteToken<'t>> {
         let mut previously_computed_tokens = None;
 
         for (i, rule) in self.rules.iter().enumerate() {
             let skip_mask = self.cache.get_skip_mask(&tokens, i);
-            let x = rule.apply(tokens, text, &self, skip_mask, previously_computed_tokens);
+
+            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
             tokens = x.0;
             previously_computed_tokens = x.1;
         }
@@ -319,7 +356,7 @@ impl Tokenizer {
         tokens
     }
 
-    pub fn tokenize(&self, text: &str) -> Vec<IncompleteToken> {
+    pub fn tokenize<'t>(&'t self, text: &'t str) -> Vec<IncompleteToken<'t>> {
         let sentence_indices = text
             .unicode_sentences()
             .map(|sentence| {
@@ -349,7 +386,7 @@ impl Tokenizer {
 
                 IncompleteToken {
                     word: Word::new_with_tags(
-                        trimmed.to_string(),
+                        trimmed,
                         self.tagger.get_tags(
                             trimmed,
                             is_sentence_start || self.options.always_add_lower_tags,
@@ -361,6 +398,7 @@ impl Tokenizer {
                     is_sentence_end,
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
+                    text,
                 }
             })
             .filter(|token| !token.word.text.is_empty())
