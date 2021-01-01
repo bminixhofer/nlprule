@@ -141,6 +141,15 @@ pub struct Token<'t> {
     pub text: &'t str,
 }
 
+#[derive(Debug)]
+pub struct OwnedToken {
+    pub word: OwnedWord,
+    pub char_span: (usize, usize),
+    pub byte_span: (usize, usize),
+    pub has_space_before: bool,
+    pub chunks: Vec<String>,
+}
+
 impl<'t> AsRef<str> for Token<'t> {
     fn as_ref(&self) -> &str {
         self.word.text
@@ -159,6 +168,16 @@ impl<'t> Token<'t> {
             has_space_before: false,
             chunks: Vec::new(),
             text,
+        }
+    }
+
+    pub fn to_owned_token(&self) -> OwnedToken {
+        OwnedToken {
+            word: self.word.to_owned_word(),
+            char_span: self.char_span,
+            byte_span: self.byte_span,
+            has_space_before: self.has_space_before,
+            chunks: self.chunks.clone(),
         }
     }
 }

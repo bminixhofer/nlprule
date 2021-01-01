@@ -1,7 +1,7 @@
 use flate2::read::GzDecoder;
 use nlprule_core::{
     rule::Rules,
-    tokenizer::{finalize, tag::Tagger, Token},
+    tokenizer::{finalize, tag::Tagger, OwnedToken},
 };
 use nlprule_core::{
     rule::Suggestion,
@@ -272,7 +272,7 @@ impl PyTagger {
                 self.options.use_compound_split_heuristic,
             )
             .into_iter()
-            .map(|x| (x.lemma, x.pos))
+            .map(|x| (x.lemma.to_string(), x.pos.to_string()))
             .collect()
     }
 
@@ -303,11 +303,11 @@ impl PyTagger {
 /// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
-    token: Token,
+    token: OwnedToken,
 }
 
-impl From<Token> for PyToken {
-    fn from(token: Token) -> Self {
+impl From<OwnedToken> for PyToken {
+    fn from(token: OwnedToken) -> Self {
         PyToken { token }
     }
 }
@@ -505,7 +505,7 @@ impl PyTokenizer {
                     .disambiguate(self.tokenizer.tokenize(&sentence)),
             )
             .into_iter()
-            .map(|x| PyCell::new(py, PyToken::from(x)))
+            .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
             .collect::<PyResult<Vec<_>>>()
         })
     }
@@ -527,7 +527,7 @@ impl PyTokenizer {
                             .disambiguate(self.tokenizer.tokenize(&sentence)),
                     )
                     .into_iter()
-                    .map(|x| PyCell::new(py, PyToken::from(x)))
+                    .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
                     .collect::<PyResult<Vec<_>>>()?;
                     output.extend(tokens);
                 }
@@ -650,7 +650,7 @@ impl PyRules {
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
             self.rules
-                .apply(&tokens, &sentence)
+                .apply(&tokens)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -676,7 +676,7 @@ impl PyRules {
                     let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(sentence)));
                     let suggestions = self
                         .rules
-                        .apply(&tokens, sentence)
+                        .apply(&tokens)
                         .into_iter()
                         .map(|mut x| {
                             x.start += offset;
@@ -708,7 +708,7 @@ impl PyRules {
             let tokenizer = tokenizer.tokenizer();
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
-            let suggestions = self.rules.apply(&tokens, &sentence);
+            let suggestions = self.rules.apply(&tokens);
             Ok(Rules::correct(&sentence, &suggestions))
         })
     }
@@ -729,7 +729,7 @@ impl PyRules {
                     .iter()
                     .map(|x| {
                         let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
-                        let suggestions = self.rules.apply(&tokens, x);
+                        let suggestions = self.rules.apply(&tokens);
                         Rules::correct(x, &suggestions)
                     })
                     .collect::<Vec<_>>()
