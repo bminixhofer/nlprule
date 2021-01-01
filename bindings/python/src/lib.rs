@@ -150,6 +150,16 @@ where
     }
 }
 
+/// A convience class to split text on specific characters.
+/// Can be passed as `sentence_splitter` to the `Rules` or `Tokenizer` to enable processing more than one sentence.
+///
+/// # Example
+///
+/// ```python
+/// split = SplitOn([".", "?", "!"])
+/// split(["This is a test. This is also a test."])
+/// # returns [["This is a test. ", "This is also a test."]]
+/// ```
 #[pyclass(module = "nlprule")]
 #[text_signature = "(split_chars)"]
 #[derive(Default)]
@@ -222,6 +232,10 @@ impl SplitOn {
     }
 }
 
+/// A tagger dictionary.
+/// Associates many words with possible POS tags and lemmas.
+///
+/// Can not be created directly but accessed by the `.tagger` attribute on the tokenizer.
 #[pyclass(name = "Tagger", module = "nlprule")]
 #[derive(Default)]
 pub struct PyTagger {
@@ -237,16 +251,40 @@ impl PyTagger {
 
 #[pymethods]
 impl PyTagger {
-    fn get_tags(&self, word: &str, add_lower: bool) -> Vec<(String, String)> {
+    /// Get the data for a given word from the dictionary.
+    ///
+    /// Arguments:
+    ///     word (str): The input word.
+    ///     add_lower (Optional[bool]):
+    ///         Whether to add data for the lowercase variant of the word.
+    ///         If unset, will be set according to the language config.
+    ///
+    /// Returns:
+    ///     data (List[Tuple[str, str]]):
+    ///         A list of tuples of (lemma, POS).
+    ///         Not contextualized so it can be thought of as possible lemma / POS of the given word.
+    #[text_signature = "(word, add_lower=None)"]
+    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, String)> {
         self.tagger
-            .get_tags(word, add_lower, self.options.use_compound_split_heuristic)
+            .get_tags(
+                word,
+                add_lower.unwrap_or(self.options.always_add_lower_tags),
+                self.options.use_compound_split_heuristic,
+            )
             .into_iter()
             .map(|x| (x.lemma, x.pos))
             .collect()
     }
 
-    fn get_group_members(&self, word: &str) -> Vec<&str> {
-        self.tagger.get_group_members(&word.to_string())
+    /// Get the words with the same lemma as the given lemma.
+    ///
+    /// Arguments:
+    ///     lemma (str): The lemma.
+    ///
+    /// Returns:
+    ///     group_members (List[str]): The words in the dictionary with the same lemma.
+    fn get_group_members(&self, lemma: &str) -> Vec<&str> {
+        self.tagger.get_group_members(&lemma.to_string())
     }
 }
 
@@ -256,6 +294,13 @@ impl PyTagger {
     }
 }
 
+/// An analyzed token with the attributes:
+/// * text (str): the text of this token
+/// * span (Tuple[int, int]): the character span of this token in the original string
+/// * data (List[Tuple[str, str]]): Lemmas and corresponding POS tags of this token
+/// * lemmas (List[str]): A list of lemmas of this token
+/// * tags (List[str]): A list of possible POS tags for this token. Including special SENT_START and SENT_END tags.
+/// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
     token: Token,
@@ -335,6 +380,11 @@ impl PyToken {
     }
 }
 
+/// A replacement suggestion with the attributes:
+/// * start (int): The start character position of the suggestion in the original text.
+/// * end (int): The end character position of the suggestion in the original text.
+/// * text (List[str]): A list of suggested replacements.
+/// * source (str): The ID of the rule that triggered this suggestion.
 #[pyclass(name = "Suggestion", module = "nlprule")]
 struct PySuggestion {
     suggestion: Suggestion,
@@ -369,6 +419,18 @@ impl From<Suggestion> for PySuggestion {
     }
 }
 
+/// The tokenizer.
+/// Does dictionary- and rule-based POS tagging, lemmatization and (depending on the language) chunking.
+/// Can be created from a tokenizer binary:
+/// ```python
+/// tokenizer = Tokenizer("/path/to/tokenizer.bin")
+/// ```
+/// or from a language code:
+/// ```python
+/// tokenizer = Tokenizer.load("en")
+/// ```
+/// When created from a language code, the binary is downloaded from the internet the first time.
+/// Then it is stored at your cache and loaded from there.
 #[pyclass(name = "Tokenizer", module = "nlprule")]
 #[text_signature = "(path, sentence_splitter=None)"]
 #[derive(Default)]
@@ -413,6 +475,10 @@ impl PyTokenizer {
         })
     }
 
+    /// Get the tagger dictionary of this tokenizer.
+    ///
+    /// Returns:
+    ///     tagger (Tagger): The tagger dictionary.
     #[getter]
     fn tagger(&self) -> PyTagger {
         PyTagger::new(
@@ -421,6 +487,30 @@ impl PyTokenizer {
         )
     }
 
+    /// Tokenizes the given sentence(s).
+    /// "tokenizing" in this context includes POS tagging, lemmatization and chunking.
+    ///
+    /// Arguments:
+    ///     sentence_or_sentences (Union[str, List[str]]): The sentence(s) to tokenize.
+    ///
+    /// Returns:
+    ///     tokens (Union[List[Token], List[List[Token]]]):
+    ///         The analyzed tokens. Batched if the input is batched.
+    ///         NB: a special SENT_START token is always inserted as the first token, otherwise tokens mostly correspond to words.
+    #[text_signature = "(sentence_or_sentences)"]
+    fn tokenize_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
+        sentence_guard(py, sentence_or_sentences, |sentence| {
+            finalize(
+                self.tokenizer
+                    .disambiguate(self.tokenizer.tokenize(&sentence)),
+            )
+            .into_iter()
+            .map(|x| PyCell::new(py, PyToken::from(x)))
+            .collect::<PyResult<Vec<_>>>()
+        })
+    }
+
+    /// Tokenize an arbitrary text. See the documentation for `tokenize_sentence`.
     #[text_signature = "(text_or_texts)"]
     fn tokenize(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
         text_guard(
@@ -445,19 +535,6 @@ impl PyTokenizer {
                 Ok(output)
             },
         )
-    }
-
-    #[text_signature = "(sentence_or_sentences)"]
-    fn tokenize_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
-        sentence_guard(py, sentence_or_sentences, |sentence| {
-            finalize(
-                self.tokenizer
-                    .disambiguate(self.tokenizer.tokenize(&sentence)),
-            )
-            .into_iter()
-            .map(|x| PyCell::new(py, PyToken::from(x)))
-            .collect::<PyResult<Vec<_>>>()
-        })
     }
 
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
@@ -491,6 +568,18 @@ impl PyTokenizer {
     }
 }
 
+/// The grammatical rules.
+/// Can be created from a rules binary:
+/// ```python
+/// tokenizer = Tokenizer("/path/to/rules.bin")
+/// ```
+/// or from a language code and `Tokenizer`:
+/// ```python
+/// tokenizer = Tokenizer.load("en")
+/// rules = Rules.load("en", tokenizer)
+/// ```
+/// When created from a language code, the binary is downloaded from the internet the first time.
+/// Then it is stored at your cache and loaded from there.
 #[pyclass(name = "Rules", module = "nlprule")]
 #[text_signature = "(path, tokenizer, sentence_splitter=None)"]
 struct PyRules {
@@ -545,6 +634,14 @@ impl PyRules {
         })
     }
 
+    /// Get suggestions for the given sentence.
+    ///
+    /// Arguments:
+    ///     sentence_or_sentences (Union[str, List[str]]): The sentence(s) to get suggestions for.
+    ///
+    /// Returns:
+    ///     suggestions (Union[List[Suggestion], List[List[Suggestion]]]):
+    ///         The computed suggestions. Batched if the input is batched.
     #[text_signature = "(sentence_or_sentences)"]
     fn suggest_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
         sentence_guard(py, sentence_or_sentences, |sentence| {
@@ -560,6 +657,7 @@ impl PyRules {
         })
     }
 
+    /// Get suggestions for an arbitrary text. See the documentation for `suggest_sentence`.
     #[text_signature = "(text_or_texts)"]
     fn suggest(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
         text_guard(
@@ -595,6 +693,14 @@ impl PyRules {
         )
     }
 
+    /// Correct the given sentence.
+    ///
+    /// Arguments:
+    ///     sentence_or_sentences (Union[str, List[str]]): The sentence(s) to correct.
+    ///
+    /// Returns:
+    ///     sentence_or_sentences (Union[str, List[str]]):
+    ///         The corrected texts. Batched if the input is batched.
     #[text_signature = "(sentence_or_sentences)"]
     fn correct_sentence(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
         sentence_guard(py, sentence_or_sentences, |sentence| {
@@ -607,30 +713,7 @@ impl PyRules {
         })
     }
 
-    #[text_signature = "(text, suggestions)"]
-    fn apply_suggestions(
-        &self,
-        py: Python,
-        text: &str,
-        suggestions: Vec<Py<PySuggestion>>,
-    ) -> String {
-        let suggestions: Vec<Suggestion> = suggestions
-            .into_iter()
-            .map(|x| {
-                let x = x.borrow(py);
-
-                Suggestion {
-                    source: x.source().to_string(),
-                    text: x.text().iter().map(|x| x.to_string()).collect(),
-                    start: x.start(),
-                    end: x.end(),
-                }
-            })
-            .collect();
-
-        Rules::correct(text, &suggestions)
-    }
-
+    /// Correct an arbitrary text. See the documentation for `correct_sentence`.
     #[text_signature = "(text_or_texts)"]
     fn correct(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
         text_guard(
@@ -653,6 +736,35 @@ impl PyRules {
                     .join(""))
             },
         )
+    }
+
+    /// Convenience method to apply suggestions to the given text.
+    /// Always uses the first element of `suggestion.text` as replacement.
+    ///
+    /// Arguments:
+    ///     text (str): The input text.
+    ///     suggestions (List[Suggestion]): A list of suggestions to apply.
+    ///
+    /// Returns:
+    ///     text (str): The text with the suggestions applied to it.
+    #[text_signature = "(text, suggestions)"]
+    #[staticmethod]
+    fn apply_suggestions(py: Python, text: &str, suggestions: Vec<Py<PySuggestion>>) -> String {
+        let suggestions: Vec<Suggestion> = suggestions
+            .into_iter()
+            .map(|x| {
+                let x = x.borrow(py);
+
+                Suggestion {
+                    source: x.source().to_string(),
+                    text: x.text().iter().map(|x| x.to_string()).collect(),
+                    start: x.start(),
+                    end: x.end(),
+                }
+            })
+            .collect();
+
+        Rules::correct(text, &suggestions)
     }
 
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
