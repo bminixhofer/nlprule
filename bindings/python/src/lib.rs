@@ -650,7 +650,7 @@ impl PyRules {
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
             self.rules
-                .apply(&tokens)
+                .apply(&tokens, &sentence)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -676,7 +676,7 @@ impl PyRules {
                     let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(sentence)));
                     let suggestions = self
                         .rules
-                        .apply(&tokens)
+                        .apply(&tokens, sentence)
                         .into_iter()
                         .map(|mut x| {
                             x.start += offset;
@@ -708,7 +708,7 @@ impl PyRules {
             let tokenizer = tokenizer.tokenizer();
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
-            let suggestions = self.rules.apply(&tokens);
+            let suggestions = self.rules.apply(&tokens, &sentence);
             Ok(Rules::correct(&sentence, &suggestions))
         })
     }
@@ -729,7 +729,7 @@ impl PyRules {
                     .iter()
                     .map(|x| {
                         let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
-                        let suggestions = self.rules.apply(&tokens);
+                        let suggestions = self.rules.apply(&tokens, x);
                         Rules::correct(x, &suggestions)
                     })
                     .collect::<Vec<_>>()

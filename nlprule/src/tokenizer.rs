@@ -259,11 +259,7 @@ impl Tokenizer {
     pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
         self.cache.populate(
             common_words,
-            &self
-                .rules
-                .iter()
-                .map(|x| &x.composition)
-                .collect::<Vec<_>>(),
+            &self.rules.iter().map(|x| &x.engine).collect::<Vec<_>>(),
         );
     }
 
@@ -286,6 +282,7 @@ impl Tokenizer {
     pub fn disambiguate_up_to_id(
         &self,
         mut tokens: Vec<IncompleteToken>,
+        text: &str,
         id: &str,
     ) -> Vec<IncompleteToken> {
         let mut previously_computed_tokens = None;
@@ -296,7 +293,7 @@ impl Tokenizer {
             }
 
             let skip_mask = self.cache.get_skip_mask(&tokens, i);
-            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
+            let x = rule.apply(tokens, text, &self, skip_mask, previously_computed_tokens);
 
             tokens = x.0;
             previously_computed_tokens = x.1;
@@ -305,12 +302,16 @@ impl Tokenizer {
         tokens
     }
 
-    pub fn disambiguate(&self, mut tokens: Vec<IncompleteToken>) -> Vec<IncompleteToken> {
+    pub fn disambiguate(
+        &self,
+        mut tokens: Vec<IncompleteToken>,
+        text: &str,
+    ) -> Vec<IncompleteToken> {
         let mut previously_computed_tokens = None;
 
         for (i, rule) in self.rules.iter().enumerate() {
             let skip_mask = self.cache.get_skip_mask(&tokens, i);
-            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
+            let x = rule.apply(tokens, text, &self, skip_mask, previously_computed_tokens);
             tokens = x.0;
             previously_computed_tokens = x.1;
         }
