@@ -394,23 +394,23 @@ impl OffsetAtom {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Group<'a> {
+pub struct Group<'t> {
     pub char_start: usize,
     pub char_end: usize,
-    pub tokens: Vec<&'a Token>,
+    pub tokens: Vec<&'t Token<'t>>,
 }
 
 #[derive(Debug)]
-pub struct MatchGraph<'a> {
-    groups: Vec<Group<'a>>,
-    id_to_idx: &'a HashMap<usize, usize>,
+pub struct MatchGraph<'t> {
+    groups: Vec<Group<'t>>,
+    id_to_idx: &'t HashMap<usize, usize>,
 }
 
 lazy_static! {
     static ref EMPTY_MAP: HashMap<usize, usize> = HashMap::new();
 }
 
-impl<'a> Default for MatchGraph<'a> {
+impl<'t> Default for MatchGraph<'t> {
     fn default() -> Self {
         MatchGraph {
             groups: Vec::new(),
@@ -419,16 +419,16 @@ impl<'a> Default for MatchGraph<'a> {
     }
 }
 
-impl<'a> MatchGraph<'a> {
-    fn new(groups: Vec<Group<'a>>, id_to_idx: &'a HashMap<usize, usize>) -> Self {
+impl<'t> MatchGraph<'t> {
+    fn new(groups: Vec<Group<'t>>, id_to_idx: &'t HashMap<usize, usize>) -> Self {
         MatchGraph { groups, id_to_idx }
     }
 
-    pub fn by_index(&self, index: usize) -> &Group<'a> {
+    pub fn by_index(&self, index: usize) -> &Group<'t> {
         &self.groups[index]
     }
 
-    pub fn by_id(&self, id: usize) -> Option<&Group<'a>> {
+    pub fn by_id(&self, id: usize) -> Option<&Group<'t>> {
         Some(&self.groups[self.get_index(id)?])
     }
 
@@ -535,7 +535,7 @@ impl Composition {
             .any(|x| x.atom.is_match(tokens, graph, position))
     }
 
-    pub fn apply<'a>(&'a self, tokens: &[&'a Token], start: usize) -> Option<MatchGraph<'a>> {
+    pub fn apply<'t>(&'t self, tokens: &[&'t Token<'t>], start: usize) -> Option<MatchGraph<'t>> {
         let mut position = start;
 
         let mut cur_count = 0;
