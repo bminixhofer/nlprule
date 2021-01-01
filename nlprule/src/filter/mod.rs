@@ -1,6 +1,6 @@
-use crate::composition::MatchGraph;
 use crate::tokenizer::Tokenizer;
 use crate::utils::SerializeRegex;
+use crate::{composition::MatchGraph, Error};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,8 +16,8 @@ pub trait Filterable {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool;
 }
 
-trait FromArgs {
-    fn from_args(args: HashMap<String, String>) -> Self;
+trait FromArgs: Sized {
+    fn from_args(args: HashMap<String, String>) -> Result<Self, Error>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -30,17 +30,17 @@ pub struct NoDisambiguationEnglishPartialPosTagFilter {
 }
 
 impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
-    fn from_args(args: HashMap<String, String>) -> Self {
+    fn from_args(args: HashMap<String, String>) -> Result<Self, Error> {
         if args.contains_key("negate_postag") {
             panic!("negate_postag not supported in NoDisambiguationEnglishPartialPosTagFilter");
         }
 
-        NoDisambiguationEnglishPartialPosTagFilter {
+        Ok(NoDisambiguationEnglishPartialPosTagFilter {
             index: args.get("no").unwrap().parse::<usize>().unwrap() - 1,
-            regexp: SerializeRegex::new(&args.get("regexp").unwrap(), true, true),
-            postag_regexp: SerializeRegex::new(&args.get("postag_regexp").unwrap(), true, true),
+            regexp: SerializeRegex::new(&args.get("regexp").unwrap(), true, true)?,
+            postag_regexp: SerializeRegex::new(&args.get("postag_regexp").unwrap(), true, true)?,
             negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),
-        }
+        })
     }
 }
 
@@ -69,11 +69,11 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     }
 }
 
-pub fn get_filter(name: &str, args: HashMap<String, String>) -> Filter {
+pub fn get_filter(name: &str, args: HashMap<String, String>) -> Result<Filter, Error> {
     match name {
         "NoDisambiguationEnglishPartialPosTagFilter" => {
-            NoDisambiguationEnglishPartialPosTagFilter::from_args(args).into()
+            Ok(NoDisambiguationEnglishPartialPosTagFilter::from_args(args)?.into())
         }
-        _ => panic!("unsupported filter {}", name),
+        _ => Err(Error::Unexpected(format!("unsupported filter {}", name))),
     }
 }

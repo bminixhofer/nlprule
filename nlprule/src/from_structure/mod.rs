@@ -27,7 +27,7 @@ fn parse_match_attribs(
     text: Option<&str>,
     case_sensitive: bool,
     text_match_idx: Option<usize>,
-) -> Atom {
+) -> Result<Atom, Error> {
     let mut atoms: Vec<Atom> = Vec::new();
 
     let case_sensitive = if let Some(case_sensitive) = attribs.case_sensitive() {
@@ -84,7 +84,7 @@ fn parse_match_attribs(
     if text.is_some() || text_match_idx.is_some() {
         let matcher = if is_regex && text_match_idx.is_none() {
             let regex = SerializeRegex::new(text.unwrap().trim(), true, case_sensitive);
-            Matcher::new_regex(regex, negate, inflected)
+            Matcher::new_regex(regex?, negate, inflected)
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
@@ -107,7 +107,7 @@ fn parse_match_attribs(
     if let Some(postag) = attribs.postag() {
         pos_matcher = Some(if is_postag_regexp {
             let regex = SerializeRegex::new(&postag.trim(), true, true);
-            Matcher::new_regex(regex, negate_pos, true)
+            Matcher::new_regex(regex?, negate_pos, true)
         } else {
             Matcher::new_string(
                 either::Left(postag.trim().to_string()),
@@ -144,10 +144,14 @@ fn parse_match_attribs(
         atoms.push(SpaceBeforeAtom::new(value).into());
     }
 
-    AndAtom::and(atoms)
+    Ok(AndAtom::and(atoms))
 }
 
-fn get_exceptions(token: &structure::Token, case_sensitive: bool, only_shifted: bool) -> Atom {
+fn get_exceptions(
+    token: &structure::Token,
+    case_sensitive: bool,
+    only_shifted: bool,
+) -> Result<Atom, Error> {
     if let Some(parts) = &token.parts {
         let exceptions: Vec<Atom> = parts
             .iter()
@@ -161,7 +165,8 @@ fn get_exceptions(token: &structure::Token, case_sensitive: bool, only_shifted: 
                 } else {
                     None
                 };
-                let mut atom = parse_match_attribs(x, exception_text, case_sensitive, None);
+                let mut atom =
+                    parse_match_attribs(x, exception_text, case_sensitive, None).unwrap();
 
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
@@ -185,13 +190,13 @@ fn get_exceptions(token: &structure::Token, case_sensitive: bool, only_shifted: 
                 }
             })
             .collect::<Vec<_>>();
-        NotAtom::not(OrAtom::or(exceptions))
+        Ok(NotAtom::not(OrAtom::or(exceptions)))
     } else {
-        (TrueAtom {}).into()
+        Ok((TrueAtom {}).into())
     }
 }
 
-fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
+fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Part>, Error> {
     let mut parts = Vec::new();
     let text = if let Some(parts) = &token.parts {
         parts.iter().find_map(|x| match x {
@@ -235,8 +240,8 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         .unwrap_or(1usize);
 
     let quantifier = Quantifier::new(min, max);
-    let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx);
-    atom = AndAtom::and(vec![atom, get_exceptions(token, case_sensitive, false)]);
+    let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx)?;
+    atom = AndAtom::and(vec![atom, get_exceptions(token, case_sensitive, false)?]);
 
     parts.push(Part::new(atom, quantifier, true));
 
@@ -248,18 +253,18 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Vec<Part> {
         };
 
         parts.push(Part::new(
-            get_exceptions(token, case_sensitive, true),
+            get_exceptions(token, case_sensitive, true)?,
             Quantifier::new(0, to_skip),
             false,
         ));
     }
 
-    parts
+    Ok(parts)
 }
 
 fn parse_suggestion(
     data: Vec<structure::SuggestionPart>,
-    composition: &Composition,
+    composition: &Option<&Composition>,
 ) -> Result<rule::Suggester, Error> {
     let mut parts = Vec::new();
 
@@ -318,14 +323,17 @@ fn parse_suggestion(
                     ));
                 }
 
-                let last_id = get_last_id(&composition.parts) as usize;
                 let mut id =
                     m.no.parse::<usize>()
                         .expect("no must be parsable as usize.")
                         - 1;
 
-                if id > last_id {
-                    id = last_id;
+                if let Some(composition) = composition {
+                    let last_id = get_last_id(&composition.parts) as usize;
+
+                    if id > last_id {
+                        id = last_id;
+                    }
                 }
 
                 let case_conversion = if let Some(conversion) = &m.case_conversion {
@@ -336,7 +344,7 @@ fn parse_suggestion(
 
                 let replacer = match (m.regexp_match, m.regexp_replace) {
                     (Some(regex_match), Some(regex_replace)) => Some((
-                        SerializeRegex::new(&regex_match, false, true),
+                        SerializeRegex::new(&regex_match, false, true)?,
                         regex_replace,
                     )),
                     _ => None,
@@ -377,7 +385,7 @@ fn parse_parallel_tokens(
     tokens
         .iter()
         .map(|x| {
-            let mut parsed = parse_token(x, case_sensitive);
+            let mut parsed = parse_token(x, case_sensitive)?;
 
             if parsed.len() != 1 || parsed[0].quantifier.min != 1 || parsed[0].quantifier.max != 1 {
                 return Err(Error::Unimplemented(
@@ -398,7 +406,7 @@ fn parse_unify_tokens(
 
     for token_combination in tokens {
         out.extend(match token_combination {
-            structure::UnifyTokenCombination::Token(token) => parse_token(token, case_sensitive),
+            structure::UnifyTokenCombination::Token(token) => parse_token(token, case_sensitive)?,
             structure::UnifyTokenCombination::And(tokens) => {
                 let atom = AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
@@ -425,7 +433,7 @@ fn parse_tokens(
 
     for token_combination in tokens {
         out.extend(match token_combination {
-            structure::TokenCombination::Token(token) => parse_token(token, case_sensitive),
+            structure::TokenCombination::Token(token) => parse_token(token, case_sensitive)?,
             structure::TokenCombination::And(tokens) => {
                 let atom = AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
@@ -456,7 +464,7 @@ fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usi
     for part in &pattern.parts {
         match part {
             structure::PatternPart::Token(token) => {
-                composition_parts.extend(parse_token(token, case_sensitive))
+                composition_parts.extend(parse_token(token, case_sensitive)?)
             }
             structure::PatternPart::Marker(marker) => {
                 start = Some(get_last_id(&composition_parts) + 1);
@@ -499,26 +507,45 @@ impl TryFrom<structure::Rule> for rule::Rule {
             ));
         }
 
-        let (composition, start, end) = match (data.pattern, data.regex) {
+        let (engine, start, end) = match (data.pattern, data.regex) {
             (Some(_), Some(_)) => Err(Error::Unexpected(
                 "must not contain both `pattern` and `regexp`.".into(),
             )),
             (None, None) => Err(Error::Unexpected(
                 "either `pattern` or `regexp` must be supplied.".into(),
             )),
-            (Some(pattern), None) => parse_pattern(pattern),
-            (None, Some(_)) => Err(Error::Unimplemented(
-                "Regex rules are not implemented.".into(),
+            (Some(pattern), None) => {
+                let (composition, start, end) = parse_pattern(pattern)?;
+
+                Ok((
+                    rule::Engine::Token(rule::TokenEngine {
+                        composition,
+                        start,
+                        end,
+                        antipatterns: if let Some(antipatterns) = data.antipatterns {
+                            antipatterns
+                                .into_iter()
+                                .map(|pattern| parse_pattern(pattern).map(|x| x.0))
+                                .collect::<Result<Vec<_>, Error>>()?
+                        } else {
+                            Vec::new()
+                        },
+                    }),
+                    start,
+                    end,
+                ))
+            }
+            (None, Some(regex)) => Ok((
+                rule::Engine::Text(SerializeRegex::new(&regex, false, false)?),
+                0,
+                0,
             )),
         }?;
 
-        let antipatterns = if let Some(antipatterns) = data.antipatterns {
-            antipatterns
-                .into_iter()
-                .map(|pattern| parse_pattern(pattern).map(|x| x.0))
-                .collect::<Result<Vec<_>, Error>>()?
+        let maybe_composition = if let rule::Engine::Token(engine) = &engine {
+            Some(&engine.composition)
         } else {
-            Vec::new()
+            None
         };
 
         let suggesters = data
@@ -527,7 +554,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
             .into_iter()
             .filter_map(|x| match x {
                 structure::MessagePart::Suggestion(suggestion) => {
-                    Some(parse_suggestion(suggestion.parts, &composition))
+                    Some(parse_suggestion(suggestion.parts, &maybe_composition))
                 }
                 structure::MessagePart::Text(_) => None, // the actual message is ignored at the moment
                 structure::MessagePart::Match(_) => None,
@@ -536,7 +563,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 data.suggestions
                     .unwrap_or_else(Vec::new)
                     .into_iter()
-                    .map(|x| parse_suggestion(x.parts, &composition)),
+                    .map(|x| parse_suggestion(x.parts, &maybe_composition)),
             )
             .collect::<Result<Vec<rule::Suggester>, Error>>()?;
 
@@ -609,12 +636,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
         }
 
         Ok(rule::Rule {
-            engine: rule::Engine::Token(rule::TokenEngine {
-                composition,
-                antipatterns,
-                start,
-                end,
-            }),
+            engine,
             tests,
             start,
             end,
@@ -662,7 +684,7 @@ impl From<structure::WordData> for WordData {
 
 fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> rule::POSFilter {
     match postag_regexp.as_deref() {
-        Some("yes") => rule::POSFilter::Regex(SerializeRegex::new(&postag, true, true)),
+        Some("yes") => rule::POSFilter::Regex(SerializeRegex::new(&postag, true, true).unwrap()),
         Some(_) | None => rule::POSFilter::String(postag.to_string()),
     }
 }
@@ -950,7 +972,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             Some(get_filter(
                 filter_data.class.split('.').next_back().unwrap(),
                 args,
-            ))
+            )?)
         } else {
             None
         };
