@@ -174,105 +174,6 @@ impl Suggester {
     }
 }
 
-trait RuleMatch {
-    fn composition(&self) -> &Composition;
-    fn antipatterns(&self) -> &Vec<Composition>;
-    fn id(&self) -> &str;
-    fn start(&self) -> usize;
-    fn end(&self) -> usize;
-
-    fn get_match<'a>(
-        &'a self,
-        tokens: &'a [&Token],
-        i: usize,
-        mask: Option<&mut Vec<bool>>,
-    ) -> Option<MatchGraph<'a>> {
-        if let Some(graph) = self.composition().apply(tokens, i) {
-            let start_group = graph.by_id(self.start()).unwrap_or_else(|| {
-                panic!("{} group must exist in graph: {}", self.id(), self.start())
-            });
-            let end_group = graph.by_id(self.end() - 1).unwrap_or_else(|| {
-                panic!(
-                    "{} group must exist in graph: {}",
-                    self.id(),
-                    self.end() - 1
-                )
-            });
-
-            let start = start_group.char_start;
-            let end = end_group.char_end;
-
-            // only add the suggestion if we don't have any yet from this rule in its range
-            if mask
-                .as_ref()
-                .map_or(true, |x| !x[start..end].iter().any(|x| *x))
-            {
-                let mut blocked = false;
-
-                // TODO: cache / move to outer loop
-                for i in 0..tokens.len() {
-                    for antipattern in self.antipatterns() {
-                        if let Some(anti_graph) = antipattern.apply(tokens, i) {
-                            let anti_start = anti_graph.by_index(0).char_start;
-                            let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
-
-                            let rule_start = graph.by_index(0).char_start;
-                            let rule_end = graph.by_index(graph.len() - 1).char_end;
-
-                            if anti_start <= rule_end && rule_start <= anti_end {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                    }
-                    if blocked {
-                        break;
-                    }
-                }
-
-                if !blocked {
-                    if let Some(mask) = mask {
-                        mask[start..end].iter_mut().for_each(|x| *x = true);
-                    }
-
-                    return Some(graph);
-                }
-            }
-        }
-
-        None
-    }
-}
-
-macro_rules! impl_rule_match {
-    ($e:ty) => {
-        impl RuleMatch for $e {
-            fn antipatterns(&self) -> &Vec<Composition> {
-                &self.antipatterns
-            }
-
-            fn composition(&self) -> &Composition {
-                &self.composition
-            }
-
-            fn start(&self) -> usize {
-                self.start
-            }
-
-            fn end(&self) -> usize {
-                self.end
-            }
-
-            fn id(&self) -> &str {
-                self.id.as_str()
-            }
-        }
-    };
-}
-
-impl_rule_match!(Rule);
-impl_rule_match!(DisambiguationRule);
-
 #[derive(Serialize, Deserialize)]
 pub enum POSFilter {
     Regex(SerializeRegex),
@@ -487,8 +388,7 @@ pub enum DisambiguationTest {
 #[derive(Serialize, Deserialize)]
 pub struct DisambiguationRule {
     pub(crate) id: String,
-    pub(crate) composition: Composition,
-    pub(crate) antipatterns: Vec<Composition>,
+    pub(crate) engine: Engine,
     pub(crate) disambiguations: Disambiguation,
     pub(crate) filter: Option<Filter>,
     pub(crate) start: usize,
@@ -508,6 +408,7 @@ impl DisambiguationRule {
     pub fn apply(
         &self,
         mut tokens: Vec<IncompleteToken>,
+        text: &str,
         tokenizer: &Tokenizer,
         mut skip_mask: Vec<bool>,
         complete_tokens: Option<Vec<Token>>,
@@ -517,7 +418,11 @@ impl DisambiguationRule {
         }
 
         for (i, val) in skip_mask.iter_mut().enumerate().filter(|(_, x)| !**x) {
-            *val = self.composition.can_not_match(tokens[i].as_ref());
+            *val = if let Engine::Token(engine) = &self.engine {
+                engine.composition.can_not_match(tokens[i].as_ref())
+            } else {
+                false
+            };
         }
 
         if skip_mask.iter().all(|x| *x) {
@@ -536,33 +441,27 @@ impl DisambiguationRule {
 
         let mut all_byte_spans = Vec::new();
 
-        for (i, skip_val) in skip_mask.iter().enumerate() {
-            if *skip_val {
-                continue;
+        for graph in self.engine.get_matches(&refs, text, None, Some(&skip_mask)) {
+            if let Some(filter) = &self.filter {
+                if !filter.keep(&graph, tokenizer) {
+                    continue;
+                }
             }
 
-            if let Some(graph) = self.get_match(&refs, i, None) {
-                if let Some(filter) = &self.filter {
-                    if !filter.keep(&graph, tokenizer) {
-                        continue;
-                    }
-                }
+            let mut byte_spans = Vec::new();
 
-                let mut byte_spans = Vec::new();
+            for group_idx in self.start..self.end {
+                let group = graph.by_id(group_idx).unwrap_or_else(|| {
+                    panic!("{} group must exist in graph: {}", self.id, self.start)
+                });
 
-                for group_idx in self.start..self.end {
-                    let group = graph.by_id(group_idx).unwrap_or_else(|| {
-                        panic!("{} group must exist in graph: {}", self.id, self.start)
-                    });
+                let group_byte_spans: HashSet<_> =
+                    group.tokens.iter().map(|x| x.byte_span).collect();
 
-                    let group_byte_spans: HashSet<_> =
-                        group.tokens.iter().map(|x| x.byte_span).collect();
-
-                    byte_spans.push(group_byte_spans);
-                }
-
-                all_byte_spans.push(byte_spans);
+                byte_spans.push(group_byte_spans);
             }
+
+            all_byte_spans.push(byte_spans);
         }
 
         if all_byte_spans.is_empty() {
@@ -604,11 +503,13 @@ impl DisambiguationRule {
                 DisambiguationTest::Changed(x) => x.text.as_str(),
             };
 
-            let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
+            let tokens_before =
+                tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), text, &self.id);
             let mut tokens_after = tokens_before.clone();
             tokens_after = self
                 .apply(
                     tokens_after,
+                    text,
                     tokenizer,
                     vec![false; tokens_before.len()],
                     None,
@@ -665,10 +566,112 @@ impl DisambiguationRule {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Rule {
-    pub(crate) id: String,
+pub struct TokenEngine {
     pub(crate) composition: Composition,
     pub(crate) antipatterns: Vec<Composition>,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+impl TokenEngine {
+    fn get_match<'a>(
+        &'a self,
+        tokens: &'a [&'a Token],
+        i: usize,
+        mask: &mut Option<Vec<bool>>,
+    ) -> Option<MatchGraph<'a>> {
+        if let Some(graph) = self.composition.apply(tokens, i) {
+            let start_group = graph
+                .by_id(self.start)
+                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.start));
+            let end_group = graph
+                .by_id(self.end - 1)
+                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.end - 1));
+
+            let start = start_group.char_start;
+            let end = end_group.char_end;
+
+            // only add the suggestion if we don't have any yet from this rule in its range
+            if mask
+                .as_ref()
+                .map_or(true, |x| !x[start..end].iter().any(|x| *x))
+            {
+                let mut blocked = false;
+
+                // TODO: cache / move to outer loop
+                for i in 0..tokens.len() {
+                    for antipattern in &self.antipatterns {
+                        if let Some(anti_graph) = antipattern.apply(tokens, i) {
+                            let anti_start = anti_graph.by_index(0).char_start;
+                            let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
+
+                            let rule_start = graph.by_index(0).char_start;
+                            let rule_end = graph.by_index(graph.len() - 1).char_end;
+
+                            if anti_start <= rule_end && rule_start <= anti_end {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                    }
+                    if blocked {
+                        break;
+                    }
+                }
+
+                if !blocked {
+                    if let Some(mask) = mask {
+                        mask[start..end].iter_mut().for_each(|x| *x = true);
+                    }
+
+                    return Some(graph);
+                }
+            }
+        }
+
+        None
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Engine {
+    Token(TokenEngine),
+    Text(SerializeRegex),
+}
+
+impl Engine {
+    fn get_matches<'a>(
+        &'a self,
+        tokens: &'a [&'a Token],
+        text: &str,
+        mut mask: Option<Vec<bool>>,
+        skip_mask: Option<&[bool]>,
+    ) -> Vec<MatchGraph<'a>> {
+        let mut graphs = Vec::new();
+
+        match &self {
+            Engine::Token(engine) => {
+                for i in 0..tokens.len() {
+                    if let Some(skip_mask) = skip_mask {
+                        if skip_mask[i] {
+                            continue;
+                        }
+                    }
+
+                    graphs.extend(engine.get_match(&tokens, i, &mut mask));
+                }
+            }
+            _ => unimplemented!(),
+        }
+
+        graphs
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rule {
+    pub(crate) id: String,
+    pub(crate) engine: Engine,
     pub(crate) tests: Vec<Test>,
     pub(crate) suggesters: Vec<Suggester>,
     pub(crate) start: usize,
@@ -693,78 +696,75 @@ impl Rule {
         self.on = on;
     }
 
-    pub fn apply(&self, tokens: &[Token], skip_mask: Option<&[bool]>) -> Vec<Suggestion> {
+    pub fn apply(
+        &self,
+        tokens: &[Token],
+        text: &str,
+        skip_mask: Option<&[bool]>,
+    ) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
-        let mut mask: Vec<_> = vec![
+        let mask: Option<Vec<_>> = Some(vec![
             false;
             tokens
                 .get(tokens.len() - 1)
                 .map(|x| x.char_span.1)
                 .unwrap_or(0)
-        ];
+        ]);
 
-        for i in 0..tokens.len() {
-            if let Some(skip_mask) = skip_mask {
-                if skip_mask[i] {
-                    continue;
-                }
-            }
+        for graph in self.engine.get_matches(&refs, text, mask, skip_mask) {
+            let start_group = graph
+                .by_id(self.start)
+                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));
+            let end_group = graph.by_id(self.end - 1).unwrap_or_else(|| {
+                panic!("{} group must exist in graph: {}", self.id, self.end - 1)
+            });
 
-            if let Some(graph) = self.get_match(&refs, i, Some(&mut mask)) {
-                let start_group = graph.by_id(self.start).unwrap_or_else(|| {
-                    panic!("{} group must exist in graph: {}", self.id, self.start)
-                });
-                let end_group = graph.by_id(self.end - 1).unwrap_or_else(|| {
-                    panic!("{} group must exist in graph: {}", self.id, self.end - 1)
-                });
+            let text: Vec<String> = self
+                .suggesters
+                .iter()
+                .filter_map(|x| x.apply(&graph, self.start, self.end))
+                .collect();
 
-                let text: Vec<String> = self
-                    .suggesters
+            let start = if text
+                .iter()
+                .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
+            {
+                let first_token = graph.groups()[graph.get_index(self.start).unwrap()..]
                     .iter()
-                    .filter_map(|x| x.apply(&graph, self.start, self.end))
-                    .collect();
+                    .find(|x| !x.tokens.is_empty())
+                    .unwrap()
+                    .tokens[0];
 
-                let start = if text
+                let idx = tokens
                     .iter()
-                    .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
-                {
-                    let first_token = graph.groups()[graph.get_index(self.start).unwrap()..]
-                        .iter()
-                        .find(|x| !x.tokens.is_empty())
-                        .unwrap()
-                        .tokens[0];
+                    .position(|x| std::ptr::eq(x, first_token))
+                    .unwrap_or(0);
 
-                    let idx = tokens
-                        .iter()
-                        .position(|x| std::ptr::eq(x, first_token))
-                        .unwrap_or(0);
-
-                    if idx > 0 {
-                        tokens[idx - 1].char_span.1
-                    } else {
-                        start_group.char_start
-                    }
+                if idx > 0 {
+                    tokens[idx - 1].char_span.1
                 } else {
                     start_group.char_start
-                };
-                let end = end_group.char_end;
-
-                // fix e. g. "Super , dass"
-                let text: Vec<String> = text
-                    .into_iter()
-                    .map(|x| utils::fix_nospace_chars(&x))
-                    .collect();
-
-                if !text.is_empty() {
-                    suggestions.push(Suggestion {
-                        source: self.id.to_string(),
-                        start,
-                        end,
-                        text,
-                    });
                 }
+            } else {
+                start_group.char_start
+            };
+            let end = end_group.char_end;
+
+            // fix e. g. "Super , dass"
+            let text: Vec<String> = text
+                .into_iter()
+                .map(|x| utils::fix_nospace_chars(&x))
+                .collect();
+
+            if !text.is_empty() {
+                suggestions.push(Suggestion {
+                    source: self.id.to_string(),
+                    start,
+                    end,
+                    text,
+                });
             }
         }
 
@@ -775,9 +775,10 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in self.tests.iter() {
-            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
+            let tokens =
+                finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text), &test.text));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens, None);
+            let suggestions = self.apply(&tokens, &test.text, None);
 
             let pass = if suggestions.len() > 1 {
                 false
@@ -841,13 +842,19 @@ impl Cache {
             .collect()
     }
 
-    pub fn populate(&mut self, common_words: &HashSet<String>, compositions: &[&Composition]) {
-        for composition in compositions {
+    pub fn populate(&mut self, common_words: &HashSet<String>, engines: &[&Engine]) {
+        for engine in engines {
             for word in common_words {
+                let can_not_match = if let Engine::Token(engine) = engine {
+                    engine.composition.can_not_match(&word)
+                } else {
+                    false
+                };
+
                 self.cache
                     .entry(word.to_string())
                     .or_insert_with(Vec::new)
-                    .push(composition.can_not_match(&word));
+                    .push(can_not_match);
             }
         }
     }
@@ -910,11 +917,7 @@ impl Rules {
     pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
         self.cache.populate(
             common_words,
-            &self
-                .rules
-                .iter()
-                .map(|x| &x.composition)
-                .collect::<Vec<_>>(),
+            &self.rules.iter().map(|x| &x.engine).collect::<Vec<_>>(),
         );
     }
 
@@ -922,7 +925,7 @@ impl Rules {
         &self.rules
     }
 
-    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token], text: &str) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -932,7 +935,7 @@ impl Rules {
 
         for (i, rule) in self.rules.iter().enumerate().filter(|(_, x)| x.on()) {
             let skip_mask = self.cache.get_skip_mask(tokens, i);
-            for suggestion in rule.apply(tokens, Some(&skip_mask)) {
+            for suggestion in rule.apply(tokens, text, Some(&skip_mask)) {
                 if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
                     mask[suggestion.start..suggestion.end]
                         .iter_mut()

@@ -609,12 +609,16 @@ impl TryFrom<structure::Rule> for rule::Rule {
         }
 
         Ok(rule::Rule {
-            composition,
-            antipatterns,
+            engine: rule::Engine::Token(rule::TokenEngine {
+                composition,
+                antipatterns,
+                start,
+                end,
+            }),
             tests,
-            suggesters,
             start,
             end,
+            suggesters,
             id: String::new(),
             on: data.default.map_or(true, |x| x != "off"),
         })
@@ -1010,9 +1014,13 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         }
 
         Ok(rule::DisambiguationRule {
-            composition,
+            engine: rule::Engine::Token(rule::TokenEngine {
+                composition,
+                antipatterns,
+                start,
+                end,
+            }),
             filter,
-            antipatterns,
             disambiguations,
             start,
             end,
