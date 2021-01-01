@@ -661,7 +661,12 @@ impl Engine {
                     graphs.extend(engine.get_match(&tokens, i, &mut mask));
                 }
             }
-            _ => unimplemented!(),
+            Engine::Text(regex) => {
+                // for cap in regex.captures_iter(text) {
+
+                // }
+                unimplemented!()
+            }
         }
 
         graphs
