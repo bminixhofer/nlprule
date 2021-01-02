@@ -1,9 +1,47 @@
+use crate::Error;
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use onig::{Captures, Regex, RegexOptions};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Deref;
 
-use crate::Error;
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CacheString<S: AsRef<str>> {
+    string: S,
+    #[serde(skip)]
+    lower: OnceCell<String>,
+}
+
+impl<S: AsRef<str>> PartialEq for CacheString<S> {
+    fn eq(&self, other: &Self) -> bool {
+        other.as_str() == self.as_str()
+    }
+}
+
+impl<S: AsRef<str>> From<S> for CacheString<S> {
+    fn from(string: S) -> Self {
+        CacheString {
+            lower: OnceCell::new(),
+            string,
+        }
+    }
+}
+
+impl<S: AsRef<str>> CacheString<S> {
+    pub fn to_lowercase(&self) -> &str {
+        self.lower
+            .get_or_init(|| self.string.as_ref().to_lowercase())
+            .as_str()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.string.as_ref()
+    }
+
+    pub fn inner(self) -> S {
+        self.string
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct RegexFields {
