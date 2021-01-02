@@ -87,7 +87,7 @@ fn parse_match_attribs(
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
-                    || either::Left(text.unwrap().trim().to_string()),
+                    || either::Left(text.unwrap().trim().to_string().into()),
                     either::Right,
                 ),
                 negate,
@@ -109,7 +109,7 @@ fn parse_match_attribs(
             Matcher::new_regex(regex?, negate_pos, true)
         } else {
             Matcher::new_string(
-                either::Left(postag.trim().to_string()),
+                either::Left(postag.trim().to_string().into()),
                 negate_pos,
                 true,
                 true,
@@ -124,7 +124,7 @@ fn parse_match_attribs(
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = ChunkAtom::new(Matcher::new_string(
-            either::Left(chunk.trim().to_string()),
+            either::Left(chunk.trim().to_string().into()),
             false,
             true,
             true,

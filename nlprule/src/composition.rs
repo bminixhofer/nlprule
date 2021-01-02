@@ -1,4 +1,7 @@
-use crate::{tokenizer::Token, utils::SerializeRegex};
+use crate::{
+    tokenizer::Token,
+    utils::{CacheString, SerializeRegex},
+};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -6,7 +9,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
+    matcher: either::Either<either::Either<CacheString<String>, usize>, SerializeRegex>,
     negate: bool,
     case_sensitive: bool,
     empty_always_false: bool,
@@ -23,7 +26,7 @@ impl Matcher {
     }
 
     pub fn new_string(
-        string_or_idx: either::Either<String, usize>,
+        string_or_idx: either::Either<CacheString<String>, usize>,
         negate: bool,
         case_sensitive: bool,
         empty_always_false: bool,
@@ -53,7 +56,7 @@ impl Matcher {
             either::Left(string_or_idx) => match string_or_idx {
                 either::Left(string) => {
                     if self.case_sensitive {
-                        string == input
+                        string.as_str() == input
                     } else {
                         string.to_lowercase() == input.to_lowercase()
                     }
