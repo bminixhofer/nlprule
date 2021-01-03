@@ -12,7 +12,7 @@ use crate::{rule, tokenizer::OwnedWord};
 use crate::{utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
-use std::convert::TryFrom;
+use std::{collections::HashMap, convert::TryFrom};
 
 pub mod structure;
 
@@ -208,7 +208,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Par
 
     let text_match_idx = if let Some(parts) = &token.parts {
         parts.iter().find_map(|x| match x {
-            structure::TokenPart::Sub(sub) => Some(sub.no.parse().unwrap()),
+            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().unwrap() + 1),
             _ => None,
         })
     } else {
@@ -289,8 +289,7 @@ fn parse_suggestion(
                         .at(1)
                         .unwrap()
                         .parse::<usize>()
-                        .expect("match regex capture must be parsable as usize.")
-                        - 1;
+                        .expect("match regex capture must be parsable as usize.");
 
                     parts.push(rule::SuggesterPart::Match(rule::Match::new(
                         index,
@@ -324,11 +323,10 @@ fn parse_suggestion(
 
                 let mut id =
                     m.no.parse::<usize>()
-                        .expect("no must be parsable as usize.")
-                        - 1;
+                        .expect("no must be parsable as usize.");
 
                 if let Some(composition) = composition {
-                    let last_id = get_last_id(&composition.parts) as usize;
+                    let last_id = get_last_id(&composition.parts) as usize - 1;
 
                     if id > last_id {
                         id = last_id;
@@ -370,11 +368,15 @@ fn parse_suggestion(
         }
     }
 
-    Ok(rule::Suggester { parts })
+    Ok(rule::Suggester {
+        parts,
+        // use uppercase adjustment (i. e. make replacement title case if match is title case) if token rule
+        use_titlecase_adjust: composition.is_some(),
+    })
 }
 
 fn get_last_id(parts: &[Part]) -> isize {
-    parts.iter().fold(0, |a, x| a + x.visible as isize) - 1
+    parts.iter().fold(1, |a, x| a + x.visible as isize)
 }
 
 fn parse_parallel_tokens(
@@ -466,11 +468,11 @@ fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usi
                 composition_parts.extend(parse_token(token, case_sensitive)?)
             }
             structure::PatternPart::Marker(marker) => {
-                start = Some(get_last_id(&composition_parts) + 1);
+                start = Some(get_last_id(&composition_parts));
 
                 composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive)?);
 
-                end = Some(get_last_id(&composition_parts) + 1);
+                end = Some(get_last_id(&composition_parts));
             }
             structure::PatternPart::And(tokens) => {
                 let atom = AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive)?);
@@ -488,8 +490,8 @@ fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usi
         }
     }
 
-    let start = start.unwrap_or(0) as usize;
-    let end = end.unwrap_or_else(|| get_last_id(&composition_parts) + 1) as usize;
+    let start = start.unwrap_or(1) as usize;
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts)) as usize;
 
     let composition = Composition::new(composition_parts);
 
@@ -534,13 +536,17 @@ impl TryFrom<structure::Rule> for rule::Rule {
                     end,
                 ))
             }
-            (None, Some(_regex)) => {
-                Err(Error::Unimplemented("regex".into()))
-                // Ok((
-                //     rule::Engine::Text(SerializeRegex::new(&regex, false, false)?),
-                //     0,
-                //     0,
-                // ))
+            (None, Some(regex)) => {
+                let case_sensitive = match regex.case_sensitive.as_deref() {
+                    Some("yes") => true,
+                    None => false,
+                    x => panic!("unknown case_sensitive value {:?}", x),
+                };
+                let mark = regex.mark.map_or(0, |x| x.parse().unwrap());
+                let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
+                let id_to_idx: HashMap<usize, usize> =
+                    (0..regex.captures_len() + 1).enumerate().collect();
+                Ok((rule::Engine::Text(regex, id_to_idx), mark, mark + 1))
             }
         }?;
 
