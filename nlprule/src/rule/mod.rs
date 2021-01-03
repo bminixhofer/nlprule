@@ -1,7 +1,10 @@
-use crate::utils::{self, SerializeRegex};
 use crate::{
     composition::Group,
     tokenizer::{finalize, IncompleteToken, OwnedWord, Token, Word, WordData},
+};
+use crate::{
+    composition::Matcher,
+    utils::{self, SerializeRegex},
 };
 use crate::{
     composition::{Composition, MatchGraph},
@@ -68,37 +71,99 @@ impl Conversion {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct PosReplacer {
+    matcher: Matcher,
+}
+
+impl PosReplacer {
+    pub fn new(matcher: Matcher) -> Self {
+        PosReplacer { matcher }
+    }
+
+    fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
+        let graph = MatchGraph::default();
+        let mut candidates: Vec<_> = tokenizer
+            .tagger()
+            .get_tags(
+                text,
+                tokenizer.options().always_add_lower_tags,
+                tokenizer.options().use_compound_split_heuristic,
+            )
+            .iter()
+            .map(|x| {
+                let group_words = tokenizer.tagger().get_group_members(&x.lemma.to_string());
+                let mut data = Vec::new();
+                for word in group_words {
+                    if let Some(i) = tokenizer
+                        .tagger()
+                        .get_tags(
+                            word,
+                            tokenizer.options().always_add_lower_tags,
+                            tokenizer.options().use_compound_split_heuristic,
+                        )
+                        .iter()
+                        .position(|x| self.matcher.is_match(x.pos, &graph))
+                    {
+                        data.push((word.to_string(), i));
+                    }
+                }
+                data
+            })
+            .rev()
+            .flatten()
+            .collect();
+        candidates.sort_by(|(_, a), (_, b)| a.cmp(b));
+        if candidates.is_empty() {
+            None
+        } else {
+            Some(candidates.remove(0).0)
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Match {
     id: usize,
     conversion: Conversion,
+    pos_replacer: Option<PosReplacer>,
     regex_replacer: Option<(SerializeRegex, String)>,
 }
 
 impl Match {
-    fn apply(&self, graph: &MatchGraph) -> Option<String> {
+    fn apply(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> Option<String> {
         let text = graph
             .by_id(self.id)
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
             .text(graph.tokens()[0].text);
 
-        if let Some((regex, replacement)) = &self.regex_replacer {
-            let replaced = regex.replace_all(text, |caps: &Captures| {
-                utils::dollar_replace(replacement.to_string(), caps)
-            });
-            Some(self.conversion.convert(replaced.as_ref()))
+        let mut text = if let Some(replacer) = &self.pos_replacer {
+            replacer.apply(text, tokenizer)?
         } else {
-            Some(self.conversion.convert(text))
-        }
+            text.to_string()
+        };
+
+        text = if let Some((regex, replacement)) = &self.regex_replacer {
+            regex.replace_all(&text, |caps: &Captures| {
+                utils::dollar_replace(replacement.to_string(), caps)
+            })
+        } else {
+            text
+        };
+
+        // TODO: maybe return a vector here and propagate accordingly
+        Some(self.conversion.convert(&text))
     }
 
     pub fn new(
         id: usize,
         conversion: Conversion,
+        pos_replacer: Option<PosReplacer>,
         regex_replacer: Option<(SerializeRegex, String)>,
     ) -> Self {
         Match {
             id,
             conversion,
+            pos_replacer,
             regex_replacer,
         }
     }
@@ -121,7 +186,13 @@ pub struct Suggester {
 }
 
 impl Suggester {
-    fn apply(&self, graph: &MatchGraph, start: usize, _end: usize) -> Option<String> {
+    fn apply(
+        &self,
+        graph: &MatchGraph,
+        tokenizer: &Tokenizer,
+        start: usize,
+        _end: usize,
+    ) -> Option<String> {
         let mut output = Vec::new();
 
         let starts_with_conversion = match &self.parts[..] {
@@ -133,7 +204,7 @@ impl Suggester {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
                 SuggesterPart::Match(m) => {
-                    output.push(m.apply(graph)?);
+                    output.push(m.apply(graph, tokenizer)?);
                 }
             }
         }
@@ -739,7 +810,12 @@ impl Rule {
         self.on = on;
     }
 
-    pub fn apply(&self, tokens: &[Token], skip_mask: Option<&[bool]>) -> Vec<Suggestion> {
+    pub fn apply(
+        &self,
+        tokens: &[Token],
+        skip_mask: Option<&[bool]>,
+        tokenizer: &Tokenizer,
+    ) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
@@ -756,7 +832,7 @@ impl Rule {
             let text: Vec<String> = self
                 .suggesters
                 .iter()
-                .filter_map(|x| x.apply(&graph, self.start, self.end))
+                .filter_map(|x| x.apply(&graph, tokenizer, self.start, self.end))
                 .collect();
 
             let start = if text
@@ -809,7 +885,7 @@ impl Rule {
         for test in self.tests.iter() {
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens, None);
+            let suggestions = self.apply(&tokens, None, tokenizer);
 
             let pass = if suggestions.len() > 1 {
                 false
@@ -956,7 +1032,7 @@ impl Rules {
         &self.rules
     }
 
-    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -966,7 +1042,7 @@ impl Rules {
 
         for (i, rule) in self.rules.iter().enumerate().filter(|(_, x)| x.on()) {
             let skip_mask = self.cache.get_skip_mask(tokens, i);
-            for suggestion in rule.apply(tokens, Some(&skip_mask)) {
+            for suggestion in rule.apply(tokens, Some(&skip_mask), tokenizer) {
                 if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
                     mask[suggestion.start..suggestion.end]
                         .iter_mut()

@@ -33,6 +33,6 @@ fn main() {
     println!("Tokens: {:#?}", incomplete_tokens);
     println!(
         "Suggestions: {:#?}",
-        rules.apply(&finalize(incomplete_tokens))
+        rules.apply(&finalize(incomplete_tokens), &tokenizer)
     );
 }

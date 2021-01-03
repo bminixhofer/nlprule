@@ -2,6 +2,7 @@
     "allow_errors": false,
     "ignore_ids": [
         "VERB_APOSTROPHE_S.3",
-        "INCORRECT_POSSESSIVE_FORM_AFTER_A_NUMBER"
+        "INCORRECT_POSSESSIVE_FORM_AFTER_A_NUMBER",
+        "A_NNS.0"
     ]
 }

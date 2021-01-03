@@ -295,6 +295,7 @@ fn parse_suggestion(
                         index,
                         rule::Conversion::Nop,
                         None,
+                        None,
                     )));
                     end_index = end;
                 }
@@ -304,14 +305,9 @@ fn parse_suggestion(
                 }
             }
             structure::SuggestionPart::Match(m) => {
-                if m.postag.is_some()
-                    || m.postag_regex.is_some()
-                    || m.postag_replace.is_some()
-                    || m.text.is_some()
-                {
+                if m.postag_replace.is_some() || m.text.is_some() {
                     return Err(Error::Unimplemented(
-                        "postag, postag_regexp, postag_replace and text in `match` are not implemented."
-                            .into(),
+                        "postag_replace and text in `match` are not implemented.".into(),
                     ));
                 }
 
@@ -339,7 +335,29 @@ fn parse_suggestion(
                     None
                 };
 
-                let replacer = match (m.regexp_match, m.regexp_replace) {
+                let pos_replacer = if let Some(postag) = m.postag {
+                    if postag.contains("+DT") || postag.contains("+INDT") {
+                        return Err(Error::Unimplemented(
+                            "+DT and +INDT determiners are not implemented.".into(),
+                        ));
+                    }
+
+                    let matcher = match m.postag_regex.as_deref() {
+                        Some("yes") => {
+                            let regex = SerializeRegex::new(&postag, true, false)?;
+                            Matcher::new_regex(regex, false, true)
+                        }
+                        None => {
+                            Matcher::new_string(either::Left(postag.into()), false, false, true)
+                        }
+                        x => panic!("unknown postag_regex value {:?}", x),
+                    };
+                    Some(rule::PosReplacer::new(matcher))
+                } else {
+                    None
+                };
+
+                let regex_replacer = match (m.regexp_match, m.regexp_replace) {
                     (Some(regex_match), Some(regex_replace)) => Some((
                         SerializeRegex::new(&regex_match, false, true)?,
                         regex_replace,
@@ -362,7 +380,8 @@ fn parse_suggestion(
                         }
                         None => rule::Conversion::Nop,
                     },
-                    replacer,
+                    pos_replacer,
+                    regex_replacer,
                 )));
             }
         }
