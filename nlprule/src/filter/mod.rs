@@ -36,7 +36,7 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
         }
 
         Ok(NoDisambiguationEnglishPartialPosTagFilter {
-            index: args.get("no").unwrap().parse::<usize>().unwrap() - 1,
+            index: args.get("no").unwrap().parse::<usize>().unwrap(),
             regexp: SerializeRegex::new(&args.get("regexp").unwrap(), true, true)?,
             postag_regexp: SerializeRegex::new(&args.get("postag_regexp").unwrap(), true, true)?,
             negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),

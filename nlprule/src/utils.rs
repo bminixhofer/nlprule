@@ -94,11 +94,15 @@ impl SerializeRegex {
         let mut case_sensitive = case_sensitive;
 
         fixed = fixed
+            .replace("\\\\s", "###backslash_before_s###")
             .replace("\\$", "###escaped_dollar###")
+            // apparently \s in Java regexes only matches an actual space, not e.g non-breaking space
+            .replace("\\s", " ")
             .replace("$+", "$")
             .replace("$?", "$")
             .replace("$*", "$")
-            .replace("###escaped_dollar###", "\\$");
+            .replace("###escaped_dollar###", "\\$")
+            .replace("###backslash_before_s###", "\\\\s");
 
         for pattern in &["(?iu)", "(?i)"] {
             if fixed.contains(pattern) {
