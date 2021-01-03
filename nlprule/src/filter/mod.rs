@@ -36,7 +36,7 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
         }
 
         Ok(NoDisambiguationEnglishPartialPosTagFilter {
-            index: args.get("no").unwrap().parse::<usize>().unwrap() - 1,
+            index: args.get("no").unwrap().parse::<usize>().unwrap(),
             regexp: SerializeRegex::new(&args.get("regexp").unwrap(), true, true)?,
             postag_regexp: SerializeRegex::new(&args.get("postag_regexp").unwrap(), true, true)?,
             negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),
@@ -47,7 +47,7 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
 impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
         if let Some(group) = graph.by_id(self.index) {
-            let tokens = &group.tokens;
+            let tokens = &group.tokens(graph.tokens());
 
             tokens.iter().all(|x| {
                 if let Some(captures) = self.regexp.captures(&x.word.text) {

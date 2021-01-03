@@ -62,7 +62,7 @@ impl Matcher {
                     }
                 }
                 either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
-                    x.tokens.get(0).map_or(false, |token| {
+                    x.tokens(&graph.tokens).get(0).map_or(false, |token| {
                         if self.case_sensitive {
                             token.word.text == input
                         } else {
@@ -397,16 +397,48 @@ impl OffsetAtom {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Group<'t> {
-    pub char_start: usize,
-    pub char_end: usize,
-    pub tokens: Vec<&'t Token<'t>>,
+pub struct Group {
+    pub char_span: (usize, usize),
+}
+
+impl Group {
+    pub fn new(char_span: (usize, usize)) -> Self {
+        Group { char_span }
+    }
+
+    pub fn tokens<'t>(&self, tokens: &[&'t Token<'t>]) -> Vec<&'t Token<'t>> {
+        tokens
+            .iter()
+            .filter_map(|x| {
+                if x.char_span.1 > x.char_span.0 // special tokens with zero range (e. g. SENT_START) can not be part of groups
+                    && x.char_span.0 >= self.char_span.0
+                    && x.char_span.1 <= self.char_span.1
+                {
+                    Some(*x)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn text<'a>(&self, text: &'a str) -> &'a str {
+        if self.char_span.0 >= self.char_span.1 {
+            return "";
+        }
+
+        let mut char_indices: Vec<_> = text.char_indices().map(|(i, _)| i).collect();
+        char_indices.push(text.len());
+
+        &text[char_indices[self.char_span.0]..char_indices[self.char_span.1]]
+    }
 }
 
 #[derive(Debug)]
 pub struct MatchGraph<'t> {
-    groups: Vec<Group<'t>>,
+    groups: Vec<Group>,
     id_to_idx: &'t HashMap<usize, usize>,
+    tokens: Vec<&'t Token<'t>>,
 }
 
 lazy_static! {
@@ -418,20 +450,29 @@ impl<'t> Default for MatchGraph<'t> {
         MatchGraph {
             groups: Vec::new(),
             id_to_idx: &(*EMPTY_MAP),
+            tokens: Vec::new(),
         }
     }
 }
 
 impl<'t> MatchGraph<'t> {
-    fn new(groups: Vec<Group<'t>>, id_to_idx: &'t HashMap<usize, usize>) -> Self {
-        MatchGraph { groups, id_to_idx }
+    pub fn new(
+        groups: Vec<Group>,
+        id_to_idx: &'t HashMap<usize, usize>,
+        tokens: Vec<&'t Token<'t>>,
+    ) -> Self {
+        MatchGraph {
+            groups,
+            id_to_idx,
+            tokens,
+        }
     }
 
-    pub fn by_index(&self, index: usize) -> &Group<'t> {
+    pub fn by_index(&self, index: usize) -> &Group {
         &self.groups[index]
     }
 
-    pub fn by_id(&self, id: usize) -> Option<&Group<'t>> {
+    pub fn by_id(&self, id: usize) -> Option<&Group> {
         Some(&self.groups[self.get_index(id)?])
     }
 
@@ -439,16 +480,64 @@ impl<'t> MatchGraph<'t> {
         Some(*self.id_to_idx.get(&id)?)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.groups.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.groups.len()
-    }
-
     pub fn groups(&self) -> &[Group] {
         &self.groups[..]
+    }
+
+    pub fn tokens(&self) -> &[&'t Token<'t>] {
+        &self.tokens[..]
+    }
+
+    pub fn fill_empty(&mut self) {
+        let mut start = self
+            .groups
+            .iter()
+            .find_map(|x| {
+                let tokens = x.tokens(&self.tokens);
+                if tokens.is_empty() {
+                    None
+                } else {
+                    Some(tokens[0].char_span.0)
+                }
+            })
+            .expect("graph must contain at least one token");
+
+        let mut end = self
+            .groups
+            .iter()
+            .rev()
+            .find_map(|x| {
+                let tokens = x.tokens(&self.tokens);
+                if tokens.is_empty() {
+                    None
+                } else {
+                    Some(tokens[tokens.len() - 1].char_span.1)
+                }
+            })
+            .expect("graph must contain at least one token");
+
+        let group_tokens: Vec<_> = self
+            .groups
+            .iter()
+            .map(|x| x.tokens(&self.tokens))
+            .collect::<Vec<_>>();
+        for (group, tokens) in self.groups.iter_mut().zip(group_tokens.iter()) {
+            if !tokens.is_empty() {
+                group.char_span.0 = tokens[0].char_span.0;
+                group.char_span.1 = tokens[tokens.len() - 1].char_span.1;
+                start = tokens[tokens.len() - 1].char_span.1;
+            } else {
+                group.char_span.1 = start;
+            }
+        }
+
+        for (group, tokens) in self.groups.iter_mut().zip(group_tokens.iter()).rev() {
+            if !tokens.is_empty() {
+                end = tokens[0].char_span.0;
+            } else {
+                group.char_span.0 = end;
+            }
+        }
     }
 }
 
@@ -478,11 +567,12 @@ pub struct Composition {
 impl Composition {
     pub fn new(parts: Vec<Part>) -> Self {
         let mut group_ids_to_idx = HashMap::new();
-        let mut current_id = 0;
+        group_ids_to_idx.insert(0, 0);
+        let mut current_id = 1;
 
         for (i, part) in parts.iter().enumerate() {
             if part.visible {
-                group_ids_to_idx.insert(current_id, i);
+                group_ids_to_idx.insert(current_id, i + 1);
                 current_id += 1;
             }
         }
@@ -545,8 +635,9 @@ impl Composition {
         let mut cur_atom_idx = 0;
 
         let mut graph = MatchGraph::new(
-            vec![Group::default(); self.parts.len()],
+            vec![Group::default(); self.parts.len() + 1],
             &self.group_ids_to_idx,
+            tokens.to_vec(),
         );
 
         let mut is_match = loop {
@@ -575,7 +666,13 @@ impl Composition {
                 cur_atom_idx += 1;
                 cur_count = 0;
             } else if part.atom.is_match(tokens, &graph, position) {
-                graph.groups[cur_atom_idx].tokens.push(tokens[position]);
+                let mut group = &mut graph.groups[cur_atom_idx + 1];
+
+                // set the group beginning if the char end was zero (i. e. the group was empty)
+                if group.char_span.1 == 0 {
+                    group.char_span.0 = tokens[position].char_span.0;
+                }
+                group.char_span.1 = tokens[position].char_span.1;
 
                 position += 1;
                 cur_count += 1;
@@ -591,49 +688,7 @@ impl Composition {
                 .all(|x| x.quantifier.min == 0);
 
         if is_match {
-            let mut start = graph
-                .groups
-                .iter()
-                .find_map(|x| {
-                    if x.tokens.is_empty() {
-                        None
-                    } else {
-                        Some(x.tokens[0].char_span.0)
-                    }
-                })
-                .expect("graph must contain at least one token");
-
-            let mut end = graph
-                .groups
-                .iter()
-                .rev()
-                .find_map(|x| {
-                    if x.tokens.is_empty() {
-                        None
-                    } else {
-                        Some(x.tokens[0].char_span.1)
-                    }
-                })
-                .expect("graph must contain at least one token");
-
-            for group in graph.groups.iter_mut() {
-                if !group.tokens.is_empty() {
-                    group.char_start = group.tokens[0].char_span.0;
-                    group.char_end = group.tokens[group.tokens.len() - 1].char_span.1;
-                    start = group.tokens[group.tokens.len() - 1].char_span.1;
-                } else {
-                    group.char_end = start;
-                }
-            }
-
-            for group in graph.groups.iter_mut().rev() {
-                if !group.tokens.is_empty() {
-                    end = group.tokens[group.tokens.len() - 1].char_span.0;
-                } else {
-                    group.char_start = end;
-                }
-            }
-
+            graph.fill_empty();
             Some(graph)
         } else {
             None

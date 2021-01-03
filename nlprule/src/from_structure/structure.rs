@@ -402,10 +402,18 @@ pub struct Pattern {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Regex {
+    pub text: XMLString,
+    pub case_sensitive: Option<String>,
+    pub mark: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub pattern: Option<Pattern>,
     #[serde(rename = "regexp")]
-    pub regex: Option<XMLText>,
+    pub regex: Option<Regex>,
     #[serde(rename = "antipattern")]
     pub antipatterns: Option<Vec<Pattern>>,
     pub message: Message,

@@ -1,5 +1,8 @@
-use crate::tokenizer::{finalize, IncompleteToken, OwnedWord, Token, Word, WordData};
 use crate::utils::{self, SerializeRegex};
+use crate::{
+    composition::Group,
+    tokenizer::{finalize, IncompleteToken, OwnedWord, Token, Word, WordData},
+};
 use crate::{
     composition::{Composition, MatchGraph},
     tokenizer::Tokenizer,
@@ -43,7 +46,7 @@ pub struct Test {
     pub(crate) suggestion: Option<Suggestion>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Conversion {
     Nop,
     AllLower,
@@ -64,18 +67,11 @@ impl Conversion {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Match {
     id: usize,
     conversion: Conversion,
     regex_replacer: Option<(SerializeRegex, String)>,
-}
-
-impl std::fmt::Debug for Match {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "Match {{ index: {:?} }}", self.id)?;
-        Ok(())
-    }
 }
 
 impl Match {
@@ -83,16 +79,7 @@ impl Match {
         let text = graph
             .by_id(self.id)
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
-            .tokens
-            .get(0)
-            .map(|x| {
-                if x.word.text.is_empty() {
-                    None
-                } else {
-                    Some(x.word.text)
-                }
-            })
-            .unwrap_or(Some(""))?;
+            .text(graph.tokens()[0].text);
 
         if let Some((regex, replacement)) = &self.regex_replacer {
             let replaced = regex.replace_all(text, |caps: &Captures| {
@@ -129,11 +116,12 @@ pub enum SuggesterPart {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Suggester {
+    pub(crate) use_titlecase_adjust: bool,
     pub(crate) parts: Vec<SuggesterPart>,
 }
 
 impl Suggester {
-    fn apply(&self, groups: &MatchGraph, start: usize, _end: usize) -> Option<String> {
+    fn apply(&self, graph: &MatchGraph, start: usize, _end: usize) -> Option<String> {
         let mut output = Vec::new();
 
         let starts_with_conversion = match &self.parts[..] {
@@ -145,7 +133,7 @@ impl Suggester {
             match part {
                 SuggesterPart::Text(t) => output.push(t.clone()),
                 SuggesterPart::Match(m) => {
-                    output.push(m.apply(groups)?);
+                    output.push(m.apply(graph)?);
                 }
             }
         }
@@ -155,22 +143,25 @@ impl Suggester {
         // if the suggestion does not start with a case conversion match, make it title case if:
         // * at sentence start
         // * the replaced text is title case
-        let first_token = groups.groups()[groups.get_index(start).unwrap()..]
-            .iter()
-            .find(|x| !x.tokens.is_empty())
-            .unwrap()
-            .tokens[0];
+        let make_uppercase = !starts_with_conversion
+            && graph.groups()[graph.get_index(start).unwrap()..]
+                .iter()
+                .find(|x| !x.tokens(graph.tokens()).is_empty())
+                .map(|group| {
+                    let first_token = group.tokens(graph.tokens())[0];
+                    (self.use_titlecase_adjust
+                        && first_token
+                            .word
+                            .text
+                            .chars()
+                            .next()
+                            .expect("token must have at least one char")
+                            .is_uppercase())
+                        || first_token.byte_span.0 == 0
+                })
+                .unwrap_or(false);
 
-        if !starts_with_conversion
-            && (first_token
-                .word
-                .text
-                .chars()
-                .next()
-                .expect("token must have at least one char")
-                .is_uppercase()
-                || first_token.byte_span.0 == 0)
-        {
+        if make_uppercase {
             Some(utils::apply_to_first(&suggestion, |x| {
                 x.to_uppercase().collect()
             }))
@@ -467,8 +458,11 @@ impl DisambiguationRule {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
                 });
 
-                let group_byte_spans: HashSet<_> =
-                    group.tokens.iter().map(|x| x.byte_span).collect();
+                let group_byte_spans: HashSet<_> = group
+                    .tokens(graph.tokens())
+                    .iter()
+                    .map(|x| x.byte_span)
+                    .collect();
 
                 byte_spans.push(group_byte_spans);
             }
@@ -609,8 +603,8 @@ impl TokenEngine {
                 .by_id(self.end - 1)
                 .unwrap_or_else(|| panic!("group must exist in graph: {}", self.end - 1));
 
-            let start = start_group.char_start;
-            let end = end_group.char_end;
+            let start = start_group.char_span.0;
+            let end = end_group.char_span.1;
 
             // only add the suggestion if we don't have any yet from this rule in its range
             if mask
@@ -623,11 +617,14 @@ impl TokenEngine {
                 for i in 0..tokens.len() {
                     for antipattern in &self.antipatterns {
                         if let Some(anti_graph) = antipattern.apply(tokens, i) {
-                            let anti_start = anti_graph.by_index(0).char_start;
-                            let anti_end = anti_graph.by_index(anti_graph.len() - 1).char_end;
+                            let anti_start = anti_graph.by_index(0).char_span.0;
+                            let anti_end = anti_graph
+                                .by_index(anti_graph.groups().len() - 1)
+                                .char_span
+                                .1;
 
-                            let rule_start = graph.by_index(0).char_start;
-                            let rule_end = graph.by_index(graph.len() - 1).char_end;
+                            let rule_start = graph.by_index(0).char_span.0;
+                            let rule_end = graph.by_index(graph.groups().len() - 1).char_span.1;
 
                             if anti_start <= rule_end && rule_start <= anti_end {
                                 blocked = true;
@@ -657,7 +654,7 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(SerializeRegex),
+    Text(SerializeRegex, HashMap<usize, usize>),
 }
 
 impl Engine {
@@ -681,11 +678,32 @@ impl Engine {
                     graphs.extend(engine.get_match(&tokens, i, &mut mask));
                 }
             }
-            Engine::Text(_regex) => {
-                // for cap in regex.captures_iter(text) {
+            Engine::Text(regex, id_to_idx) => {
+                // this is the entire text, NOT the text of one token
+                let text = tokens[0].text;
 
-                // }
-                unimplemented!()
+                let mut byte_to_char_idx: HashMap<usize, usize> = text
+                    .char_indices()
+                    .enumerate()
+                    .map(|(ci, (bi, _))| (bi, ci))
+                    .collect();
+                byte_to_char_idx.insert(text.len(), byte_to_char_idx.len());
+
+                graphs.extend(regex.captures_iter(text).map(|captures| {
+                    let mut groups = Vec::new();
+                    for group in captures.iter_pos() {
+                        if let Some(group) = group {
+                            let start = *byte_to_char_idx.get(&group.0).unwrap();
+                            let end = *byte_to_char_idx.get(&group.1).unwrap();
+
+                            groups.push(Group::new((start, end)));
+                        } else {
+                            groups.push(Group::new((0, 0)));
+                        }
+                    }
+
+                    MatchGraph::new(groups, id_to_idx, tokens.to_vec())
+                }));
             }
         }
 
@@ -725,13 +743,7 @@ impl Rule {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
-        let mask: Option<Vec<_>> = Some(vec![
-            false;
-            tokens
-                .get(tokens.len() - 1)
-                .map(|x| x.char_span.1)
-                .unwrap_or(0)
-        ]);
+        let mask: Option<Vec<_>> = Some(vec![false; tokens[0].text.chars().count()]);
 
         for graph in self.engine.get_matches(&refs, mask, skip_mask) {
             let start_group = graph
@@ -753,9 +765,9 @@ impl Rule {
             {
                 let first_token = graph.groups()[graph.get_index(self.start).unwrap()..]
                     .iter()
-                    .find(|x| !x.tokens.is_empty())
+                    .find(|x| !x.tokens(graph.tokens()).is_empty())
                     .unwrap()
-                    .tokens[0];
+                    .tokens(graph.tokens())[0];
 
                 let idx = tokens
                     .iter()
@@ -765,12 +777,12 @@ impl Rule {
                 if idx > 0 {
                     tokens[idx - 1].char_span.1
                 } else {
-                    start_group.char_start
+                    start_group.char_span.0
                 }
             } else {
-                start_group.char_start
+                start_group.char_span.0
             };
-            let end = end_group.char_end;
+            let end = end_group.char_span.1;
 
             // fix e. g. "Super , dass"
             let text: Vec<String> = text
