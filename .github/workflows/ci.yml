@@ -32,6 +32,8 @@ jobs:
           args: --all-features
       - run: |
           mkdir data
+          mkdir storage
+
           cd data
           wget https://f000.backblazeb2.com/file/nlprule/en.zip
           unzip en.zip
