@@ -442,14 +442,13 @@ mod tests {
     use lazy_static::lazy_static;
     use quickcheck_macros::quickcheck;
     use std::fs::File;
+    use std::io::BufReader;
 
     #[quickcheck]
     fn can_tokenize_anything(text: String) -> bool {
         lazy_static! {
             static ref TOKENIZER: Tokenizer = {
-                let reader = flate2::read::GzDecoder::new(
-                    File::open("../storage/en/tokenizer.bin.gz").unwrap(),
-                );
+                let reader = BufReader::new(File::open("../storage/en_tokenizer.bin").unwrap());
                 bincode::deserialize_from(reader).unwrap()
             };
         }

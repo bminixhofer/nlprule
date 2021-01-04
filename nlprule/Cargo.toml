@@ -32,7 +32,6 @@ serde_json = { version = "1", optional = true }
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
-flate2 = "1"
 
 [features]
 compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json"]
