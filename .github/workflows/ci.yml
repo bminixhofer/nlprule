@@ -56,17 +56,26 @@ jobs:
           command: run
           args: --all-features --release --bin test -- --tokenizer storage/en/tokenizer.bin --rules storage/en/rules.bin
 
+  matrix_prep:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      # Required as the JSON input file needs to be read
+      - uses: actions/checkout@v2      
+      - id: set-matrix
+        uses: JoshuaTheMiller/conditional-build-matrix        
+        with:
+          # inputFile: '.github/workflows/matrix_includes.json' # Default input file path
+          filter: '[?runOnEvent==`${{ github.event_name }}` || runOnEvent==`always`]'
+
   build-python:
+    needs: matrix_prep
+    strategy:      
+      matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
     runs-on: ${{ matrix.os }}
     env:
       working-directory: bindings/python
-    strategy:
-      matrix:
-        os: [ubuntu-18.04, windows-latest, macos-latest]
-        python-version: [3.6, 3.7, 3.8]
-    # only run py3.8 on ubuntu if not release
-    if: github.event_name == 'release' || (${{ matrix.os }} == 'ubuntu-18.04' && ${{ matrix.python-version }} == '3.8')
-
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
@@ -94,7 +103,7 @@ jobs:
           path: target/wheels/*
 
   publish:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     needs: [test, build-python]
     if: github.event_name == 'release'
 
