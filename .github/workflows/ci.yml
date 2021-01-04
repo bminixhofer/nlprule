@@ -64,7 +64,9 @@ jobs:
       matrix:
         os: [ubuntu-18.04, windows-latest, macos-latest]
         python-version: [3.6, 3.7, 3.8]
-    
+    # only run py3.8 on ubuntu if not release
+    if: github.event_name == 'release' || (${{ matrix.os }} == 'ubuntu-18.04' && ${{ matrix.python-version }} == '3.8')
+
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
