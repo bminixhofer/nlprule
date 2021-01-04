@@ -8,12 +8,12 @@
 E. g. for english:
 
 ```bash
-RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/dumps/en/output.dump data/dumps/en/added.txt --tag-remove-paths data/dumps/en/removed.txt --disambiguation-path data/disambiguation.en.canonic.xml --tokenizer-config-path configs/en/tokenizer.json --grammar-path data/grammar.en.canonic.xml --rules-config-path configs/en/rules.json --common-words-path data/en_common.txt --chunker-path data/chunker.json --out-tokenizer-path storage/en/tokenizer.bin --out-rules-path storage/en/rules.bin
+RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/en/tags/output.dump data/en/tags/added.txt --tag-remove-paths data/en/tags/removed.txt --disambiguation-path data/en/disambiguation.canonic.xml --tokenizer-config-path configs/en/tokenizer.json --grammar-path data/en/grammar.canonic.xml --rules-config-path configs/en/rules.json --common-words-path data/en/en_common.txt --chunker-path data/en/chunker.json --out-tokenizer-path storage/en_tokenizer.bin --out-rules-path storage/en_rules.bin
 ```
 
 or for German (no chunker):
 ```bash
-RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/dumps/de/output.dump data/dumps/de/added.txt --tag-remove-paths data/dumps/de/removed.txt --disambiguation-path data/disambiguation.de.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/grammar.de.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de_common.txt --out-tokenizer-path storage/de/tokenizer.bin --out-rules-path storage/de/rules.bin
+RUST_LOG=WARN cargo run --all-features --release --bin compile -- --tag-paths data/de/tags/output.dump data/de/tags/added.txt --tag-remove-paths data/de/tags/removed.txt --disambiguation-path data/de/disambiguation.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/de/grammar.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de/de_common.txt --out-tokenizer-path storage/de_tokenizer.bin --out-rules-path storage/de_rules.bin
 ```
 
 ## Testing

@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  rust:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
@@ -24,37 +24,54 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --all-features -p nlprule_core
+          args: --verbose --all-features --release -p nlprule_core
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
+      - run: |
+          mkdir data
+          cd data
+          wget https://f000.backblazeb2.com/file/nlprule/en.zip
+          unzip en.zip
+          wget https://f000.backblazeb2.com/file/nlprule/de.zip
+          unzip de.zip
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          # build english, see BUILD.md
+          args: --all-features --release --bin compile -- --tag-paths data/en/tags/output.dump data/en/tags/added.txt --tag-remove-paths data/en/tags/removed.txt --disambiguation-path data/en/disambiguation.canonic.xml --tokenizer-config-path configs/en/tokenizer.json --grammar-path data/en/grammar.canonic.xml --rules-config-path configs/en/rules.json --common-words-path data/en/en_common.txt --chunker-path data/en/chunker.json --out-tokenizer-path storage/en_tokenizer.bin --out-rules-path storage/en_rules.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          # build german, see BUILD.md
+          args: --all-features --release --bin compile -- --tag-paths data/de/tags/output.dump data/de/tags/added.txt --tag-remove-paths data/de/tags/removed.txt --disambiguation-path data/de/disambiguation.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/de/grammar.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de/de_common.txt --out-tokenizer-path storage/de_tokenizer.bin --out-rules-path storage/de_rules.bin
       - uses: actions-rs/cargo@v1
         with:
           command: test
           args: --verbose --all-features --release -p nlprule_core
-      - run: |
-          gunzip storage/en/rules.bin.gz
-          gunzip storage/en/tokenizer.bin.gz
-          gunzip storage/de/rules.bin.gz
-          gunzip storage/de/tokenizer.bin.gz
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/de/tokenizer.bin
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/en_tokenizer.bin
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/en/tokenizer.bin
+          args: --all-features --release --bin test -- --tokenizer storage/en_tokenizer.bin --rules storage/en_rules.bin
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test -- --tokenizer storage/de/tokenizer.bin --rules storage/de/rules.bin
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/de_tokenizer.bin
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test -- --tokenizer storage/en/tokenizer.bin --rules storage/en/rules.bin
+          args: --all-features --release --bin test -- --tokenizer storage/de_tokenizer.bin --rules storage/de_rules.bin
+      - name: Upload binaries as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: binaries
+          path: storage/*
 
   matrix_prep:
     runs-on: ubuntu-latest
@@ -69,7 +86,7 @@ jobs:
           # inputFile: '.github/workflows/matrix_includes.json' # Default input file path
           filter: '[?runOnEvent==`${{ github.event_name }}` || runOnEvent==`always`]'
 
-  build-python:
+  python:
     needs: matrix_prep
     strategy:      
       matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
@@ -104,7 +121,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
-    needs: [test, build-python]
+    needs: [rust, python]
     if: github.event_name == 'release'
 
     steps:
