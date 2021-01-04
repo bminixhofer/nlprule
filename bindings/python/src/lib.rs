@@ -411,6 +411,11 @@ impl PySuggestion {
     fn source(&self) -> &str {
         &self.suggestion.source
     }
+
+    #[getter]
+    fn message(&self) -> &str {
+        &self.suggestion.message
+    }
 }
 
 impl From<Suggestion> for PySuggestion {
@@ -757,6 +762,7 @@ impl PyRules {
 
                 Suggestion {
                     source: x.source().to_string(),
+                    message: x.message().to_string(),
                     text: x.text().iter().map(|x| x.to_string()).collect(),
                     start: x.start(),
                     end: x.end(),

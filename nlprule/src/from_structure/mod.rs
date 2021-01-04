@@ -261,135 +261,147 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Par
     Ok(parts)
 }
 
-fn parse_suggestion(
-    data: Vec<structure::SuggestionPart>,
+fn parse_match(
+    m: structure::Match,
     composition: &Option<&Composition>,
-) -> Result<rule::Suggester, Error> {
-    let mut parts = Vec::new();
+) -> Result<rule::Match, Error> {
+    if m.postag_replace.is_some() || m.text.is_some() {
+        return Err(Error::Unimplemented(
+            "postag_replace and text in `match` are not implemented.".into(),
+        ));
+    }
 
+    if m.include_skipped.is_some() {
+        return Err(Error::Unimplemented(
+            "include_skipped in `match` is not implemented.".into(),
+        ));
+    }
+
+    let mut id =
+        m.no.parse::<usize>()
+            .expect("no must be parsable as usize.");
+
+    if let Some(composition) = composition {
+        let last_id = get_last_id(&composition.parts) as usize - 1;
+
+        if id > last_id {
+            id = last_id;
+        }
+    }
+
+    let case_conversion = if let Some(conversion) = &m.case_conversion {
+        Some(conversion.as_str())
+    } else {
+        None
+    };
+
+    let pos_replacer = if let Some(postag) = m.postag {
+        if postag.contains("+DT") || postag.contains("+INDT") {
+            return Err(Error::Unimplemented(
+                "+DT and +INDT determiners are not implemented.".into(),
+            ));
+        }
+
+        let matcher = match m.postag_regex.as_deref() {
+            Some("yes") => {
+                let regex = SerializeRegex::new(&postag, true, false)?;
+                Matcher::new_regex(regex, false, true)
+            }
+            None => Matcher::new_string(either::Left(postag.into()), false, false, true),
+            x => panic!("unknown postag_regex value {:?}", x),
+        };
+        Some(rule::PosReplacer::new(matcher))
+    } else {
+        None
+    };
+
+    let regex_replacer = match (m.regexp_match, m.regexp_replace) {
+        (Some(regex_match), Some(regex_replace)) => Some((
+            SerializeRegex::new(&regex_match, false, true)?,
+            regex_replace,
+        )),
+        _ => None,
+    };
+
+    Ok(rule::Match::new(
+        id,
+        match case_conversion {
+            Some("alllower") => rule::Conversion::AllLower,
+            Some("startlower") => rule::Conversion::StartLower,
+            Some("startupper") => rule::Conversion::StartUpper,
+            Some("allupper") => rule::Conversion::AllUpper,
+            Some(x) => {
+                return Err(Error::Unimplemented(format!(
+                    "case conversion {} not supported.",
+                    x
+                )))
+            }
+            None => rule::Conversion::Nop,
+        },
+        pos_replacer,
+        regex_replacer,
+    ))
+}
+
+fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
     lazy_static! {
         static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
     }
 
-    for part in data {
+    let mut parts = Vec::new();
+    let mut end_index = 0;
+
+    for capture in MATCH_REGEX.captures_iter(&text) {
+        let (start, end) = capture.pos(0).unwrap();
+
+        if end_index != start {
+            parts.push(rule::SynthesizerPart::Text(
+                (&text[end_index..start]).to_string(),
+            ))
+        }
+
+        let index = capture
+            .at(1)
+            .unwrap()
+            .parse::<usize>()
+            .expect("match regex capture must be parsable as usize.");
+
+        parts.push(rule::SynthesizerPart::Match(rule::Match::new(
+            index,
+            rule::Conversion::Nop,
+            None,
+            None,
+        )));
+        end_index = end;
+    }
+
+    if end_index < text.len() {
+        parts.push(rule::SynthesizerPart::Text(
+            (&text[end_index..]).to_string(),
+        ))
+    }
+    parts
+}
+
+fn parse_suggestion(
+    data: structure::Suggestion,
+    composition: &Option<&Composition>,
+) -> Result<rule::Synthesizer, Error> {
+    let mut parts = Vec::new();
+    for part in data.parts {
         match part {
             structure::SuggestionPart::Text(text) => {
-                let mut end_index = 0;
-
-                for capture in MATCH_REGEX.captures_iter(&text) {
-                    let (start, end) = capture.pos(0).unwrap();
-
-                    if end_index != start {
-                        parts.push(rule::SuggesterPart::Text(
-                            (&text[end_index..start]).to_string(),
-                        ))
-                    }
-
-                    let index = capture
-                        .at(1)
-                        .unwrap()
-                        .parse::<usize>()
-                        .expect("match regex capture must be parsable as usize.");
-
-                    parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                        index,
-                        rule::Conversion::Nop,
-                        None,
-                        None,
-                    )));
-                    end_index = end;
-                }
-
-                if end_index < text.len() {
-                    parts.push(rule::SuggesterPart::Text((&text[end_index..]).to_string()))
-                }
+                parts.extend(parse_synthesizer_text(text.as_str()));
             }
             structure::SuggestionPart::Match(m) => {
-                if m.postag_replace.is_some() || m.text.is_some() {
-                    return Err(Error::Unimplemented(
-                        "postag_replace and text in `match` are not implemented.".into(),
-                    ));
-                }
-
-                if m.include_skipped.is_some() {
-                    return Err(Error::Unimplemented(
-                        "include_skipped in `match` is not implemented.".into(),
-                    ));
-                }
-
-                let mut id =
-                    m.no.parse::<usize>()
-                        .expect("no must be parsable as usize.");
-
-                if let Some(composition) = composition {
-                    let last_id = get_last_id(&composition.parts) as usize - 1;
-
-                    if id > last_id {
-                        id = last_id;
-                    }
-                }
-
-                let case_conversion = if let Some(conversion) = &m.case_conversion {
-                    Some(conversion.as_str())
-                } else {
-                    None
-                };
-
-                let pos_replacer = if let Some(postag) = m.postag {
-                    if postag.contains("+DT") || postag.contains("+INDT") {
-                        return Err(Error::Unimplemented(
-                            "+DT and +INDT determiners are not implemented.".into(),
-                        ));
-                    }
-
-                    let matcher = match m.postag_regex.as_deref() {
-                        Some("yes") => {
-                            let regex = SerializeRegex::new(&postag, true, false)?;
-                            Matcher::new_regex(regex, false, true)
-                        }
-                        None => {
-                            Matcher::new_string(either::Left(postag.into()), false, false, true)
-                        }
-                        x => panic!("unknown postag_regex value {:?}", x),
-                    };
-                    Some(rule::PosReplacer::new(matcher))
-                } else {
-                    None
-                };
-
-                let regex_replacer = match (m.regexp_match, m.regexp_replace) {
-                    (Some(regex_match), Some(regex_replace)) => Some((
-                        SerializeRegex::new(&regex_match, false, true)?,
-                        regex_replace,
-                    )),
-                    _ => None,
-                };
-
-                parts.push(rule::SuggesterPart::Match(rule::Match::new(
-                    id,
-                    match case_conversion {
-                        Some("alllower") => rule::Conversion::AllLower,
-                        Some("startlower") => rule::Conversion::StartLower,
-                        Some("startupper") => rule::Conversion::StartUpper,
-                        Some("allupper") => rule::Conversion::AllUpper,
-                        Some(x) => {
-                            return Err(Error::Unimplemented(format!(
-                                "case conversion {} not supported.",
-                                x
-                            )))
-                        }
-                        None => rule::Conversion::Nop,
-                    },
-                    pos_replacer,
-                    regex_replacer,
-                )));
+                parts.push(rule::SynthesizerPart::Match(parse_match(m, composition)?));
             }
         }
     }
 
-    Ok(rule::Suggester {
+    Ok(rule::Synthesizer {
         parts,
-        // use uppercase adjustment (i. e. make replacement title case if match is title case) if token rule
+        // use titlecase adjustment (i. e. make replacement title case if match is title case) if token rule
         use_titlecase_adjust: composition.is_some(),
     })
 }
@@ -575,30 +587,42 @@ impl TryFrom<structure::Rule> for rule::Rule {
             None
         };
 
-        let suggesters = data
-            .message
-            .parts
-            .into_iter()
-            .filter_map(|x| match x {
+        let mut message_parts = Vec::new();
+        let mut suggesters = Vec::new();
+
+        for part in data.message.parts {
+            match part {
                 structure::MessagePart::Suggestion(suggestion) => {
-                    Some(parse_suggestion(suggestion.parts, &maybe_composition))
+                    let suggester = parse_suggestion(suggestion.clone(), &maybe_composition)?;
+                    // simpler to just parse a second time than cloning the result
+                    message_parts.extend(parse_suggestion(suggestion, &maybe_composition)?.parts);
+                    suggesters.push(suggester);
                 }
-                structure::MessagePart::Text(_) => None, // the actual message is ignored at the moment
-                structure::MessagePart::Match(_) => None,
-            })
-            .chain(
-                data.suggestions
-                    .unwrap_or_else(Vec::new)
-                    .into_iter()
-                    .map(|x| parse_suggestion(x.parts, &maybe_composition)),
-            )
-            .collect::<Result<Vec<rule::Suggester>, Error>>()?;
+                structure::MessagePart::Text(text) => {
+                    message_parts.extend(parse_synthesizer_text(text.as_str()));
+                }
+                structure::MessagePart::Match(m) => {
+                    message_parts.push(rule::SynthesizerPart::Match(parse_match(
+                        m,
+                        &maybe_composition,
+                    )?));
+                }
+            }
+        }
+
+        if let Some(suggestions) = data.suggestions {
+            for suggestion in suggestions {
+                suggesters.push(parse_suggestion(suggestion, &maybe_composition)?);
+            }
+        }
 
         if suggesters.is_empty() {
             return Err(Error::Unimplemented(
                 "rules with no suggestion are not implemented.".into(),
             ));
         }
+
+        assert!(!message_parts.is_empty(), "Rules must have a message.");
 
         let mut tests = Vec::new();
         for example in &data.examples {
@@ -645,6 +669,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
 
                             suggestion = Some(rule::Suggestion {
                                 source: "_Test".to_string(),
+                                message: "_Test".to_string(),
                                 start: char_length,
                                 end: char_length + length,
                                 text,
@@ -668,6 +693,10 @@ impl TryFrom<structure::Rule> for rule::Rule {
             start,
             end,
             suggesters,
+            message: rule::Synthesizer {
+                parts: message_parts,
+                use_titlecase_adjust: true,
+            },
             id: String::new(),
             on: data.default.map_or(true, |x| x != "off"),
         })

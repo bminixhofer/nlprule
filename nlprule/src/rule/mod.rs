@@ -29,6 +29,7 @@ use crate::from_structure;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Suggestion {
     pub source: String,
+    pub message: String,
     pub start: usize,
     pub end: usize,
     pub text: Vec<String>,
@@ -174,18 +175,18 @@ impl Match {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum SuggesterPart {
+pub enum SynthesizerPart {
     Text(String),
     Match(Match),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Suggester {
+pub struct Synthesizer {
     pub(crate) use_titlecase_adjust: bool,
-    pub(crate) parts: Vec<SuggesterPart>,
+    pub(crate) parts: Vec<SynthesizerPart>,
 }
 
-impl Suggester {
+impl Synthesizer {
     fn apply(
         &self,
         graph: &MatchGraph,
@@ -196,14 +197,14 @@ impl Suggester {
         let mut output = Vec::new();
 
         let starts_with_conversion = match &self.parts[..] {
-            [SuggesterPart::Match(m), ..] => m.has_conversion(),
+            [SynthesizerPart::Match(m), ..] => m.has_conversion(),
             _ => false,
         };
 
         for part in &self.parts {
             match part {
-                SuggesterPart::Text(t) => output.push(t.clone()),
-                SuggesterPart::Match(m) => {
+                SynthesizerPart::Text(t) => output.push(t.clone()),
+                SynthesizerPart::Match(m) => {
                     output.push(m.apply(graph, tokenizer)?);
                 }
             }
@@ -787,7 +788,8 @@ pub struct Rule {
     pub(crate) id: String,
     pub(crate) engine: Engine,
     pub(crate) tests: Vec<Test>,
-    pub(crate) suggesters: Vec<Suggester>,
+    pub(crate) suggesters: Vec<Synthesizer>,
+    pub(crate) message: Synthesizer,
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) on: bool,
@@ -868,6 +870,10 @@ impl Rule {
 
             if !text.is_empty() {
                 suggestions.push(Suggestion {
+                    message: self
+                        .message
+                        .apply(&graph, tokenizer, self.start, self.end)
+                        .expect("Rules must have a message."),
                     source: self.id.to_string(),
                     start,
                     end,
