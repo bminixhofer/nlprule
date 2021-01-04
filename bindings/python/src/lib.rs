@@ -56,7 +56,7 @@ fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
 
     // ... otherwise, request the data from the URL ...
     let bytes = reqwest::blocking::get(&format!(
-        "https://github.com/bminixhofer/nlprule/raw/{}/storage/{}/{}",
+        "https://github.com/bminixhofer/nlprule/releases/download/{}/{}_{}",
         env!("CARGO_PKG_VERSION"),
         code,
         name

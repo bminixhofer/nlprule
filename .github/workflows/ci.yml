@@ -138,6 +138,15 @@ jobs:
         with:
           name: python-wheel
           path: python-wheel
+      - uses: actions/download-artifact@v2
+        with:
+          name: binaries
+          path: storage
+      - run: |
+          gzip storage/en_tokenizer.bin
+          gzip storage/en_rules.bin
+          gzip storage/de_tokenizer.bin
+          gzip storage/de_rules.bin
       - name: Update version
         run: |
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
@@ -154,3 +163,9 @@ jobs:
         with:
           commit_message: v${{ github.event.release.tag_name }}
           branch: master
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.2.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["./storage/"]'
