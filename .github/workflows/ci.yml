@@ -64,7 +64,7 @@ jobs:
       # Required as the JSON input file needs to be read
       - uses: actions/checkout@v2      
       - id: set-matrix
-        uses: JoshuaTheMiller/conditional-build-matrix@v0.01
+        uses: JoshuaTheMiller/conditional-build-matrix@0.01
         with:
           # inputFile: '.github/workflows/matrix_includes.json' # Default input file path
           filter: '[?runOnEvent==`${{ github.event_name }}` || runOnEvent==`always`]'
