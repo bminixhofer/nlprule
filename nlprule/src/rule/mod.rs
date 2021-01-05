@@ -1,22 +1,15 @@
 use crate::{
-    composition::Group,
-    tokenizer::{finalize, IncompleteToken, OwnedWord, Token, Word, WordData},
-};
-use crate::{
-    composition::Matcher,
-    utils::{self, SerializeRegex},
-};
-use crate::{
-    composition::{Composition, MatchGraph},
-    tokenizer::Tokenizer,
-};
-use crate::{
+    composition::{Composition, Group, MatchGraph, Matcher},
     filter::{Filter, Filterable},
-    tokenizer::OwnedWordData,
+    tokenizer::{
+        finalize, IncompleteToken, OwnedWord, OwnedWordData, Token, Tokenizer, Word, WordData,
+    },
+    utils::{self, SerializeRegex},
 };
 use itertools::Itertools;
 use log::{error, info, warn};
 use onig::Captures;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -516,7 +509,10 @@ impl DisambiguationRule {
 
         let mut all_byte_spans = Vec::new();
 
-        for graph in self.engine.get_matches(&refs, None, Some(&skip_mask)) {
+        for graph in self
+            .engine
+            .get_matches(&refs, Some(&skip_mask), self.start, self.end)
+        {
             if let Some(filter) = &self.filter {
                 if !filter.keep(&graph, tokenizer) {
                     continue;
@@ -656,66 +652,39 @@ impl DisambiguationRule {
 pub struct TokenEngine {
     pub(crate) composition: Composition,
     pub(crate) antipatterns: Vec<Composition>,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
 }
 
 impl TokenEngine {
-    fn get_match<'t>(
-        &'t self,
-        tokens: &'t [&'t Token],
-        i: usize,
-        mask: &mut Option<Vec<bool>>,
-    ) -> Option<MatchGraph<'t>> {
+    fn get_match<'t>(&'t self, tokens: &'t [&'t Token], i: usize) -> Option<MatchGraph<'t>> {
         if let Some(graph) = self.composition.apply(tokens, i) {
-            let start_group = graph
-                .by_id(self.start)
-                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.start));
-            let end_group = graph
-                .by_id(self.end - 1)
-                .unwrap_or_else(|| panic!("group must exist in graph: {}", self.end - 1));
+            let mut blocked = false;
 
-            let start = start_group.char_span.0;
-            let end = end_group.char_span.1;
+            // TODO: cache / move to outer loop
+            for i in 0..tokens.len() {
+                for antipattern in &self.antipatterns {
+                    if let Some(anti_graph) = antipattern.apply(tokens, i) {
+                        let anti_start = anti_graph.by_index(0).char_span.0;
+                        let anti_end = anti_graph
+                            .by_index(anti_graph.groups().len() - 1)
+                            .char_span
+                            .1;
 
-            // only add the suggestion if we don't have any yet from this rule in its range
-            if mask
-                .as_ref()
-                .map_or(true, |x| !x[start..end].iter().any(|x| *x))
-            {
-                let mut blocked = false;
+                        let rule_start = graph.by_index(0).char_span.0;
+                        let rule_end = graph.by_index(graph.groups().len() - 1).char_span.1;
 
-                // TODO: cache / move to outer loop
-                for i in 0..tokens.len() {
-                    for antipattern in &self.antipatterns {
-                        if let Some(anti_graph) = antipattern.apply(tokens, i) {
-                            let anti_start = anti_graph.by_index(0).char_span.0;
-                            let anti_end = anti_graph
-                                .by_index(anti_graph.groups().len() - 1)
-                                .char_span
-                                .1;
-
-                            let rule_start = graph.by_index(0).char_span.0;
-                            let rule_end = graph.by_index(graph.groups().len() - 1).char_span.1;
-
-                            if anti_start <= rule_end && rule_start <= anti_end {
-                                blocked = true;
-                                break;
-                            }
+                        if anti_start <= rule_end && rule_start <= anti_end {
+                            blocked = true;
+                            break;
                         }
                     }
-                    if blocked {
-                        break;
-                    }
                 }
-
-                if !blocked {
-                    if let Some(mask) = mask {
-                        mask[start..end].iter_mut().for_each(|x| *x = true);
-                    }
-
-                    return Some(graph);
+                if blocked {
+                    break;
                 }
+            }
+
+            if !blocked {
+                return Some(graph);
             }
         }
 
@@ -733,21 +702,43 @@ impl Engine {
     fn get_matches<'t>(
         &'t self,
         tokens: &'t [&'t Token],
-        mut mask: Option<Vec<bool>>,
         skip_mask: Option<&[bool]>,
+        start: usize,
+        end: usize,
     ) -> Vec<MatchGraph<'t>> {
         let mut graphs = Vec::new();
 
         match &self {
             Engine::Token(engine) => {
-                for i in 0..tokens.len() {
-                    if let Some(skip_mask) = skip_mask {
-                        if skip_mask[i] {
-                            continue;
-                        }
-                    }
+                let mut graph_info: Vec<_> = (0..tokens.len())
+                    .into_iter()
+                    .filter(|i| skip_mask.map_or(true, |x| !x[*i]))
+                    .filter_map(|i| {
+                        if let Some(graph) = engine.get_match(&tokens, i) {
+                            let start_group = graph
+                                .by_id(start)
+                                .unwrap_or_else(|| panic!("group must exist in graph: {}", start));
+                            let end_group = graph.by_id(end - 1).unwrap_or_else(|| {
+                                panic!("group must exist in graph: {}", end - 1)
+                            });
 
-                    graphs.extend(engine.get_match(&tokens, i, &mut mask));
+                            let start = start_group.char_span.0;
+                            let end = end_group.char_span.1;
+                            Some((graph, start, end))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                graph_info.sort_by(|(_, start, _), (_, end, _)| start.cmp(end));
+                let mut mask = vec![false; tokens[0].text.chars().count()];
+
+                for (graph, start, end) in graph_info {
+                    if mask[start..end].iter().all(|x| !x) {
+                        graphs.push(graph);
+                        mask[start..end].iter_mut().for_each(|x| *x = true);
+                    }
                 }
             }
             Engine::Text(regex, id_to_idx) => {
@@ -821,9 +812,10 @@ impl Rule {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
-        let mask: Option<Vec<_>> = Some(vec![false; tokens[0].text.chars().count()]);
-
-        for graph in self.engine.get_matches(&refs, mask, skip_mask) {
+        for graph in self
+            .engine
+            .get_matches(&refs, skip_mask, self.start, self.end)
+        {
             let start_group = graph
                 .by_id(self.start)
                 .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));
@@ -1043,23 +1035,38 @@ impl Rules {
             return Vec::new();
         }
 
-        let mut output = Vec::new();
-        let mut mask = vec![false; tokens[tokens.len() - 1].char_span.1];
+        let mut output: Vec<_> = self
+            .rules
+            .par_iter()
+            .enumerate()
+            .filter(|(_, x)| x.on())
+            .map(|(i, rule)| {
+                let skip_mask = self.cache.get_skip_mask(tokens, i);
+                let mut output = Vec::new();
 
-        for (i, rule) in self.rules.iter().enumerate().filter(|(_, x)| x.on()) {
-            let skip_mask = self.cache.get_skip_mask(tokens, i);
-            for suggestion in rule.apply(tokens, Some(&skip_mask), tokenizer) {
-                if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
-                    mask[suggestion.start..suggestion.end]
-                        .iter_mut()
-                        .for_each(|x| *x = true);
-
+                for suggestion in rule.apply(tokens, Some(&skip_mask), tokenizer) {
                     output.push(suggestion);
                 }
-            }
-        }
+
+                output
+            })
+            .flatten()
+            .collect();
 
         output.sort_by(|a, b| a.start.cmp(&b.start));
+
+        let mut mask = vec![false; tokens[0].text.chars().count()];
+        output.retain(|suggestion| {
+            if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
+                mask[suggestion.start..suggestion.end]
+                    .iter_mut()
+                    .for_each(|x| *x = true);
+                true
+            } else {
+                false
+            }
+        });
+
         output
     }
 

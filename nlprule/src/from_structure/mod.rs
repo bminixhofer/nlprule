@@ -578,8 +578,6 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 Ok((
                     rule::Engine::Token(rule::TokenEngine {
                         composition,
-                        start,
-                        end,
                         antipatterns: if let Some(antipatterns) = data.antipatterns {
                             antipatterns
                                 .into_iter()
@@ -1124,8 +1122,6 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             engine: rule::Engine::Token(rule::TokenEngine {
                 composition,
                 antipatterns,
-                start,
-                end,
             }),
             filter,
             disambiguations,
