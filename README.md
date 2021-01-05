@@ -23,8 +23,8 @@ NLPRule currently supports English and German.
 
 |         | \|Disambiguation rules\| | \|Grammar rules\| | LT version   |
 |---------|--------------------------|-------------------|--------------|
-| English | 801 (100%)               | 3083 (~ 87%)      | 5.1          |
-| German  | 464 (100%)               | 2830 (~ 91%)      | 5.1          |
+| English | 843 (100%)               | 3725 (~ 85%)      | 5.2          |
+| German  | 486 (100%)               | 2830 (~ 90%)      | 5.2          |
 
 ## Usage
 
