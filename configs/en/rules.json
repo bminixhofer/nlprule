@@ -4,6 +4,8 @@
         "VERB_APOSTROPHE_S.3",
         "PRP_MD_NN.2",
         "IT_IS_DEPENDING_ON",
-        "WILL_BASED_ON"
+        "INCORRECT_POSSESSIVE_FORM_AFTER_A_NUMBER",
+        "WILL_BASED_ON",
+        "PRP_PAST_PART.0"
     ]
 }
