@@ -122,6 +122,25 @@ fn parse_match_attribs(
         atoms.push(WordDataAtom::new(matcher, case_sensitive).into());
     }
 
+    match (attribs.chunk(), attribs.chunk_re()) {
+        (Some(chunk), None) => {
+            let chunk_atom = ChunkAtom::new(Matcher::new_string(
+                either::Left(chunk.trim().to_string().into()),
+                false,
+                true,
+                true,
+            ));
+            atoms.push(chunk_atom.into());
+        }
+        (None, Some(chunk_re)) => {
+            let regex = SerializeRegex::new(chunk_re.trim(), true, true)?;
+            let chunk_atom = ChunkAtom::new(Matcher::new_regex(regex, false, true));
+            atoms.push(chunk_atom.into());
+        }
+        (None, None) => {}
+        _ => panic!("unexpected combination of chunk / chunk_re values."),
+    }
+
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = ChunkAtom::new(Matcher::new_string(
             either::Left(chunk.trim().to_string().into()),
@@ -226,7 +245,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Par
             }
         })
         .unwrap_or(1usize);
-    let max = token
+    let mut max = token
         .max
         .clone()
         .map(|x| {
@@ -237,6 +256,9 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Par
             }
         })
         .unwrap_or(1usize);
+    if min > 1 && max == 1 {
+        max = max_matches();
+    }
 
     let quantifier = Quantifier::new(min, max);
     let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx)?;
@@ -265,9 +287,13 @@ fn parse_match(
     m: structure::Match,
     composition: &Option<&Composition>,
 ) -> Result<rule::Match, Error> {
-    if m.postag_replace.is_some() || m.text.is_some() {
+    if m.postag.is_some()
+        || m.postag_regex.is_some()
+        || m.postag_replace.is_some()
+        || m.text.is_some()
+    {
         return Err(Error::Unimplemented(
-            "postag_replace and text in `match` are not implemented.".into(),
+            "postag, postag_regex, postag_replace and text in `match` are not implemented.".into(),
         ));
     }
 

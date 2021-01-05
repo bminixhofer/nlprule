@@ -223,6 +223,7 @@ pub struct Exception {
     pub postag: Option<String>,
     pub postag_regexp: Option<String>,
     pub chunk: Option<String>,
+    pub chunk_re: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -259,6 +260,7 @@ pub struct Token {
     pub postag: Option<String>,
     pub postag_regexp: Option<String>,
     pub chunk: Option<String>,
+    pub chunk_re: Option<String>,
     pub regexp: Option<String>,
     pub spacebefore: Option<String>,
     pub negate: Option<String>,
@@ -274,6 +276,7 @@ pub trait MatchAttributes {
     fn postag(&self) -> &Option<String>;
     fn postag_regexp(&self) -> &Option<String>;
     fn chunk(&self) -> &Option<String>;
+    fn chunk_re(&self) -> &Option<String>;
     fn regexp(&self) -> &Option<String>;
     fn spacebefore(&self) -> &Option<String>;
     fn negate(&self) -> &Option<String>;
@@ -301,6 +304,10 @@ macro_rules! impl_match_attributes {
 
             fn chunk(&self) -> &Option<String> {
                 &self.chunk
+            }
+
+            fn chunk_re(&self) -> &Option<String> {
+                &self.chunk_re
             }
 
             fn regexp(&self) -> &Option<String> {

@@ -2,5 +2,8 @@
     "allow_errors": false,
     "retain_last": true,
     "use_compound_split_heuristic": false,
-    "always_add_lower_tags": true
+    "always_add_lower_tags": true,
+    "ignore_ids": [
+        "BEST_JJS"
+    ]
 }

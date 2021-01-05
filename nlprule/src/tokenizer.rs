@@ -279,6 +279,7 @@ impl Tokenizer {
                             && !options.ignore_ids.contains(&id)
                         {
                             rule.set_id(id);
+
                             Some(rule)
                         } else {
                             None

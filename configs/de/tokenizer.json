@@ -2,5 +2,9 @@
     "allow_errors": false,
     "retain_last": false,
     "use_compound_split_heuristic": true,
-    "always_add_lower_tags": false
+    "always_add_lower_tags": false,
+    "ignore_ids": [
+        "SUB_BEAMTE.1",
+        "SUB_BEAMTE.2"
+    ]
 }

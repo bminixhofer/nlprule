@@ -1,11 +1,11 @@
 use flate2::read::GzDecoder;
 use nlprule_core::{
-    rule::Rules,
-    tokenizer::{finalize, tag::Tagger, OwnedToken},
-};
-use nlprule_core::{
     rule::Suggestion,
     tokenizer::{Tokenizer, TokenizerOptions},
+};
+use nlprule_core::{
+    rule::{Rule, Rules},
+    tokenizer::{finalize, tag::Tagger, OwnedToken},
 };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -573,6 +573,32 @@ impl PyTokenizer {
     }
 }
 
+#[pyclass(name = "Rule", module = "nlprule")]
+struct PyRule {
+    id: String,
+}
+
+impl PyRule {
+    fn from_rule(rule: &Rule) -> Self {
+        PyRule {
+            id: rule.id().to_string(),
+        }
+    }
+}
+
+/// One grammatical rule.
+///
+/// Can not be created directly but accessed by the `.rules` attribute on the rules.
+/// Attributes:
+/// * id (str): The id of this rule.
+#[pymethods]
+impl PyRule {
+    #[getter]
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 /// The grammatical rules.
 /// Can be created from a rules binary:
 /// ```python
@@ -637,6 +663,11 @@ impl PyRules {
             tokenizer,
             sentence_splitter,
         })
+    }
+
+    #[getter]
+    fn rules(&self) -> Vec<PyRule> {
+        self.rules.rules().iter().map(PyRule::from_rule).collect()
     }
 
     /// Get suggestions for the given sentence.

@@ -2,7 +2,8 @@
     "allow_errors": false,
     "ignore_ids": [
         "VERB_APOSTROPHE_S.3",
-        "INCORRECT_POSSESSIVE_FORM_AFTER_A_NUMBER",
-        "A_NNS.0"
+        "PRP_MD_NN.2",
+        "IT_IS_DEPENDING_ON",
+        "WILL_BASED_ON"
     ]
 }
