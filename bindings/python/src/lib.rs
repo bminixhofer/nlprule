@@ -385,6 +385,7 @@ impl PyToken {
 /// * end (int): The end character position of the suggestion in the original text.
 /// * text (List[str]): A list of suggested replacements.
 /// * source (str): The ID of the rule that triggered this suggestion.
+/// * message (str): A human-readable message for this suggestion.
 #[pyclass(name = "Suggestion", module = "nlprule")]
 struct PySuggestion {
     suggestion: Suggestion,
@@ -573,6 +574,11 @@ impl PyTokenizer {
     }
 }
 
+/// One grammatical rule.
+///
+/// Can not be created directly but accessed by the `.rules` attribute on the rules.
+/// Attributes:
+/// * id (str): The id of this rule.
 #[pyclass(name = "Rule", module = "nlprule")]
 struct PyRule {
     id: String,
@@ -586,11 +592,6 @@ impl PyRule {
     }
 }
 
-/// One grammatical rule.
-///
-/// Can not be created directly but accessed by the `.rules` attribute on the rules.
-/// Attributes:
-/// * id (str): The id of this rule.
 #[pymethods]
 impl PyRule {
     #[getter]
