@@ -1,21 +1,19 @@
 use crate::types::*;
-use crate::{
-    composition::{
-        concrete::ChunkAtom,
-        concrete::{SpaceBeforeAtom, TextAtom, WordDataAtom},
-        AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier,
-        TrueAtom, WordDataMatcher,
-    },
-    filter::get_filter,
-    rule, utils,
-    utils::regex::SerializeRegex,
-    Error,
-};
+use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
 use std::{collections::HashMap, convert::TryFrom};
 
-pub mod structure;
+mod structure;
+
+pub use structure::{read_disambiguation_rules, read_rules};
+
+use super::disambiguation::*;
+use super::engine::composition::concrete::*;
+use super::engine::composition::*;
+use super::engine::*;
+use super::grammar::*;
+use super::{DisambiguationRule, Rule};
 
 // TODO: should be an option in config OR restricted to one sentence
 fn max_matches() -> usize {
@@ -284,10 +282,7 @@ fn parse_token(token: &structure::Token, case_sensitive: bool) -> Result<Vec<Par
     Ok(parts)
 }
 
-fn parse_match(
-    m: structure::Match,
-    composition: &Option<&Composition>,
-) -> Result<rule::Match, Error> {
+fn parse_match(m: structure::Match, composition: &Option<&Composition>) -> Result<Match, Error> {
     if m.postag.is_some()
         || m.postag_regex.is_some()
         || m.postag_replace.is_some()
@@ -337,7 +332,7 @@ fn parse_match(
             None => Matcher::new_string(either::Left(postag.into()), false, false, true),
             x => panic!("unknown postag_regex value {:?}", x),
         };
-        Some(rule::PosReplacer::new(matcher))
+        Some(PosReplacer::new(matcher))
     } else {
         None
     };
@@ -350,27 +345,27 @@ fn parse_match(
         _ => None,
     };
 
-    Ok(rule::Match::new(
+    Ok(Match::new(
         id,
         match case_conversion {
-            Some("alllower") => rule::Conversion::AllLower,
-            Some("startlower") => rule::Conversion::StartLower,
-            Some("startupper") => rule::Conversion::StartUpper,
-            Some("allupper") => rule::Conversion::AllUpper,
+            Some("alllower") => Conversion::AllLower,
+            Some("startlower") => Conversion::StartLower,
+            Some("startupper") => Conversion::StartUpper,
+            Some("allupper") => Conversion::AllUpper,
             Some(x) => {
                 return Err(Error::Unimplemented(format!(
                     "case conversion {} not supported.",
                     x
                 )))
             }
-            None => rule::Conversion::Nop,
+            None => Conversion::Nop,
         },
         pos_replacer,
         regex_replacer,
     ))
 }
 
-fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
+fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
     lazy_static! {
         static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
     }
@@ -382,9 +377,7 @@ fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
         let (start, end) = capture.pos(0).unwrap();
 
         if end_index != start {
-            parts.push(rule::SynthesizerPart::Text(
-                (&text[end_index..start]).to_string(),
-            ))
+            parts.push(SynthesizerPart::Text((&text[end_index..start]).to_string()))
         }
 
         let index = capture
@@ -393,9 +386,9 @@ fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
-        parts.push(rule::SynthesizerPart::Match(rule::Match::new(
+        parts.push(SynthesizerPart::Match(Match::new(
             index,
-            rule::Conversion::Nop,
+            Conversion::Nop,
             None,
             None,
         )));
@@ -403,9 +396,7 @@ fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
     }
 
     if end_index < text.len() {
-        parts.push(rule::SynthesizerPart::Text(
-            (&text[end_index..]).to_string(),
-        ))
+        parts.push(SynthesizerPart::Text((&text[end_index..]).to_string()))
     }
     parts
 }
@@ -413,7 +404,7 @@ fn parse_synthesizer_text(text: &str) -> Vec<rule::SynthesizerPart> {
 fn parse_suggestion(
     data: structure::Suggestion,
     composition: &Option<&Composition>,
-) -> Result<rule::Synthesizer, Error> {
+) -> Result<Synthesizer, Error> {
     let mut parts = Vec::new();
     for part in data.parts {
         match part {
@@ -421,12 +412,12 @@ fn parse_suggestion(
                 parts.extend(parse_synthesizer_text(text.as_str()));
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(rule::SynthesizerPart::Match(parse_match(m, composition)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, composition)?));
             }
         }
     }
 
-    Ok(rule::Synthesizer {
+    Ok(Synthesizer {
         parts,
         // use titlecase adjustment (i. e. make replacement title case if match is title case) if token rule
         use_titlecase_adjust: composition.is_some(),
@@ -556,10 +547,10 @@ fn parse_pattern(pattern: structure::Pattern) -> Result<(Composition, usize, usi
     Ok((composition, start, end))
 }
 
-impl TryFrom<structure::Rule> for rule::Rule {
+impl TryFrom<structure::Rule> for Rule {
     type Error = Error;
 
-    fn try_from(data: structure::Rule) -> Result<rule::Rule, Self::Error> {
+    fn try_from(data: structure::Rule) -> Result<Rule, Self::Error> {
         if data.filter.is_some() {
             return Err(Error::Unimplemented(
                 "rules with filter are not implemented.".into(),
@@ -577,7 +568,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 let (composition, start, end) = parse_pattern(pattern)?;
 
                 Ok((
-                    rule::Engine::Token(rule::TokenEngine {
+                    Engine::Token(TokenEngine {
                         composition,
                         antipatterns: if let Some(antipatterns) = data.antipatterns {
                             antipatterns
@@ -602,11 +593,11 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
                 let id_to_idx: HashMap<usize, usize> =
                     (0..regex.captures_len() + 1).enumerate().collect();
-                Ok((rule::Engine::Text(regex, id_to_idx), mark, mark + 1))
+                Ok((Engine::Text(regex, id_to_idx), mark, mark + 1))
             }
         }?;
 
-        let maybe_composition = if let rule::Engine::Token(engine) = &engine {
+        let maybe_composition = if let Engine::Token(engine) = &engine {
             Some(&engine.composition)
         } else {
             None
@@ -627,10 +618,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                     message_parts.extend(parse_synthesizer_text(text.as_str()));
                 }
                 structure::MessagePart::Match(m) => {
-                    message_parts.push(rule::SynthesizerPart::Match(parse_match(
-                        m,
-                        &maybe_composition,
-                    )?));
+                    message_parts.push(SynthesizerPart::Match(parse_match(m, &maybe_composition)?));
                 }
             }
         }
@@ -659,7 +647,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
 
             let mut texts = Vec::new();
             let mut char_length = 0;
-            let mut suggestion: Option<rule::Suggestion> = None;
+            let mut suggestion: Option<Suggestion> = None;
 
             for part in &example.parts {
                 match part {
@@ -692,7 +680,7 @@ impl TryFrom<structure::Rule> for rule::Rule {
                                 text
                             };
 
-                            suggestion = Some(rule::Suggestion {
+                            suggestion = Some(Suggestion {
                                 source: "_Test".to_string(),
                                 message: "_Test".to_string(),
                                 start: char_length,
@@ -706,19 +694,19 @@ impl TryFrom<structure::Rule> for rule::Rule {
                 }
             }
 
-            tests.push(rule::Test {
+            tests.push(Test {
                 text: texts.join(""),
                 suggestion,
             });
         }
 
-        Ok(rule::Rule {
+        Ok(Rule {
             engine,
             tests,
             start,
             end,
             suggesters,
-            message: rule::Synthesizer {
+            message: Synthesizer {
                 parts: message_parts,
                 use_titlecase_adjust: true,
             },
@@ -766,21 +754,17 @@ impl From<structure::WordData> for OwnedWordData {
     }
 }
 
-fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> rule::POSFilter {
+fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>) -> POSFilter {
     match postag_regexp.as_deref() {
-        Some("yes") => rule::POSFilter::Regex(SerializeRegex::new(&postag, true, true).unwrap()),
-        Some(_) | None => rule::POSFilter::String(postag.to_string()),
+        Some("yes") => POSFilter::Regex(SerializeRegex::new(&postag, true, true).unwrap()),
+        Some(_) | None => POSFilter::String(postag.to_string()),
     }
 }
 
 fn parse_unify(
     unify: &structure::Unify,
     unifications: &Option<Vec<structure::Unification>>,
-) -> (
-    Vec<Vec<rule::POSFilter>>,
-    Vec<Option<rule::POSFilter>>,
-    Vec<bool>,
-) {
+) -> (Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>) {
     let mut filters = Vec::new();
     let mut disambig = Vec::new();
     let mut mask = Vec::new();
@@ -859,12 +843,10 @@ fn parse_unify(
     (filters, disambig, mask)
 }
 
-impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
+impl TryFrom<structure::DisambiguationRule> for DisambiguationRule {
     type Error = Error;
 
-    fn try_from(
-        data: structure::DisambiguationRule,
-    ) -> Result<rule::DisambiguationRule, Self::Error> {
+    fn try_from(data: structure::DisambiguationRule) -> Result<DisambiguationRule, Self::Error> {
         // might need the pattern later so clone it here
         let (composition, start, end) = parse_pattern(data.pattern.clone())?;
 
@@ -894,13 +876,11 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
         let disambiguations = match data.disambig.action.as_deref() {
             Some("remove") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
-                    Ok(rule::Disambiguation::Remove(vec![either::Right(
+                    Ok(Disambiguation::Remove(vec![either::Right(
                         parse_pos_filter(postag, Some("yes")),
                     )]))
                 } else {
-                    Ok(rule::Disambiguation::Remove(
-                        word_datas.into_iter().collect(),
-                    ))
+                    Ok(Disambiguation::Remove(word_datas.into_iter().collect()))
                 }
             }
             Some("add") => {
@@ -908,7 +888,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                     panic!("postag not supported for `add`.")
                 }
 
-                Ok(rule::Disambiguation::Add(
+                Ok(Disambiguation::Add(
                     word_datas
                         .into_iter()
                         .map(|x| x.left().expect("match not supported for `add`"))
@@ -920,7 +900,7 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                     panic!("postag not supported for `replace`.")
                 }
 
-                Ok(rule::Disambiguation::Replace(
+                Ok(Disambiguation::Replace(
                     word_datas
                         .into_iter()
                         .map(|x| {
@@ -930,8 +910,8 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                         .collect(),
                 ))
             }
-            Some("ignore_spelling") => Ok(rule::Disambiguation::Nop), // ignore_spelling can be ignored since we dont check spelling
-            Some("immunize") => Ok(rule::Disambiguation::Nop), // immunize can probably not be ignored
+            Some("ignore_spelling") => Ok(Disambiguation::Nop), // ignore_spelling can be ignored since we dont check spelling
+            Some("immunize") => Ok(Disambiguation::Nop), // immunize can probably not be ignored
             Some("filterall") => {
                 let mut disambig = Vec::new();
                 let mut marker_disambig = Vec::new();
@@ -985,17 +965,17 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                     disambig
                 };
 
-                Ok(rule::Disambiguation::Filter(
+                Ok(Disambiguation::Filter(
                     disambiguations.into_iter().collect(),
                 ))
             }
             Some("filter") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
-                    Ok(rule::Disambiguation::Filter(vec![Some(either::Right(
+                    Ok(Disambiguation::Filter(vec![Some(either::Right(
                         parse_pos_filter(postag, Some("yes")),
                     ))]))
                 } else {
-                    Ok(rule::Disambiguation::Filter(
+                    Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
                     ))
                 }
@@ -1024,15 +1004,15 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                     _ => panic!("only `unify` as only element in `pattern` is implemented"),
                 }
 
-                Ok(rule::Disambiguation::Unify(filters, disambig, mask))
+                Ok(Disambiguation::Unify(filters, disambig, mask))
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
-                    Ok(rule::Disambiguation::Filter(vec![Some(either::Left(
+                    Ok(Disambiguation::Filter(vec![Some(either::Left(
                         OwnedWordData::new(String::new(), postag.to_string()),
                     ))]))
                 } else {
-                    Ok(rule::Disambiguation::Filter(
+                    Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
                     ))
                 }
@@ -1095,8 +1075,8 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
                 let text = texts.join("");
 
                 let test = match example.kind.as_str() {
-                    "untouched" => rule::DisambiguationTest::Unchanged(text),
-                    "ambiguous" => rule::DisambiguationTest::Changed(rule::DisambiguationChange {
+                    "untouched" => DisambiguationTest::Unchanged(text),
+                    "ambiguous" => DisambiguationTest::Changed(DisambiguationChange {
                         text,
                         before: parse_tag_form(
                             example
@@ -1119,8 +1099,8 @@ impl TryFrom<structure::DisambiguationRule> for rule::DisambiguationRule {
             }
         }
 
-        Ok(rule::DisambiguationRule {
-            engine: rule::Engine::Token(rule::TokenEngine {
+        Ok(DisambiguationRule {
+            engine: Engine::Token(TokenEngine {
                 composition,
                 antipatterns,
             }),

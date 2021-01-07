@@ -1,6 +1,6 @@
 use clap::Clap;
 use nlprule_core::{
-    rule::Rules,
+    rules::Rules,
     tokenizer::{finalize, Tokenizer},
 };
 use std::{fs::File, io::BufReader};

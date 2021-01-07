@@ -1,6 +1,6 @@
 use clap::Clap;
 use nlprule_core::{
-    rule::Rules,
+    rules::Rules,
     tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer},
 };
 use std::{

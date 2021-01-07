@@ -135,7 +135,7 @@ impl Tokenizer {
         use log::warn;
         use std::convert::TryFrom;
 
-        let rules = crate::from_structure::structure::read_disambiguation_rules(path);
+        let rules = crate::rule::read_disambiguation_rules(path);
         let mut error = None;
 
         let rules: Vec<_> = rules

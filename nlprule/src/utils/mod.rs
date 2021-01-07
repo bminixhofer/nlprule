@@ -38,10 +38,6 @@ impl<S: AsRef<str>> CacheString<S> {
     pub fn as_str(&self) -> &str {
         self.string.as_ref()
     }
-
-    pub fn inner(self) -> S {
-        self.string
-    }
 }
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust

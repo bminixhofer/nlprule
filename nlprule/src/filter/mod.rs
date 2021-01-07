@@ -1,6 +1,6 @@
 use crate::tokenizer::Tokenizer;
 use crate::utils::regex::SerializeRegex;
-use crate::{composition::MatchGraph, Error};
+use crate::{rule::MatchGraph, Error};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,6 +69,7 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_filter(name: &str, args: HashMap<String, String>) -> Result<Filter, Error> {
     match name {
         "NoDisambiguationEnglishPartialPosTagFilter" => {

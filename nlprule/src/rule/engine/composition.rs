@@ -6,7 +6,6 @@ use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
     matcher: either::Either<either::Either<CacheString<String>, usize>, SerializeRegex>,

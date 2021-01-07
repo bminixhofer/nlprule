@@ -6,11 +6,9 @@
 
 use thiserror::Error;
 
-pub mod composition;
-pub mod filter;
-#[cfg(feature = "compile")]
-pub(crate) mod from_structure;
+mod filter;
 pub mod rule;
+pub mod rules;
 pub mod tokenizer;
 pub mod types;
 pub(crate) mod utils;

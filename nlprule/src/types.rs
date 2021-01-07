@@ -1,6 +1,9 @@
+//! Common types used by this crate.
+
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
+/// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
     pub lemma: Cow<'t, str>,
@@ -23,6 +26,7 @@ impl<'t> WordData<'t> {
     }
 }
 
+/// An owned version of [WordData] for serialization and use in longer-living structures e. g. rule tests.
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct OwnedWordData {
     pub lemma: String,
@@ -35,18 +39,35 @@ impl OwnedWordData {
     }
 }
 
+/// Contains all the local information about a token i. e.
+/// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word<'t> {
     pub text: &'t str,
     pub tags: Vec<WordData<'t>>,
 }
 
+impl<'t> Word<'t> {
+    pub fn new_with_tags(text: &'t str, tags: Vec<WordData<'t>>) -> Self {
+        Word { text, tags }
+    }
+
+    pub fn to_owned_word(&self) -> OwnedWord {
+        OwnedWord {
+            text: self.text.to_string(),
+            tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
+        }
+    }
+}
+
+/// An owned version of [Word] for serialization and use in longer-living structures e. g. rule tests.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OwnedWord {
     pub text: String,
     pub tags: Vec<OwnedWordData>,
 }
 
+/// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteToken<'t> {
     pub word: Word<'t>,
@@ -64,19 +85,7 @@ impl<'t> AsRef<str> for IncompleteToken<'t> {
     }
 }
 
-impl<'t> Word<'t> {
-    pub fn new_with_tags(text: &'t str, tags: Vec<WordData<'t>>) -> Self {
-        Word { text, tags }
-    }
-
-    pub fn to_owned_word(&self) -> OwnedWord {
-        OwnedWord {
-            text: self.text.to_string(),
-            tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
-        }
-    }
-}
-
+/// A finished token with all information set.
 #[derive(Debug)]
 pub struct Token<'t> {
     pub word: Word<'t>,
@@ -87,7 +96,8 @@ pub struct Token<'t> {
     pub text: &'t str,
 }
 
-#[derive(Debug)]
+/// An owned version of [Token] for serialization and use in longer-living structures e. g. rule tests.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OwnedToken {
     pub word: OwnedWord,
     pub char_span: (usize, usize),
@@ -103,6 +113,7 @@ impl<'t> AsRef<str> for Token<'t> {
 }
 
 impl<'t> Token<'t> {
+    /// Get the special sentence start token.
     pub fn sent_start(text: &'t str) -> Self {
         Token {
             word: Word::new_with_tags(
