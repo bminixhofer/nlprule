@@ -21,6 +21,7 @@ enum_dispatch = "0.3.4"
 indexmap = { version = "1", features = ["serde"]}
 once_cell = "1.5"
 
+rayon-cond = "0.1.0"
 rayon = "1.5"
 
 clap = { version = "3.0.0-beta.1", optional = true }

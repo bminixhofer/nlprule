@@ -4,12 +4,11 @@ use crate::{
     tokenizer::{
         finalize, IncompleteToken, OwnedWord, OwnedWordData, Token, Tokenizer, Word, WordData,
     },
-    utils::{self, SerializeRegex},
+    utils::{self, parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
 };
 use itertools::Itertools;
 use log::{error, info, warn};
 use onig::Captures;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -1037,7 +1036,7 @@ impl Rules {
 
         let mut output: Vec<_> = self
             .rules
-            .par_iter()
+            .maybe_par_iter()
             .enumerate()
             .filter(|(_, x)| x.on())
             .map(|(i, rule)| {

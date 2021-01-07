@@ -1,6 +1,6 @@
 use crate::{
     tokenizer::Token,
-    utils::{CacheString, SerializeRegex},
+    utils::{regex::SerializeRegex, CacheString},
 };
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;

@@ -1,5 +1,5 @@
 use crate::tokenizer::Tokenizer;
-use crate::utils::SerializeRegex;
+use crate::utils::regex::SerializeRegex;
 use crate::{composition::MatchGraph, Error};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};

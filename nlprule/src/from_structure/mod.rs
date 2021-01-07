@@ -5,7 +5,7 @@ use crate::{
         AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier,
         TrueAtom, WordDataMatcher,
     },
-    utils::SerializeRegex,
+    utils::regex::SerializeRegex,
 };
 use crate::{filter::get_filter, tokenizer::OwnedWordData};
 use crate::{rule, tokenizer::OwnedWord};
