@@ -1,12 +1,11 @@
 use flate2::read::GzDecoder;
 use nlprule_core::types::*;
 use nlprule_core::{
+    rule::Rule,
     rule::Suggestion,
-    tokenizer::{Tokenizer, TokenizerOptions},
-};
-use nlprule_core::{
-    rule::{Rule, Rules},
+    rules::{correct, Rules},
     tokenizer::{finalize, tag::Tagger},
+    tokenizer::{Tokenizer, TokenizerOptions},
 };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -747,7 +746,7 @@ impl PyRules {
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
             let suggestions = self.rules.apply(&tokens, &tokenizer);
-            Ok(Rules::correct(&sentence, &suggestions))
+            Ok(correct(&sentence, &suggestions))
         })
     }
 
@@ -768,7 +767,7 @@ impl PyRules {
                     .map(|x| {
                         let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
                         let suggestions = self.rules.apply(&tokens, &tokenizer);
-                        Rules::correct(x, &suggestions)
+                        correct(x, &suggestions)
                     })
                     .collect::<Vec<_>>()
                     .join(""))
@@ -803,7 +802,7 @@ impl PyRules {
             })
             .collect();
 
-        Rules::correct(text, &suggestions)
+        correct(text, &suggestions)
     }
 
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
