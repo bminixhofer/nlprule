@@ -1,5 +1,5 @@
 use crate::{
-    tokenizer::Token,
+    types::Token,
     utils::{regex::SerializeRegex, CacheString},
 };
 use enum_dispatch::enum_dispatch;

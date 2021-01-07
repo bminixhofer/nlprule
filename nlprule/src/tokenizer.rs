@@ -1,7 +1,14 @@
+//! A tokenizer to split raw text into tokens.
+//! Tokens are assigned lemmas and part-of-speech tags by lookup from a [Tagger][tag::Tagger] and chunks containing
+//! information about noun / verb and grammatical case by a statistical [Chunker][chunk::Chunker].
+//! Tokens are *disambiguated* (i. e. information from the initial assignment is changed) in a rule-based way by
+//! [DisambiguationRule][crate::rule::DisambiguationRule]s.
+
+use crate::types::*;
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
@@ -55,158 +62,8 @@ fn get_token_strs(text: &str) -> Vec<&str> {
     tokens
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct WordData<'t> {
-    pub lemma: Cow<'t, str>,
-    pub pos: &'t str,
-}
-
-impl<'t> WordData<'t> {
-    pub fn new<S: Into<Cow<'t, str>>>(lemma: S, pos: &'t str) -> Self {
-        WordData {
-            lemma: lemma.into(),
-            pos,
-        }
-    }
-
-    pub fn to_owned_word_data(&self) -> OwnedWordData {
-        OwnedWordData {
-            lemma: self.lemma.to_string(),
-            pos: self.pos.to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
-pub struct OwnedWordData {
-    pub lemma: String,
-    pub pos: String,
-}
-
-impl OwnedWordData {
-    pub fn new(lemma: String, pos: String) -> Self {
-        OwnedWordData { lemma, pos }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Word<'t> {
-    pub text: &'t str,
-    pub tags: Vec<WordData<'t>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OwnedWord {
-    pub text: String,
-    pub tags: Vec<OwnedWordData>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IncompleteToken<'t> {
-    pub word: Word<'t>,
-    pub byte_span: (usize, usize),
-    pub char_span: (usize, usize),
-    pub is_sentence_end: bool,
-    pub has_space_before: bool,
-    pub chunks: Vec<String>,
-    pub text: &'t str,
-}
-
-impl<'t> AsRef<str> for IncompleteToken<'t> {
-    fn as_ref(&self) -> &str {
-        self.word.text
-    }
-}
-
-impl<'t> Word<'t> {
-    pub fn new_with_tags(text: &'t str, tags: Vec<WordData<'t>>) -> Self {
-        Word { text, tags }
-    }
-
-    pub fn to_owned_word(&self) -> OwnedWord {
-        OwnedWord {
-            text: self.text.to_string(),
-            tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Token<'t> {
-    pub word: Word<'t>,
-    pub char_span: (usize, usize),
-    pub byte_span: (usize, usize),
-    pub has_space_before: bool,
-    pub chunks: Vec<String>,
-    pub text: &'t str,
-}
-
-#[derive(Debug)]
-pub struct OwnedToken {
-    pub word: OwnedWord,
-    pub char_span: (usize, usize),
-    pub byte_span: (usize, usize),
-    pub has_space_before: bool,
-    pub chunks: Vec<String>,
-}
-
-impl<'t> AsRef<str> for Token<'t> {
-    fn as_ref(&self) -> &str {
-        self.word.text
-    }
-}
-
-impl<'t> Token<'t> {
-    fn sent_start(text: &'t str) -> Self {
-        Token {
-            word: Word::new_with_tags(
-                "",
-                vec![WordData::new("", "SENT_START")].into_iter().collect(),
-            ),
-            char_span: (0, 0),
-            byte_span: (0, 0),
-            has_space_before: false,
-            chunks: Vec::new(),
-            text,
-        }
-    }
-
-    pub fn to_owned_token(&self) -> OwnedToken {
-        OwnedToken {
-            word: self.word.to_owned_word(),
-            char_span: self.char_span,
-            byte_span: self.byte_span,
-            has_space_before: self.has_space_before,
-            chunks: self.chunks.clone(),
-        }
-    }
-}
-
-impl<'t> From<IncompleteToken<'t>> for Token<'t> {
-    fn from(data: IncompleteToken<'t>) -> Self {
-        let mut word = data.word.clone();
-
-        word.tags.push(WordData::new(data.word.text, ""));
-
-        if word.tags.iter().all(|x| x.pos.is_empty()) {
-            word.tags.push(WordData::new(data.word.text, "UNKNOWN"));
-        }
-
-        if data.is_sentence_end {
-            word.tags.push(WordData::new(data.word.text, "SENT_END"));
-        }
-
-        Token {
-            word,
-            byte_span: data.byte_span,
-            char_span: data.char_span,
-            has_space_before: data.has_space_before,
-            chunks: data.chunks,
-            text: data.text,
-        }
-    }
-}
-
+/// *Finalizes* the tokens by e. g. adding a specific UNKNOWN part-of-speech tag.
+/// After finalization grammatical error correction rules can be used on the tokens.
 pub fn finalize<'t>(tokens: Vec<IncompleteToken<'t>>) -> Vec<Token<'t>> {
     if tokens.is_empty() {
         return Vec::new();
@@ -218,17 +75,26 @@ pub fn finalize<'t>(tokens: Vec<IncompleteToken<'t>>) -> Vec<Token<'t>> {
     finalized
 }
 
+/// Options for a tokenizer.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TokenizerOptions {
+    /// Whether to allow errors while constructing the tokenizer.
     pub allow_errors: bool,
+    /// Whether to retain the last tag if disambiguation leads to an empty tag.
+    /// Language-specific in LT so it has to be an option.
     pub retain_last: bool,
+    /// Whether to use a heuristic to split potential compound words.
     pub use_compound_split_heuristic: bool,
+    /// Whether to always add tags for a lowercase version of the word when assigning part-of-speech tags.
     pub always_add_lower_tags: bool,
     #[serde(default)]
+    /// Disambiguation Rule IDs to use in this tokenizer.
     pub ids: Vec<String>,
     #[serde(default)]
+    /// Disambiguation Rule IDs to ignore in this tokenizer.
     pub ignore_ids: Vec<String>,
     #[serde(default)]
+    /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
     pub known_failures: Vec<String>,
 }
 
@@ -246,6 +112,8 @@ impl Default for TokenizerOptions {
     }
 }
 
+/// The complete Tokenizer doing tagging, chunking and disambiguation.
+/// Will typically be deserialized instead of being created directly.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
@@ -256,6 +124,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
+    /// Creates a Tokenizer from a path to an XML file containing disambiguation rules.
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
@@ -314,6 +183,7 @@ impl Tokenizer {
         })
     }
 
+    /// Populates the cache of this model by checking whether the rules can match on a common set of words.
     pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
         self.cache.populate(
             common_words,
@@ -337,7 +207,7 @@ impl Tokenizer {
         &self.options
     }
 
-    pub fn disambiguate_up_to_id<'t>(
+    pub(crate) fn disambiguate_up_to_id<'t>(
         &'t self,
         mut tokens: Vec<IncompleteToken<'t>>,
         id: &str,
@@ -359,6 +229,8 @@ impl Tokenizer {
         tokens
     }
 
+    /// Apply rule-based disambiguation to the tokens.
+    /// This does not change the number of tokens, but can change the content arbitrarily.
     pub fn disambiguate<'t>(
         &'t self,
         mut tokens: Vec<IncompleteToken<'t>>,
@@ -376,6 +248,7 @@ impl Tokenizer {
         tokens
     }
 
+    /// Tokenize the given text. This applies chunking and tagging, but does not do disambiguation.
     pub fn tokenize<'t>(&'t self, text: &'t str) -> Vec<IncompleteToken<'t>> {
         let sentence_indices = text
             .unicode_sentences()
@@ -429,7 +302,7 @@ impl Tokenizer {
             tokens[last_idx].is_sentence_end = true;
 
             if let Some(chunker) = &self.chunker {
-                chunker.apply(text, &mut tokens);
+                chunker.apply(&mut tokens);
             }
         }
 

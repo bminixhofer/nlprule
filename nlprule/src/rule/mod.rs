@@ -1,9 +1,8 @@
+use crate::types::*;
 use crate::{
     composition::{Composition, Group, MatchGraph, Matcher},
     filter::{Filter, Filterable},
-    tokenizer::{
-        finalize, IncompleteToken, OwnedWord, OwnedWordData, Token, Tokenizer, Word, WordData,
-    },
+    tokenizer::{finalize, Tokenizer},
     utils::{self, parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
 };
 use itertools::Itertools;

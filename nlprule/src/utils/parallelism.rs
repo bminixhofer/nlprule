@@ -13,12 +13,12 @@ pub const ENV_VARIABLE: &str = "NLPRULE_PARALLELISM";
 static mut USED_PARALLELISM: bool = false;
 
 /// Check if the NLPRULE_PARALLELISM env variable has been explicitly set
-pub fn is_parallelism_configured() -> bool {
+pub fn _is_parallelism_configured() -> bool {
     std::env::var(ENV_VARIABLE).is_ok()
 }
 
 /// Check if at some point we used a parallel iterator
-pub fn has_parallelism_been_used() -> bool {
+pub fn _has_parallelism_been_used() -> bool {
     unsafe { USED_PARALLELISM }
 }
 
@@ -34,7 +34,7 @@ pub fn get_parallelism() -> bool {
 }
 
 /// Set the value for `NLPRULE_PARALLELISM` for the current process
-pub fn set_parallelism(val: bool) {
+pub fn _set_parallelism(val: bool) {
     std::env::set_var(ENV_VARIABLE, if val { "true" } else { "false" })
 }
 

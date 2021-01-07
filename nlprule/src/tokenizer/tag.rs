@@ -1,4 +1,7 @@
-use super::WordData;
+//! A dictionary-based tagger. The raw format is tuples of the form `(word, lemma, part-of-speech)`
+//! where each word typically has multiple entries with different part-of-speech tags.
+
+use crate::types::*;
 use bimap::BiMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -6,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 
+/// The lexical tagger. Will typically be deserialized instead of being created directly.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tagger {
     tags: HashMap<u32, IndexMap<u32, Vec<u16>>>,
@@ -63,6 +67,13 @@ impl Tagger {
         Ok(output)
     }
 
+    /// Creates a tagger from raw files.
+    ///
+    /// # Arguments
+    /// * `paths`: Paths to files where each line contains the word, lemma and tag, respectively,
+    /// separated by tabs, to be added to the tagger.
+    /// * `remove_paths`: Paths to files where each line contains the word, lemma and tag, respectively,
+    /// separated by tabs, to be removed from the tagger if present in the files from `paths`.
     pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
         paths: &[S1],
         remove_paths: &[S2],
@@ -160,6 +171,14 @@ impl Tagger {
         tags
     }
 
+    /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word.
+    ///
+    /// # Arguments
+    /// * `word`: The word to lookup data for.
+    /// * `add_lower`: Whether to add data for the lowercase variant of the word.
+    /// * `use_compound_split_heuristic`: Whether to use a heuristic to split compound words.
+    /// If true, will attempt to find tags for words which are longer than some cutoff and unknown by looking up tags
+    /// for substrings from left to right until tags are found or a minimum length reached.
     pub fn get_tags(
         &self,
         word: &str,
@@ -206,6 +225,7 @@ impl Tagger {
         tags
     }
 
+    /// Get the words with the same lemma as the given lemma.
     #[allow(clippy::clippy::ptr_arg)]
     pub fn get_group_members(&self, lemma: &String) -> Vec<&str> {
         self.word_store

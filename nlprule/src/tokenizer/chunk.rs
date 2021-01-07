@@ -1,3 +1,5 @@
+//! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
+
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -63,7 +65,7 @@ impl<'a> Default for Sequence<'a> {
 }
 
 impl<'a> Sequence<'a> {
-    pub fn new(outcomes: Vec<&'a str>, probs: Vec<f32>) -> Self {
+    fn new(outcomes: Vec<&'a str>, probs: Vec<f32>) -> Self {
         let log_prob = probs.iter().fold(0., |a, b| a + b.ln());
         Sequence {
             outcomes,
@@ -73,7 +75,7 @@ impl<'a> Sequence<'a> {
     }
 
     #[inline]
-    pub fn outcomes(&self) -> &[&'a str] {
+    fn outcomes(&self) -> &[&'a str] {
         &self.outcomes
     }
 
@@ -90,7 +92,7 @@ struct Model {
 }
 
 impl Model {
-    pub fn eval(&self, context: &[String]) -> Vec<f32> {
+    fn eval(&self, context: &[String]) -> Vec<f32> {
         let scontexts: Vec<Option<&Context>> = context.iter().map(|x| self.pmap.get(x)).collect();
         let mut prior =
             vec![(1. / (self.outcome_labels.len() as f32)).ln(); self.outcome_labels.len()];
@@ -107,7 +109,7 @@ impl Model {
         prior
     }
 
-    pub fn get_top_n(&self, probs: &[f32], n: usize) -> Vec<(usize, f32, &str)> {
+    fn get_top_n(&self, probs: &[f32], n: usize) -> Vec<(usize, f32, &str)> {
         let mut probs: Vec<_> = probs.iter().enumerate().collect();
         probs.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
 
@@ -556,6 +558,8 @@ impl MaxentChunker {
     }
 }
 
+/// Predicts noun chunks and verb chunks through a [Maximum Entropy Model](https://www.aclweb.org/anthology/W00-0729.pdf).
+/// Grammatical number (i. e. singular and plural) is also assigned through the part-of-speech tags of the tokens.
 #[derive(Serialize, Deserialize)]
 pub struct Chunker {
     token_model: MaxentTokenizer,
@@ -564,9 +568,10 @@ pub struct Chunker {
 }
 
 impl Chunker {
-    pub fn apply(&self, text: &str, tokens: &mut Vec<IncompleteToken>) {
+    /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
+    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
         // replacements must not change char indices
-        let text = text.replace('’', "\'");
+        let text = tokens[0].text.replace('’', "\'");
 
         let mut byte_to_char_idx: HashMap<usize, usize> = text
             .char_indices()
@@ -575,7 +580,9 @@ impl Chunker {
             .collect();
         byte_to_char_idx.insert(text.len(), text.chars().count());
 
+        // the chunker expects tokens tokenized with a maximum entropy tokenizer
         let internal_tokens = self.token_model.tokenize(&text);
+        // the chunker gets part-of-speech tags as input so we also have to run a maximum entropy POSTagger before the chunker
         let tags = self.pos_model.tag(&internal_tokens);
         let chunks = self.chunk_model.chunk(
             &internal_tokens
@@ -585,6 +592,7 @@ impl Chunker {
                 .collect::<Vec<_>>(),
         );
 
+        // compute the char span of each chunk to be able to match it with the input tokens
         let internal_chunks: Vec<_> = chunks
             .outcomes()
             .iter()
@@ -611,6 +619,7 @@ impl Chunker {
                         break;
                     }
 
+                    // the number is singular unless any token in the noun chunk has the part-of-speech tag `NNS` assigned
                     if tokens
                         .iter()
                         .find(|token| token.char_span == char_span)
@@ -643,6 +652,7 @@ impl Chunker {
             chunks.push(to_push);
         }
 
+        // chunks with exactly the same char span as the input tokens get assigned to the token to match LT
         for token in tokens.iter_mut() {
             for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
                 if *char_span == token.char_span {

@@ -1,3 +1,4 @@
+use crate::types::*;
 use crate::{
     composition::{
         concrete::ChunkAtom,
@@ -5,11 +6,11 @@ use crate::{
         AndAtom, Atom, Composition, Matcher, NotAtom, OffsetAtom, OrAtom, Part, Quantifier,
         TrueAtom, WordDataMatcher,
     },
+    filter::get_filter,
+    rule, utils,
     utils::regex::SerializeRegex,
+    Error,
 };
-use crate::{filter::get_filter, tokenizer::OwnedWordData};
-use crate::{rule, tokenizer::OwnedWord};
-use crate::{utils, Error};
 use lazy_static::lazy_static;
 use onig::Regex;
 use std::{collections::HashMap, convert::TryFrom};

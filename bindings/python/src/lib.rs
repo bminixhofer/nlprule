@@ -1,11 +1,12 @@
 use flate2::read::GzDecoder;
+use nlprule_core::types::*;
 use nlprule_core::{
     rule::Suggestion,
     tokenizer::{Tokenizer, TokenizerOptions},
 };
 use nlprule_core::{
     rule::{Rule, Rules},
-    tokenizer::{finalize, tag::Tagger, OwnedToken},
+    tokenizer::{finalize, tag::Tagger},
 };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
