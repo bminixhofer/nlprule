@@ -33,6 +33,20 @@ NLPRule currently supports English and German.
 | English | 843 (100%)               | 3725 (~ 85%)      | 5.2          |
 | German  | 486 (100%)               | 2970 (~ 90%)      | 5.2          |
 
+NLPRule is focused on speed.
+
+```python
+In [1]: from nlprule import Tokenizer, Rules, SplitOn
+   ...: 
+   ...: tokenizer = Tokenizer.load("en")
+   ...: rules = Rules.load("en", tokenizer, SplitOn([".", "?", "!"]))
+
+In [2]: %timeit rules.correct("He wants that you send him an email.")
+4.43 ms ± 15.3 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
+```
+
+<sub>Using Intel(R) Core(TM) i5-8600K CPU @ 3.60GHz</sub>
+
 ## Usage
 
 1. Install: `pip install nlprule`
