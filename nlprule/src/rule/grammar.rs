@@ -1,4 +1,5 @@
 use super::engine::composition::{MatchGraph, Matcher};
+use crate::types::*;
 use crate::{
     tokenizer::Tokenizer,
     utils::{self, regex::SerializeRegex},
@@ -6,15 +7,6 @@ use crate::{
 use onig::Captures;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Suggestion {
-    pub source: String,
-    pub message: String,
-    pub start: usize,
-    pub end: usize,
-    pub text: Vec<String>,
-}
 
 impl std::cmp::PartialEq for Suggestion {
     fn eq(&self, other: &Suggestion) -> bool {

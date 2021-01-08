@@ -2,7 +2,6 @@ use flate2::read::GzDecoder;
 use nlprule_core::types::*;
 use nlprule_core::{
     rule::Rule,
-    rule::Suggestion,
     rules::{correct, Rules},
     tokenizer::{finalize, tag::Tagger},
     tokenizer::{Tokenizer, TokenizerOptions},
@@ -687,7 +686,7 @@ impl PyRules {
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
             self.rules
-                .apply(&tokens, &tokenizer)
+                .suggest(&tokens, &tokenizer)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -713,7 +712,7 @@ impl PyRules {
                     let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(sentence)));
                     let suggestions = self
                         .rules
-                        .apply(&tokens, &tokenizer)
+                        .suggest(&tokens, &tokenizer)
                         .into_iter()
                         .map(|mut x| {
                             x.start += offset;
@@ -745,7 +744,7 @@ impl PyRules {
             let tokenizer = tokenizer.tokenizer();
 
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
-            let suggestions = self.rules.apply(&tokens, &tokenizer);
+            let suggestions = self.rules.suggest(&tokens, &tokenizer);
             Ok(correct(&sentence, &suggestions))
         })
     }
@@ -766,7 +765,7 @@ impl PyRules {
                     .iter()
                     .map(|x| {
                         let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
-                        let suggestions = self.rules.apply(&tokens, &tokenizer);
+                        let suggestions = self.rules.suggest(&tokens, &tokenizer);
                         correct(x, &suggestions)
                     })
                     .collect::<Vec<_>>()

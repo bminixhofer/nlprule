@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 
-/// The lexical tagger. Will typically be deserialized instead of being created directly.
+/// The lexical tagger.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tagger {
     tags: HashMap<u32, IndexMap<u32, Vec<u16>>>,

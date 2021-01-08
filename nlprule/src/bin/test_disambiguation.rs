@@ -1,5 +1,3 @@
-use std::{fs::File, io::BufReader};
-
 use clap::Clap;
 use nlprule_core::tokenizer::Tokenizer;
 
@@ -19,8 +17,7 @@ fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let reader = BufReader::new(File::open(opts.tokenizer).unwrap());
-    let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
+    let tokenizer = Tokenizer::new(opts.tokenizer).unwrap();
     let rules = tokenizer.rules();
 
     println!("Last ID: {}", rules[rules.len() - 1].id());

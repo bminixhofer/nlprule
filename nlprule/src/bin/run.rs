@@ -3,7 +3,6 @@ use nlprule_core::{
     rules::Rules,
     tokenizer::{finalize, Tokenizer},
 };
-use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]
 #[clap(
@@ -22,17 +21,14 @@ fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let reader = BufReader::new(File::open(opts.tokenizer).unwrap());
-    let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
-
-    let reader = BufReader::new(File::open(opts.rules).unwrap());
-    let rules: Rules = bincode::deserialize_from(reader).unwrap();
+    let tokenizer = Tokenizer::new(opts.tokenizer).unwrap();
+    let rules = Rules::new(opts.rules).unwrap();
 
     let incomplete_tokens = tokenizer.disambiguate(tokenizer.tokenize(&opts.text));
 
     println!("Tokens: {:#?}", incomplete_tokens);
     println!(
         "Suggestions: {:#?}",
-        rules.apply(&finalize(incomplete_tokens), &tokenizer)
+        rules.suggest(&finalize(incomplete_tokens), &tokenizer)
     );
 }

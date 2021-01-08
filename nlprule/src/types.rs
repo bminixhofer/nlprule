@@ -1,4 +1,4 @@
-//! Common types used by this crate.
+//! Fundamental types used by this crate.
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -162,4 +162,19 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             text: data.text,
         }
     }
+}
+
+/// Suggestion for change in a text.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Suggestion {
+    /// The ID of the rule this suggestion is from.
+    pub source: String,
+    /// A human-readable message.
+    pub message: String,
+    /// The start character index (inclusive).
+    pub start: usize,
+    /// The end character index (exclusive).
+    pub end: usize,
+    /// The suggested replacement options for the text.
+    pub text: Vec<String>,
 }

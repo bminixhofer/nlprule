@@ -1,15 +1,26 @@
-use crate::rule::{Cache, Rule, Suggestion};
+//! Sets of grammatical error correction rules.
+
+use crate::rule::{Cache, Rule};
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    fs::File,
+    io::{BufReader, Read},
+    path::Path,
+};
 
+/// Options for a rule set.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RulesOptions {
+    /// Whether to allow errors while constructing the rules.
     pub allow_errors: bool,
+    /// Grammar Rule IDs to use in this set.
     #[serde(default)]
     pub ids: Vec<String>,
+    /// Grammar Rule IDs to ignore in this set.
     #[serde(default)]
     pub ignore_ids: Vec<String>,
 }
@@ -24,6 +35,7 @@ impl Default for RulesOptions {
     }
 }
 
+/// A set of grammatical error correction rules.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     rules: Vec<Rule>,
@@ -31,6 +43,7 @@ pub struct Rules {
 }
 
 impl Rules {
+    /// Creates a rule set from a path to an XML file containing grammar rules.
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(path: P, options: RulesOptions) -> Self {
         use log::warn;
@@ -80,6 +93,18 @@ impl Rules {
         }
     }
 
+    /// Creates a new rules set from a file.
+    pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
+        let reader = BufReader::new(File::open(p).unwrap());
+        bincode::deserialize_from(reader)
+    }
+
+    /// Creates a new rules set from a reader.
+    pub fn new_from<R: Read>(reader: R) -> bincode::Result<Self> {
+        bincode::deserialize_from(reader)
+    }
+
+    /// Populates the cache of the rule set by checking whether the rules can match on a common set of words.
     pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
         self.cache.populate(
             common_words,
@@ -91,12 +116,13 @@ impl Rules {
         &self.rules
     }
 
-    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    /// Compute the suggestions for the given tokens by checking all rules.
+    pub fn suggest(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
 
-        let mut output: Vec<_> = self
+        let mut output: Vec<Suggestion> = self
             .rules
             .maybe_par_iter()
             .enumerate()
@@ -132,6 +158,8 @@ impl Rules {
     }
 }
 
+/// Correct a text by applying suggestions to it.
+/// In the case of multiple possible replacements, always chooses the first one.
 pub fn correct(text: &str, suggestions: &[Suggestion]) -> String {
     let mut offset: isize = 0;
     let mut chars: Vec<_> = text.chars().collect();

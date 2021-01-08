@@ -1,3 +1,5 @@
+//! Implementations related to single rules.
+
 use crate::types::*;
 use crate::{
     filter::{Filter, Filterable},
@@ -20,8 +22,25 @@ mod grammar;
 use engine::Engine;
 
 pub(crate) use engine::composition::MatchGraph;
-pub use grammar::Suggestion;
 
+/// A disambiguation rule.
+/// Changes the information associcated with one or more tokens if it matches.
+/// Sourced from LanguageTool. An example of how a simple rule might look in the original XML format:
+///
+/// ```xml
+/// <rule id="NODT_HAVE" name="no determiner + have as verb/noun ->have/verb">
+///    <pattern>
+///        <token>
+///             <exception postag="PRP$"></exception>
+///             <exception regexp="yes">the|a</exception>
+///        </token>
+///        <marker>
+///            <token case_sensitive="yes" regexp="yes">[Hh]ave|HAVE</token>
+///        </marker>
+///    </pattern>
+///    <disambig action="replace"><wd lemma="have" pos="VB"></wd></disambig>
+/// </rule>
+/// ```
 #[derive(Serialize, Deserialize)]
 pub struct DisambiguationRule {
     pub(crate) id: String,
@@ -34,11 +53,13 @@ pub struct DisambiguationRule {
 }
 
 impl DisambiguationRule {
+    /// Get a unique identifier of this rule.
     pub fn id(&self) -> &str {
         self.id.as_str()
     }
 
-    pub fn set_id(&mut self, id: String) {
+    #[allow(dead_code)]
+    pub(crate) fn set_id(&mut self, id: String) {
         self.id = id;
     }
 
@@ -136,6 +157,8 @@ impl DisambiguationRule {
         (tokens, None)
     }
 
+    /// Often there are examples associated with a rule.
+    /// This method checks whether the correct action is taken in the examples.
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
@@ -216,6 +239,21 @@ impl DisambiguationRule {
     }
 }
 
+/// A grammar rule.
+/// Returns a [Suggestion][crate::types::Suggestion] for change if it matches.
+/// Sourced from LanguageTool. An example of how a simple rule might look in the original XML format:
+///
+/// ```xml
+/// <rule id="DOSNT" name="he dosn't (doesn't)">
+///     <pattern>
+///         <token regexp="yes">do[se]n|does|dosan|doasn|dosen</token>
+///         <token regexp="yes">['’`´‘]</token>
+///         <token>t</token>
+///     </pattern>
+///     <message>Did you mean <suggestion>doesn\2t</suggestion>?</message>
+///     <example correction="doesn't">He <marker>dosn't</marker> know about it.</example>
+/// </rule>
+/// ```
 #[derive(Serialize, Deserialize)]
 pub struct Rule {
     pub(crate) id: String,
@@ -229,18 +267,22 @@ pub struct Rule {
 }
 
 impl Rule {
+    /// Get a unique identifier of this rule.
     pub fn id(&self) -> &str {
         self.id.as_str()
     }
 
-    pub fn set_id(&mut self, id: String) {
+    #[allow(dead_code)]
+    pub(crate) fn set_id(&mut self, id: String) {
         self.id = id;
     }
 
+    /// Get whether this rule is "turned on" i. e. whether it should be used by the rule set.
     pub fn on(&self) -> bool {
         self.on
     }
 
+    /// Turn this rule on.
     pub fn set_on(&mut self, on: bool) {
         self.on = on;
     }
@@ -250,7 +292,7 @@ impl Rule {
         tokens: &[Token],
         skip_mask: Option<&[bool]>,
         tokenizer: &Tokenizer,
-    ) -> Vec<grammar::Suggestion> {
+    ) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
@@ -303,7 +345,7 @@ impl Rule {
                 .collect();
 
             if !text.is_empty() {
-                suggestions.push(grammar::Suggestion {
+                suggestions.push(Suggestion {
                     message: self
                         .message
                         .apply(&graph, tokenizer, self.start, self.end)
@@ -319,6 +361,8 @@ impl Rule {
         suggestions
     }
 
+    /// Grammar rules always have at least one example associated with them.
+    /// This method checks whether the correct action is taken in the examples.
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 

@@ -1,6 +1,5 @@
 use clap::Clap;
 use nlprule_core::{rules::Rules, tokenizer::Tokenizer};
-use std::{fs::File, io::BufReader};
 
 #[derive(Clap)]
 #[clap(
@@ -20,11 +19,8 @@ fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let reader = BufReader::new(File::open(&opts.tokenizer).unwrap());
-    let tokenizer: Tokenizer = bincode::deserialize_from(reader).unwrap();
-
-    let reader = BufReader::new(File::open(&opts.rules).unwrap());
-    let rules_container: Rules = bincode::deserialize_from(reader).unwrap();
+    let tokenizer = Tokenizer::new(opts.tokenizer).unwrap();
+    let rules_container = Rules::new(opts.rules).unwrap();
     let rules = rules_container.rules();
 
     println!("Runnable rules: {}", rules.len());

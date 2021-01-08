@@ -8,7 +8,13 @@ use crate::types::*;
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    fs::File,
+    io::{BufReader, Read},
+    path::Path,
+    sync::Arc,
+};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
@@ -87,14 +93,14 @@ pub struct TokenizerOptions {
     pub use_compound_split_heuristic: bool,
     /// Whether to always add tags for a lowercase version of the word when assigning part-of-speech tags.
     pub always_add_lower_tags: bool,
-    #[serde(default)]
     /// Disambiguation Rule IDs to use in this tokenizer.
+    #[serde(default)]
     pub ids: Vec<String>,
-    #[serde(default)]
     /// Disambiguation Rule IDs to ignore in this tokenizer.
-    pub ignore_ids: Vec<String>,
     #[serde(default)]
+    pub ignore_ids: Vec<String>,
     /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
+    #[serde(default)]
     pub known_failures: Vec<String>,
 }
 
@@ -113,7 +119,6 @@ impl Default for TokenizerOptions {
 }
 
 /// The complete Tokenizer doing tagging, chunking and disambiguation.
-/// Will typically be deserialized instead of being created directly.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tokenizer {
     rules: Vec<DisambiguationRule>,
@@ -183,7 +188,18 @@ impl Tokenizer {
         })
     }
 
-    /// Populates the cache of this model by checking whether the rules can match on a common set of words.
+    /// Creates a new tokenizer from a file.
+    pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
+        let reader = BufReader::new(File::open(p).unwrap());
+        bincode::deserialize_from(reader)
+    }
+
+    /// Creates a new tokenizer from a reader.
+    pub fn new_from<R: Read>(reader: R) -> bincode::Result<Self> {
+        bincode::deserialize_from(reader)
+    }
+
+    /// Populates the cache of the tokenizer by checking whether the rules can match on a common set of words.
     pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
         self.cache.populate(
             common_words,
