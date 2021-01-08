@@ -8,13 +8,20 @@ from nlprule import Tokenizer, Rules, SplitOn
 tokenizer = Tokenizer.load("en")
 rules = Rules.load("en", tokenizer, SplitOn([".", "?", "!"]))
 
-rules.correct(
-    "NLPRule can correct grammatical errors through a large number of rules ported from LanguageTool. "
-    "Their are many rules which are too obscure for all intensive purposes, but the bulk of them cold be useful."
-)
-# returns: 
-# 'NLPRule can correct grammatical errors through many rules ported from LanguageTool. '
-# 'There are many rules which are too obscure for all intents and purposes, but the bulk of them could be useful.'
+rules.correct("He wants that you send him an email.")
+# returns: 'He wants you to send him an email.'
+
+rules.correct("Thanks for your’s and Lucy’s help.")
+# returns: 'Thanks for yours and Lucy’s help.'
+
+rules.correct("I can due his homework.")
+# returns: 'I can do his homework.'
+
+suggestions = rules.suggest_sentence("She was not been here since Monday.")
+for s in suggestions:
+  print(s.start, s.end, s.text, s.source, s.message)
+# prints:
+# 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 ```
 
 My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed implications) and without all the extra stuff LanguageTool does such as spellchecking, n-gram based error detection, etc.
@@ -88,15 +95,14 @@ rules.correct("He wants that you send him an email. She was not been here since 
 
 <details><summary>3b. Get suggestions</summary>
 <p>
-    
+
 
 ```python
 suggestions = rules.suggest_sentence("She was not been here since Monday.")
 for s in suggestions:
-  print(s.start, s.end, s.text)
-  
+  print(s.start, s.end, s.text, s.source, s.message)
 # prints:
-# 4 16 ['was not', 'has not been']
+# 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 ```
 
 `.suggest_sentence` also has a multi-sentence counterpart in `.suggest`.
@@ -128,6 +134,15 @@ for token in tokens:
 
 </p>
 </details>
+
+## Benchmark
+
+NLPRule is approximately 2.3x - 4.7x faster than LanguageTool. See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for details.
+
+|         | NLPRule time | LanguageTool time  |
+|---------|--------------|--------------------|
+| English | 1            | 4.77               | 
+| German  | 1            | 2.36               |
 
 ## Maintenance disclaimer
 

@@ -597,7 +597,13 @@ macro_rules! flatten_group {
                 let on =
                     group_on && $category_on && rule.default.as_ref().map_or(true, |x| x != "off");
 
-                (rule, format!("{}.{}", rule_group_id, i), on)
+                let rule_id = rule.id.clone();
+
+                (
+                    rule,
+                    format!("{}.{}", rule_id.unwrap_or_else(|| rule_group_id.clone()), i),
+                    on,
+                )
             })
             .collect::<Vec<_>>()
     }};

@@ -122,7 +122,7 @@ impl Rules {
             return Vec::new();
         }
 
-        let mut output: Vec<Suggestion> = self
+        let mut output: Vec<(usize, Suggestion)> = self
             .rules
             .maybe_par_iter()
             .enumerate()
@@ -132,7 +132,7 @@ impl Rules {
                 let mut output = Vec::new();
 
                 for suggestion in rule.apply(tokens, Some(&skip_mask), tokenizer) {
-                    output.push(suggestion);
+                    output.push((i, suggestion));
                 }
 
                 output
@@ -140,21 +140,23 @@ impl Rules {
             .flatten()
             .collect();
 
-        output.sort_by(|a, b| a.start.cmp(&b.start));
+        output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 
         let mut mask = vec![false; tokens[0].text.chars().count()];
-        output.retain(|suggestion| {
-            if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
-                mask[suggestion.start..suggestion.end]
-                    .iter_mut()
-                    .for_each(|x| *x = true);
-                true
-            } else {
-                false
-            }
-        });
 
         output
+            .into_iter()
+            .filter_map(|(_, suggestion)| {
+                if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
+                    mask[suggestion.start..suggestion.end]
+                        .iter_mut()
+                        .for_each(|x| *x = true);
+                    Some(suggestion)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
