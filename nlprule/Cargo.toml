@@ -1,5 +1,6 @@
 [package]
-name = "nlprule_core"
+name = "nlprule" # BUILD_BINDINGS_COMMENT
+# name = "nlprule_core" # BUILD_BINDINGS_UNCOMMENT
 version = "0.2.0"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"

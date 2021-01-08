@@ -8,8 +8,8 @@
 //! # Example: get suggestions and correct a text
 //!
 //! ```no_run
-//! use nlprule_core::types::*;
-//! use nlprule_core::{tokenizer::{Tokenizer, finalize}, rules::{Rules, correct}};
+//! use nlprule::types::*;
+//! use nlprule::{tokenizer::{Tokenizer, finalize}, rules::{Rules, correct}};
 //!
 //! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
 //! let rules = Rules::new("path/to/en_rules.bin")?;

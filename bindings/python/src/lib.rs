@@ -1,6 +1,6 @@
 use flate2::read::GzDecoder;
-use nlprule_core::types::*;
-use nlprule_core::{
+use nlprule::types::*;
+use nlprule::{
     rule::Rule,
     rules::{correct, Rules},
     tokenizer::{finalize, tag::Tagger},

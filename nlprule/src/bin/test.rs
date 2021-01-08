@@ -1,5 +1,5 @@
 use clap::Clap;
-use nlprule_core::{rules::Rules, tokenizer::Tokenizer};
+use nlprule::{rules::Rules, tokenizer::Tokenizer};
 
 #[derive(Clap)]
 #[clap(

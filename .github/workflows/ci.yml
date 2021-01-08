@@ -24,7 +24,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --all-features --release -p nlprule_core
+          args: --verbose --all-features --release -p nlprule
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
         with:
@@ -52,7 +52,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --all-features --release -p nlprule_core
+          args: --verbose --all-features --release -p nlprule
       - uses: actions-rs/cargo@v1
         with:
           command: run
@@ -113,8 +113,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install maturin==0.8.3
-          maturin build --interpreter python --release --manylinux 1
-        working-directory: ${{env.working-directory}}
+          ./scripts/maturin build --interpreter python --release --manylinux 1
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2
         with:
