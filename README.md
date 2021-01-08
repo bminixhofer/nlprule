@@ -31,7 +31,7 @@ NLPRule currently supports English and German.
 |         | \|Disambiguation rules\| | \|Grammar rules\| | LT version   |
 |---------|--------------------------|-------------------|--------------|
 | English | 843 (100%)               | 3725 (~ 85%)      | 5.2          |
-| German  | 486 (100%)               | 2830 (~ 90%)      | 5.2          |
+| German  | 486 (100%)               | 2970 (~ 90%)      | 5.2          |
 
 ## Usage
 
