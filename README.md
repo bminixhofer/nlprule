@@ -17,7 +17,7 @@ rules.correct("Thanks for your’s and Lucy’s help.")
 rules.correct("I can due his homework.")
 # returns: 'I can do his homework.'
 
-suggestions = rules.suggest_sentence("She was not been here since Monday.")
+suggestions = rules.suggest("She was not been here since Monday.")
 for s in suggestions:
   print(s.start, s.end, s.text, s.source, s.message)
 # prints:
