@@ -35,6 +35,8 @@
 //! # Ok::<(), bincode::Error>(())
 //! ```
 //!
+//! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
+//!
 //! # The 't lifetime
 //! By convention the lifetime `'t` in this crate is the lifetime of the input text.
 //! Almost all structures with a lifetime are bound to this lifetime.
