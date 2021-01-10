@@ -1,27 +1,30 @@
 //! Fundamental types used by this crate.
 
+use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+
+use crate::tokenizer::tag::Tagger;
 
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
     pub lemma: Cow<'t, str>,
-    pub pos: &'t str,
+    pub pos_id: u16,
 }
 
 impl<'t> WordData<'t> {
-    pub fn new<S: Into<Cow<'t, str>>>(lemma: S, pos: &'t str) -> Self {
+    pub fn new<S: Into<Cow<'t, str>>>(lemma: S, pos_id: u16) -> Self {
         WordData {
             lemma: lemma.into(),
-            pos,
+            pos_id,
         }
     }
 
     pub fn to_owned_word_data(&self) -> OwnedWordData {
         OwnedWordData {
             lemma: self.lemma.to_string(),
-            pos: self.pos.to_string(),
+            pos_id: self.pos_id,
         }
     }
 }
@@ -30,12 +33,12 @@ impl<'t> WordData<'t> {
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct OwnedWordData {
     pub lemma: String,
-    pub pos: String,
+    pub pos_id: u16,
 }
 
 impl OwnedWordData {
-    pub fn new(lemma: String, pos: String) -> Self {
-        OwnedWordData { lemma, pos }
+    pub fn new(lemma: String, pos_id: u16) -> Self {
+        OwnedWordData { lemma, pos_id }
     }
 }
 
@@ -68,7 +71,8 @@ pub struct OwnedWord {
 }
 
 /// A token where varying levels of information are set.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone, PartialEq)]
 pub struct IncompleteToken<'t> {
     pub word: Word<'t>,
     pub byte_span: (usize, usize),
@@ -77,6 +81,8 @@ pub struct IncompleteToken<'t> {
     pub has_space_before: bool,
     pub chunks: Vec<String>,
     pub text: &'t str,
+    #[derivative(PartialEq = "ignore", Debug = "ignore")]
+    pub tagger: &'t Tagger,
 }
 
 impl<'t> AsRef<str> for IncompleteToken<'t> {
@@ -86,7 +92,8 @@ impl<'t> AsRef<str> for IncompleteToken<'t> {
 }
 
 /// A finished token with all information set.
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Token<'t> {
     pub word: Word<'t>,
     pub char_span: (usize, usize),
@@ -94,6 +101,8 @@ pub struct Token<'t> {
     pub has_space_before: bool,
     pub chunks: Vec<String>,
     pub text: &'t str,
+    #[derivative(Debug = "ignore")]
+    pub tagger: &'t Tagger,
 }
 
 /// An owned version of [Token] for serialization and use in longer-living structures e. g. rule tests.
@@ -114,17 +123,20 @@ impl<'t> AsRef<str> for Token<'t> {
 
 impl<'t> Token<'t> {
     /// Get the special sentence start token.
-    pub fn sent_start(text: &'t str) -> Self {
+    pub fn sent_start(text: &'t str, tagger: &'t Tagger) -> Self {
         Token {
             word: Word::new_with_tags(
                 "",
-                vec![WordData::new("", "SENT_START")].into_iter().collect(),
+                vec![WordData::new("", tagger.tag_to_id("SENT_START"))]
+                    .into_iter()
+                    .collect(),
             ),
             char_span: (0, 0),
             byte_span: (0, 0),
             has_space_before: false,
             chunks: Vec::new(),
             text,
+            tagger,
         }
     }
 
@@ -143,14 +155,25 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
     fn from(data: IncompleteToken<'t>) -> Self {
         let mut word = data.word.clone();
 
-        word.tags.push(WordData::new(data.word.text, ""));
+        word.tags
+            .push(WordData::new(data.word.text, data.tagger.tag_to_id("")));
 
-        if word.tags.iter().all(|x| x.pos.is_empty()) {
-            word.tags.push(WordData::new(data.word.text, "UNKNOWN"));
+        if word
+            .tags
+            .iter()
+            .all(|x| data.tagger.id_to_tag(x.pos_id).is_empty())
+        {
+            word.tags.push(WordData::new(
+                data.word.text,
+                data.tagger.tag_to_id("UNKNOWN"),
+            ));
         }
 
         if data.is_sentence_end {
-            word.tags.push(WordData::new(data.word.text, "SENT_END"));
+            word.tags.push(WordData::new(
+                data.word.text,
+                data.tagger.tag_to_id("SENT_END"),
+            ));
         }
 
         Token {
@@ -160,6 +183,7 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             has_space_before: data.has_space_before,
             chunks: data.chunks,
             text: data.text,
+            tagger: data.tagger,
         }
     }
 }

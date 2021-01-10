@@ -271,7 +271,7 @@ impl PyTagger {
                 self.options.use_compound_split_heuristic,
             )
             .into_iter()
-            .map(|x| (x.lemma.to_string(), x.pos.to_string()))
+            .map(|x| (x.lemma.to_string(), x.pos_id.to_string()))
             .collect()
     }
 
@@ -324,12 +324,12 @@ impl PyToken {
     }
 
     #[getter]
-    fn data(&self) -> Vec<(&str, &str)> {
+    fn data(&self) -> Vec<(&str, u16)> {
         self.token
             .word
             .tags
             .iter()
-            .map(|x| (x.lemma.as_str(), x.pos.as_str()))
+            .map(|x| (x.lemma.as_str(), x.pos_id))
             .collect()
     }
 
@@ -354,20 +354,8 @@ impl PyToken {
     }
 
     #[getter]
-    fn tags(&self) -> Vec<&str> {
-        let mut tags: Vec<_> = self
-            .token
-            .word
-            .tags
-            .iter()
-            .filter_map(|x| {
-                if x.pos.is_empty() {
-                    None
-                } else {
-                    Some(x.pos.as_str())
-                }
-            })
-            .collect();
+    fn tags(&self) -> Vec<u16> {
+        let mut tags: Vec<_> = self.token.word.tags.iter().map(|x| x.pos_id).collect();
         tags.sort_unstable();
         tags.dedup();
         tags

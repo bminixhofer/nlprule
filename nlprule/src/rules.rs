@@ -1,9 +1,12 @@
 //! Sets of grammatical error correction rules.
 
-use crate::rule::{Cache, Rule};
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
+use crate::{
+    rule::{Cache, Rule},
+    tokenizer::tag::Tagger,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -45,10 +48,13 @@ pub struct Rules {
 impl Rules {
     /// Creates a rule set from a path to an XML file containing grammar rules.
     #[cfg(feature = "compile")]
-    pub fn from_xml<P: AsRef<std::path::Path>>(path: P, options: RulesOptions) -> Self {
+    pub fn from_xml<P: AsRef<std::path::Path>>(
+        path: P,
+        tagger: &Tagger,
+        options: RulesOptions,
+    ) -> Self {
         use log::warn;
         use std::collections::HashMap;
-        use std::convert::TryFrom;
 
         let rules = crate::rule::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
@@ -56,23 +62,25 @@ impl Rules {
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
-                Ok((rule_structure, id, on)) => match Rule::try_from(rule_structure) {
-                    Ok(mut rule) => {
-                        if (options.ids.is_empty() || options.ids.contains(&id))
-                            && !options.ignore_ids.contains(&id)
-                        {
-                            rule.set_id(id);
-                            rule.set_on(on);
-                            Some(rule)
-                        } else {
+                Ok((rule_structure, id, on)) => {
+                    match Rule::from_rule_structure(rule_structure, tagger) {
+                        Ok(mut rule) => {
+                            if (options.ids.is_empty() || options.ids.contains(&id))
+                                && !options.ignore_ids.contains(&id)
+                            {
+                                rule.set_id(id);
+                                rule.set_on(on);
+                                Some(rule)
+                            } else {
+                                None
+                            }
+                        }
+                        Err(x) => {
+                            *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
                             None
                         }
                     }
-                    Err(x) => {
-                        *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
-                        None
-                    }
-                },
+                }
                 Err(x) => {
                     *errors.entry(format!("[Structure] {}", x)).or_insert(0) += 1;
                     None

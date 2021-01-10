@@ -1,4 +1,5 @@
 use crate::{
+    tokenizer::tag::Tagger,
     types::Token,
     utils::{regex::SerializeRegex, CacheString},
 };
@@ -82,29 +83,44 @@ impl Matcher {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PosMatcher {
+    mask: Vec<bool>,
+}
+
+impl PosMatcher {
+    pub fn new(matcher: Matcher, tagger: &Tagger) -> Self {
+        let mut mask = vec![false; tagger.tag_store().len()];
+        let graph = MatchGraph::default();
+
+        for (word, id) in tagger.tag_store().iter() {
+            mask[*id as usize] = matcher.is_match(word.as_str(), &graph);
+        }
+
+        PosMatcher { mask }
+    }
+
+    pub fn is_match(&self, pos_id: u16) -> bool {
+        self.mask[pos_id as usize]
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WordDataMatcher {
-    pos_matcher: Option<Matcher>,
+    pos_matcher: Option<PosMatcher>,
     inflect_matcher: Option<Matcher>,
 }
 
 impl WordDataMatcher {
-    pub fn new(pos_matcher: Option<Matcher>, inflect_matcher: Option<Matcher>) -> Self {
+    pub fn new(pos_matcher: Option<PosMatcher>, inflect_matcher: Option<Matcher>) -> Self {
         WordDataMatcher {
             pos_matcher,
             inflect_matcher,
         }
     }
 
-    pub fn is_match<S1: AsRef<str>, S2: AsRef<str>>(
-        &self,
-        input: &[(S1, S2)],
-        graph: &MatchGraph,
-    ) -> bool {
+    pub fn is_match<S: AsRef<str>>(&self, input: &[(u16, S)], graph: &MatchGraph) -> bool {
         input.iter().any(|x| {
-            let pos_matches = self
-                .pos_matcher
-                .as_ref()
-                .map_or(true, |m| m.is_match(x.0.as_ref(), graph));
+            let pos_matches = self.pos_matcher.as_ref().map_or(true, |m| m.is_match(x.0));
 
             let inflect_matches = self
                 .inflect_matcher
@@ -220,14 +236,17 @@ pub mod concrete {
 
             if self.case_sensitive {
                 self.matcher.is_match(
-                    &tags.iter().map(|x| (&x.pos, &x.lemma)).collect::<Vec<_>>(),
+                    &tags
+                        .iter()
+                        .map(|x| (x.pos_id, &x.lemma))
+                        .collect::<Vec<_>>(),
                     graph,
                 )
             } else {
                 self.matcher.is_match(
                     &tags
                         .iter()
-                        .map(|x| (&x.pos, x.lemma.to_lowercase()))
+                        .map(|x| (x.pos_id, x.lemma.to_lowercase()))
                         .collect::<Vec<_>>(),
                     graph,
                 )

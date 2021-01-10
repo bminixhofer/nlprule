@@ -84,6 +84,19 @@ impl Tagger {
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
 
+        // special tags
+        tag_store.insert("");
+        tag_store.insert("SENT_START");
+        tag_store.insert("SENT_END");
+        tag_store.insert("UNKNOWN");
+        tag_store.insert("PCT");
+        tag_store.insert("ORD");
+        tag_store.insert("SYM");
+        tag_store.insert("RB_SENT");
+
+        tag_store.insert("PKT");
+        tag_store.insert("PRO:IND:DAT:SIN:NEU");
+
         let lines = Tagger::get_lines(paths, remove_paths)?;
 
         for (word, inflection, tag) in lines.iter() {
@@ -141,7 +154,7 @@ impl Tagger {
                 for tag_id in value {
                     output.push(WordData::new(
                         self.word_store.get_by_right(key).unwrap(),
-                        self.tag_store.get_by_right(tag_id).unwrap(),
+                        *tag_id,
                     ))
                 }
             }
@@ -169,6 +182,18 @@ impl Tagger {
         }
 
         tags
+    }
+
+    pub fn id_to_tag(&self, id: u16) -> &str {
+        self.tag_store.get_by_right(&id).unwrap()
+    }
+
+    pub fn tag_to_id(&self, tag: &str) -> u16 {
+        *self.tag_store.get_by_left(&tag.to_string()).unwrap()
+    }
+
+    pub fn tag_store(&self) -> &BiMap<String, u16> {
+        &self.tag_store
     }
 
     /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word.

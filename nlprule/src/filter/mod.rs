@@ -49,8 +49,8 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
         if let Some(group) = graph.by_id(self.index) {
             let tokens = &group.tokens(graph.tokens());
 
-            tokens.iter().all(|x| {
-                if let Some(captures) = self.regexp.captures(&x.word.text) {
+            tokens.iter().all(|token| {
+                if let Some(captures) = self.regexp.captures(&token.word.text) {
                     // get group 2 because `must_fully_match` adds one group
                     let tags = tokenizer.tagger().get_tags(
                         &captures.at(2).unwrap(),
@@ -58,7 +58,10 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
                         tokenizer.options().use_compound_split_heuristic,
                     );
 
-                    tags.iter().any(|x| self.postag_regexp.is_match(&x.pos))
+                    tags.iter().any(|x| {
+                        self.postag_regexp
+                            .is_match(token.tagger.id_to_tag(x.pos_id))
+                    })
                 } else {
                     false
                 }

@@ -623,7 +623,13 @@ impl Chunker {
                     if tokens
                         .iter()
                         .find(|token| token.char_span == char_span)
-                        .map(|token| token.word.tags.iter().any(|tag| tag.pos == "NNS"))
+                        .map(|token| {
+                            token
+                                .word
+                                .tags
+                                .iter()
+                                .any(|tag| tag.pos_id == token.tagger.tag_to_id("NNS"))
+                        })
                         .unwrap_or(false)
                     {
                         number = "plural";

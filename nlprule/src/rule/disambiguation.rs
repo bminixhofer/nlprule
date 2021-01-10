@@ -1,21 +1,22 @@
 use crate::types::*;
-use crate::utils::regex::SerializeRegex;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
+use super::engine::composition::PosMatcher;
+
 #[derive(Serialize, Deserialize)]
-pub enum POSFilter {
-    Regex(SerializeRegex),
-    String(String),
+pub struct POSFilter {
+    matcher: PosMatcher,
 }
 
 impl POSFilter {
+    pub fn new(matcher: PosMatcher) -> Self {
+        POSFilter { matcher }
+    }
+
     fn is_word_data_match(&self, data: &WordData) -> bool {
-        match self {
-            POSFilter::String(string) => data.pos == string,
-            POSFilter::Regex(regex) => regex.is_match(&data.pos),
-        }
+        self.matcher.is_match(data.pos_id)
     }
 
     fn keep(&self, data: &mut Word) {
@@ -60,7 +61,7 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(data) => {
                                 token.word.tags.retain(|x| {
-                                    !(x.pos == data.pos
+                                    !(x.pos_id == data.pos_id
                                         && (data.lemma.is_empty() || x.lemma == data.lemma))
                                 });
                             }
@@ -84,7 +85,7 @@ impl Disambiguation {
                                         .map_or(token.word.text, |x| x.lemma.as_ref())
                                         .to_string();
 
-                                    token.word.tags.retain(|x| x.pos == limit.pos);
+                                    token.word.tags.retain(|x| x.pos_id == limit.pos_id);
 
                                     if token.word.tags.is_empty() {
                                         token.word.tags.push(WordData::new(
@@ -93,7 +94,7 @@ impl Disambiguation {
                                             } else {
                                                 token.word.text.into()
                                             },
-                                            limit.pos.as_str(),
+                                            limit.pos_id,
                                         ));
                                     }
                                 }
@@ -116,11 +117,16 @@ impl Disambiguation {
                             } else {
                                 data.lemma.as_str()
                             },
-                            data.pos.as_str(),
+                            data.pos_id,
                         );
 
                         token.word.tags.push(data);
-                        token.word.tags.retain(|x| !x.pos.is_empty());
+                        let tagger = token.tagger;
+
+                        token
+                            .word
+                            .tags
+                            .retain(|x| !tagger.id_to_tag(x.pos_id).is_empty());
                     }
                 }
             }
@@ -133,7 +139,7 @@ impl Disambiguation {
                             } else {
                                 data.lemma.as_str()
                             },
-                            data.pos.as_str(),
+                            data.pos_id,
                         );
 
                         token.word.tags.clear();
