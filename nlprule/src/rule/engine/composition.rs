@@ -1,14 +1,12 @@
-use crate::{
-    types::Token,
-    utils::{regex::SerializeRegex, CacheString},
-};
+use crate::{types::Token, utils::regex::SerializeRegex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use unicase::UniCase;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    matcher: either::Either<either::Either<CacheString<String>, usize>, SerializeRegex>,
+    matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
     negate: bool,
     case_sensitive: bool,
     empty_always_false: bool,
@@ -25,7 +23,7 @@ impl Matcher {
     }
 
     pub fn new_string(
-        string_or_idx: either::Either<CacheString<String>, usize>,
+        string_or_idx: either::Either<String, usize>,
         negate: bool,
         case_sensitive: bool,
         empty_always_false: bool,
@@ -38,11 +36,18 @@ impl Matcher {
         }
     }
 
-    pub fn is_slice_match<S: AsRef<str>>(&self, input: &[S], graph: &MatchGraph) -> bool {
-        input.iter().any(|x| self.is_match(x.as_ref(), graph))
+    pub fn is_slice_match<S: AsRef<str>>(
+        &self,
+        input: &[S],
+        graph: &MatchGraph,
+        case_sensitive: Option<bool>,
+    ) -> bool {
+        input
+            .iter()
+            .any(|x| self.is_match(x.as_ref(), graph, case_sensitive))
     }
 
-    pub fn is_match(&self, input: &str, graph: &MatchGraph) -> bool {
+    pub fn is_match(&self, input: &str, graph: &MatchGraph, case_sensitive: Option<bool>) -> bool {
         if input.is_empty() {
             return if self.empty_always_false {
                 false
@@ -50,22 +55,23 @@ impl Matcher {
                 self.negate
             };
         }
+        let case_sensitive = case_sensitive.unwrap_or(self.case_sensitive);
 
         let matches = match &self.matcher {
             either::Left(string_or_idx) => match string_or_idx {
                 either::Left(string) => {
-                    if self.case_sensitive {
+                    if case_sensitive {
                         string.as_str() == input
                     } else {
-                        string.to_lowercase() == input.to_lowercase()
+                        UniCase::new(string) == UniCase::new(input)
                     }
                 }
                 either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
                     x.tokens(&graph.tokens).get(0).map_or(false, |token| {
-                        if self.case_sensitive {
+                        if case_sensitive {
                             token.word.text == input
                         } else {
-                            token.word.text.to_lowercase() == input.to_lowercase()
+                            UniCase::new(token.word.text) == UniCase::new(input)
                         }
                     })
                 }),
@@ -95,21 +101,22 @@ impl WordDataMatcher {
         }
     }
 
-    pub fn is_match<S1: AsRef<str>, S2: AsRef<str>>(
+    pub fn is_match(
         &self,
-        input: &[(S1, S2)],
+        input: &[(&str, &str)],
         graph: &MatchGraph,
+        case_sensitive: Option<bool>,
     ) -> bool {
         input.iter().any(|x| {
             let pos_matches = self
                 .pos_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.0.as_ref(), graph));
+                .map_or(true, |m| m.is_match(x.0, graph, case_sensitive));
 
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.1.as_ref(), graph));
+                .map_or(true, |m| m.is_match(x.1, graph, case_sensitive));
 
             pos_matches && inflect_matches
         })
@@ -160,7 +167,8 @@ pub mod concrete {
 
     impl Atomable for TextAtom {
         fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
-            self.matcher.is_match(&input[position].word.text, graph)
+            self.matcher
+                .is_match(&input[position].word.text, graph, None)
         }
     }
 
@@ -181,7 +189,8 @@ pub mod concrete {
 
     impl Atomable for ChunkAtom {
         fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
-            self.matcher.is_slice_match(&input[position].chunks, graph)
+            self.matcher
+                .is_slice_match(&input[position].chunks, graph, None)
         }
     }
 
@@ -218,20 +227,14 @@ pub mod concrete {
         fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
             let tags = &input[position].word.tags;
 
-            if self.case_sensitive {
-                self.matcher.is_match(
-                    &tags.iter().map(|x| (&x.pos, &x.lemma)).collect::<Vec<_>>(),
-                    graph,
-                )
-            } else {
-                self.matcher.is_match(
-                    &tags
-                        .iter()
-                        .map(|x| (&x.pos, x.lemma.to_lowercase()))
-                        .collect::<Vec<_>>(),
-                    graph,
-                )
-            }
+            self.matcher.is_match(
+                &tags
+                    .iter()
+                    .map(|x| (x.pos, x.lemma.as_ref()))
+                    .collect::<Vec<_>>(),
+                graph,
+                Some(self.case_sensitive),
+            )
         }
     }
 
@@ -597,7 +600,7 @@ impl Composition {
     pub fn can_not_match(&self, text: &str) -> bool {
         if let Some(atom) = self.simple_text_atom() {
             let graph = MatchGraph::default();
-            !atom.matcher().is_match(text, &graph)
+            !atom.matcher().is_match(text, &graph, None)
         } else {
             false
         }

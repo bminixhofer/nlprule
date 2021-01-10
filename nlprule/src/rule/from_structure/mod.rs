@@ -86,7 +86,7 @@ fn parse_match_attribs(
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
-                    || either::Left(text.unwrap().trim().to_string().into()),
+                    || either::Left(text.unwrap().trim().to_string()),
                     either::Right,
                 ),
                 negate,
@@ -108,7 +108,7 @@ fn parse_match_attribs(
             Matcher::new_regex(regex?, negate_pos, true)
         } else {
             Matcher::new_string(
-                either::Left(postag.trim().to_string().into()),
+                either::Left(postag.trim().to_string()),
                 negate_pos,
                 true,
                 true,
@@ -124,7 +124,7 @@ fn parse_match_attribs(
     match (attribs.chunk(), attribs.chunk_re()) {
         (Some(chunk), None) => {
             let chunk_atom = ChunkAtom::new(Matcher::new_string(
-                either::Left(chunk.trim().to_string().into()),
+                either::Left(chunk.trim().to_string()),
                 false,
                 true,
                 true,
@@ -142,7 +142,7 @@ fn parse_match_attribs(
 
     if let Some(chunk) = attribs.chunk() {
         let chunk_atom = ChunkAtom::new(Matcher::new_string(
-            either::Left(chunk.trim().to_string().into()),
+            either::Left(chunk.trim().to_string()),
             false,
             true,
             true,
@@ -329,7 +329,7 @@ fn parse_match(m: structure::Match, composition: &Option<&Composition>) -> Resul
                 let regex = SerializeRegex::new(&postag, true, false)?;
                 Matcher::new_regex(regex, false, true)
             }
-            None => Matcher::new_string(either::Left(postag.into()), false, false, true),
+            None => Matcher::new_string(either::Left(postag), false, false, true),
             x => panic!("unknown postag_regex value {:?}", x),
         };
         Some(PosReplacer::new(matcher))

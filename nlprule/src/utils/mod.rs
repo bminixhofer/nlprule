@@ -1,44 +1,8 @@
 use lazy_static::lazy_static;
-use once_cell::sync::OnceCell;
 use onig::{Captures, Regex};
-use serde::{Deserialize, Serialize};
 
 pub mod parallelism;
 pub mod regex;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CacheString<S: AsRef<str>> {
-    string: S,
-    #[serde(skip)]
-    lower: OnceCell<String>,
-}
-
-impl<S: AsRef<str>> PartialEq for CacheString<S> {
-    fn eq(&self, other: &Self) -> bool {
-        other.as_str() == self.as_str()
-    }
-}
-
-impl<S: AsRef<str>> From<S> for CacheString<S> {
-    fn from(string: S) -> Self {
-        CacheString {
-            lower: OnceCell::new(),
-            string,
-        }
-    }
-}
-
-impl<S: AsRef<str>> CacheString<S> {
-    pub fn to_lowercase(&self) -> &str {
-        self.lower
-            .get_or_init(|| self.string.as_ref().to_lowercase())
-            .as_str()
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.string.as_ref()
-    }
-}
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust
 pub fn apply_to_first<F>(string: &str, func: F) -> String
