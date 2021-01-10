@@ -21,7 +21,7 @@
     },
     {
         "os": "windows-latest",
-        "python-version": "3.8",
+        "python-version": "3.9",
         "runOnEvent": "always"
     },
     {
