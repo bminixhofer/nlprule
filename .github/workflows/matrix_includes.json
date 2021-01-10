@@ -1,8 +1,13 @@
 [
     {
         "os": "ubuntu-latest",
-        "python-version": "3.8",
+        "python-version": "3.9",
         "runOnEvent": "always"
+    },
+    {
+        "os": "ubuntu-latest",
+        "python-version": "3.8",
+        "runOnEvent": "release"
     },
     {
         "os": "ubuntu-latest",
@@ -18,6 +23,11 @@
         "os": "windows-latest",
         "python-version": "3.8",
         "runOnEvent": "always"
+    },
+    {
+        "os": "windows-latest",
+        "python-version": "3.8",
+        "runOnEvent": "release"
     },
     {
         "os": "windows-latest",
@@ -31,8 +41,13 @@
     },
     {
         "os": "macos-latest",
-        "python-version": "3.8",
+        "python-version": "3.9",
         "runOnEvent": "always"
+    },
+    {
+        "os": "macos-latest",
+        "python-version": "3.8",
+        "runOnEvent": "release"
     },
     {
         "os": "macos-latest",
