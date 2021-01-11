@@ -75,7 +75,7 @@ pub fn finalize<'t>(tokens: Vec<IncompleteToken<'t>>) -> Vec<Token<'t>> {
         return Vec::new();
     }
 
-    let mut finalized = vec![Token::sent_start(tokens[0].text)];
+    let mut finalized = vec![Token::sent_start(tokens[0].text, tokens[0].tagger)];
     finalized.extend(tokens.into_iter().map(|x| x.into()));
 
     finalized
@@ -138,7 +138,6 @@ impl Tokenizer {
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         use log::warn;
-        use std::convert::TryFrom;
 
         let rules = crate::rule::read_disambiguation_rules(path);
         let mut error = None;
@@ -146,24 +145,26 @@ impl Tokenizer {
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
-                Ok((rule_structure, id)) => match DisambiguationRule::try_from(rule_structure) {
-                    Ok(mut rule) => {
-                        if error.is_none()
-                            && (options.ids.is_empty() || options.ids.contains(&id))
-                            && !options.ignore_ids.contains(&id)
-                        {
-                            rule.set_id(id);
+                Ok((rule_structure, id)) => {
+                    match DisambiguationRule::from_rule_structure(rule_structure, tagger.as_ref()) {
+                        Ok(mut rule) => {
+                            if error.is_none()
+                                && (options.ids.is_empty() || options.ids.contains(&id))
+                                && !options.ignore_ids.contains(&id)
+                            {
+                                rule.set_id(id);
 
-                            Some(rule)
-                        } else {
+                                Some(rule)
+                            } else {
+                                None
+                            }
+                        }
+                        Err(x) => {
+                            error = Some(format!("[Rule] {}", x));
                             None
                         }
                     }
-                    Err(x) => {
-                        error = Some(format!("[Rule] {}", x));
-                        None
-                    }
-                },
+                }
                 Err(x) => {
                     error = Some(format!("[Structure] {}", x));
                     None
@@ -308,6 +309,7 @@ impl Tokenizer {
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
                     text,
+                    tagger: self.tagger.as_ref(),
                 }
             })
             .filter(|token| !token.word.text.is_empty())

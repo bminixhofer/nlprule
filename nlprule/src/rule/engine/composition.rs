@@ -1,4 +1,4 @@
-use crate::{types::Token, utils::regex::SerializeRegex};
+use crate::{tokenizer::tag::Tagger, types::Token, utils::regex::SerializeRegex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -88,35 +88,54 @@ impl Matcher {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PosMatcher {
+    mask: Vec<bool>,
+}
+
+impl PosMatcher {
+    pub fn new(matcher: Matcher, tagger: &Tagger) -> Self {
+        let mut mask = vec![false; tagger.tag_store().len()];
+        let graph = MatchGraph::default();
+
+        for (word, id) in tagger.tag_store().iter() {
+            mask[*id as usize] = matcher.is_match(word.as_str(), &graph, None);
+        }
+
+        PosMatcher { mask }
+    }
+
+    pub fn is_match(&self, pos_id: u16) -> bool {
+        self.mask[pos_id as usize]
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WordDataMatcher {
-    pos_matcher: Option<Matcher>,
+    pos_matcher: Option<PosMatcher>,
     inflect_matcher: Option<Matcher>,
 }
 
 impl WordDataMatcher {
-    pub fn new(pos_matcher: Option<Matcher>, inflect_matcher: Option<Matcher>) -> Self {
+    pub fn new(pos_matcher: Option<PosMatcher>, inflect_matcher: Option<Matcher>) -> Self {
         WordDataMatcher {
             pos_matcher,
             inflect_matcher,
         }
     }
 
-    pub fn is_match(
+    pub fn is_match<S: AsRef<str>>(
         &self,
-        input: &[(&str, &str)],
+        input: &[(u16, S)],
         graph: &MatchGraph,
         case_sensitive: Option<bool>,
     ) -> bool {
         input.iter().any(|x| {
-            let pos_matches = self
-                .pos_matcher
-                .as_ref()
-                .map_or(true, |m| m.is_match(x.0, graph, case_sensitive));
+            let pos_matches = self.pos_matcher.as_ref().map_or(true, |m| m.is_match(x.0));
 
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.1, graph, case_sensitive));
+                .map_or(true, |m| m.is_match(x.1.as_ref(), graph, case_sensitive));
 
             pos_matches && inflect_matches
         })
@@ -230,7 +249,7 @@ pub mod concrete {
             self.matcher.is_match(
                 &tags
                     .iter()
-                    .map(|x| (x.pos, x.lemma.as_ref()))
+                    .map(|x| (x.pos_id, x.lemma.as_ref()))
                     .collect::<Vec<_>>(),
                 graph,
                 Some(self.case_sensitive),

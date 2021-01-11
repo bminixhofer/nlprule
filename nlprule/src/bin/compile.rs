@@ -71,6 +71,7 @@ fn main() {
 
     let mut rules = Rules::from_xml(
         opts.grammar_path,
+        tokenizer.tagger(),
         serde_json::from_str(&read_to_string(opts.rules_config_path).unwrap()).unwrap(),
     );
     rules.populate_cache(&common_words);

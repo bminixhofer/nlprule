@@ -1,4 +1,4 @@
-use super::engine::composition::{MatchGraph, Matcher};
+use super::engine::composition::{MatchGraph, PosMatcher};
 use crate::types::*;
 use crate::{
     tokenizer::Tokenizer,
@@ -46,16 +46,15 @@ pub struct Test {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PosReplacer {
-    matcher: Matcher,
+    matcher: PosMatcher,
 }
 
 impl PosReplacer {
-    pub fn new(matcher: Matcher) -> Self {
+    pub fn new(matcher: PosMatcher) -> Self {
         PosReplacer { matcher }
     }
 
     fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
-        let graph = MatchGraph::default();
         let mut candidates: Vec<_> = tokenizer
             .tagger()
             .get_tags(
@@ -76,7 +75,7 @@ impl PosReplacer {
                             tokenizer.options().use_compound_split_heuristic,
                         )
                         .iter()
-                        .position(|x| self.matcher.is_match(x.pos, &graph, None))
+                        .position(|x| self.matcher.is_match(x.pos_id))
                     {
                         data.push((word.to_string(), i));
                     }
