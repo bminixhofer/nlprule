@@ -74,9 +74,10 @@ impl Tagger {
     /// separated by tabs, to be added to the tagger.
     /// * `remove_paths`: Paths to files where each line contains the word, lemma and tag, respectively,
     /// separated by tabs, to be removed from the tagger if present in the files from `paths`.
-    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>>(
+    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>, S3: AsRef<str>>(
         paths: &[S1],
         remove_paths: &[S2],
+        extra_tags: &[S3],
     ) -> std::io::Result<Self> {
         let mut tags = HashMap::new();
         let mut groups = HashMap::new();
@@ -84,18 +85,14 @@ impl Tagger {
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
 
-        // special tags
+        // hardcoded special tags
         tag_store.insert("");
         tag_store.insert("SENT_START");
         tag_store.insert("SENT_END");
         tag_store.insert("UNKNOWN");
-        tag_store.insert("PCT");
-        tag_store.insert("ORD");
-        tag_store.insert("SYM");
-        tag_store.insert("RB_SENT");
 
-        tag_store.insert("PKT");
-        tag_store.insert("PRO:IND:DAT:SIN:NEU");
+        // add language specific special tags
+        tag_store.extend(extra_tags.iter().map(|x| x.as_ref()));
 
         let lines = Tagger::get_lines(paths, remove_paths)?;
 

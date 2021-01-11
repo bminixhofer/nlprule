@@ -11,6 +11,7 @@ pub struct POSFilter {
 }
 
 impl POSFilter {
+    #[allow(dead_code)]
     pub fn new(matcher: PosMatcher) -> Self {
         POSFilter { matcher }
     }

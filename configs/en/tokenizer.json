@@ -5,5 +5,11 @@
     "always_add_lower_tags": true,
     "ignore_ids": [
         "BEST_JJS"
+    ],
+    "extra_tags": [
+        "PCT",
+        "ORD",
+        "SYM",
+        "RB_SENT"
     ]
 }

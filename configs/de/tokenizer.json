@@ -6,5 +6,9 @@
     "ignore_ids": [
         "SUB_BEAMTE.1",
         "SUB_BEAMTE.2"
+    ],
+    "extra_tags": [
+        "PKT",
+        "PRO:IND:DAT:SIN:NEU"
     ]
 }

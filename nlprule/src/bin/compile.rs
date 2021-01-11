@@ -1,7 +1,7 @@
 use clap::Clap;
 use nlprule::{
-    rules::Rules,
-    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer},
+    rules::{Rules, RulesOptions},
+    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
 };
 use std::{
     collections::HashSet,
@@ -50,7 +50,17 @@ fn main() {
             .collect()
     });
 
-    let tagger = Tagger::from_dumps(&opts.tag_paths, &opts.tag_remove_paths).unwrap();
+    let tokenizer_options: TokenizerOptions =
+        serde_json::from_str(&read_to_string(opts.tokenizer_config_path).unwrap()).unwrap();
+    let rules_options: RulesOptions =
+        serde_json::from_str(&read_to_string(opts.rules_config_path).unwrap()).unwrap();
+
+    let tagger = Tagger::from_dumps(
+        &opts.tag_paths,
+        &opts.tag_remove_paths,
+        &tokenizer_options.extra_tags,
+    )
+    .unwrap();
     let mut tokenizer = Tokenizer::from_xml(
         opts.disambiguation_path,
         Arc::new(tagger),
@@ -61,7 +71,7 @@ fn main() {
         } else {
             None
         },
-        serde_json::from_str(&read_to_string(opts.tokenizer_config_path).unwrap()).unwrap(),
+        tokenizer_options,
     )
     .unwrap();
     tokenizer.populate_cache(&common_words);
@@ -69,11 +79,7 @@ fn main() {
     let f = BufWriter::new(File::create(&opts.out_tokenizer_path).unwrap());
     bincode::serialize_into(f, &tokenizer).unwrap();
 
-    let mut rules = Rules::from_xml(
-        opts.grammar_path,
-        tokenizer.tagger(),
-        serde_json::from_str(&read_to_string(opts.rules_config_path).unwrap()).unwrap(),
-    );
+    let mut rules = Rules::from_xml(opts.grammar_path, tokenizer.tagger(), rules_options);
     rules.populate_cache(&common_words);
 
     let f = BufWriter::new(File::create(&opts.out_rules_path).unwrap());

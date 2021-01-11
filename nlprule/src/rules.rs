@@ -1,7 +1,6 @@
 //! Sets of grammatical error correction rules.
 
 use crate::rule::{Cache, Rule};
-use crate::tokenizer::tag::Tagger;
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
@@ -48,7 +47,7 @@ impl Rules {
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
-        tagger: &Tagger,
+        tagger: &crate::tokenizer::tag::Tagger,
         options: RulesOptions,
     ) -> Self {
         use log::warn;

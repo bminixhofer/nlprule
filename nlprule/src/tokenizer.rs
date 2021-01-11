@@ -102,6 +102,9 @@ pub struct TokenizerOptions {
     /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
     #[serde(default)]
     pub known_failures: Vec<String>,
+    /// Used part-of-speech tags which are not in the tagger dictionary.
+    #[serde(default)]
+    pub extra_tags: Vec<String>,
 }
 
 impl Default for TokenizerOptions {
@@ -114,6 +117,7 @@ impl Default for TokenizerOptions {
             ids: Vec::new(),
             ignore_ids: Vec::new(),
             known_failures: Vec::new(),
+            extra_tags: Vec::new(),
         }
     }
 }

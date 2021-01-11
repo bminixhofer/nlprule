@@ -620,16 +620,11 @@ impl Chunker {
                     }
 
                     // the number is singular unless any token in the noun chunk has the part-of-speech tag `NNS` assigned
+                    let nns_id = tokens[0].tagger.tag_to_id("NNS");
                     if tokens
                         .iter()
                         .find(|token| token.char_span == char_span)
-                        .map(|token| {
-                            token
-                                .word
-                                .tags
-                                .iter()
-                                .any(|tag| tag.pos_id == token.tagger.tag_to_id("NNS"))
-                        })
+                        .map(|token| token.word.tags.iter().any(|tag| tag.pos_id == nns_id))
                         .unwrap_or(false)
                     {
                         number = "plural";

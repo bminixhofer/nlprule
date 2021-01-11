@@ -303,11 +303,12 @@ impl PyTagger {
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
     token: OwnedToken,
+    tagger: Arc<Tagger>,
 }
 
-impl From<OwnedToken> for PyToken {
-    fn from(token: OwnedToken) -> Self {
-        PyToken { token }
+impl PyToken {
+    fn new(token: OwnedToken, tagger: Arc<Tagger>) -> Self {
+        PyToken { token, tagger }
     }
 }
 
@@ -324,12 +325,12 @@ impl PyToken {
     }
 
     #[getter]
-    fn data(&self) -> Vec<(&str, u16)> {
+    fn data(&self) -> Vec<(&str, &str)> {
         self.token
             .word
             .tags
             .iter()
-            .map(|x| (x.lemma.as_str(), x.pos_id))
+            .map(|x| (x.lemma.as_str(), self.tagger.id_to_tag(x.pos_id)))
             .collect()
     }
 
@@ -354,8 +355,14 @@ impl PyToken {
     }
 
     #[getter]
-    fn tags(&self) -> Vec<u16> {
-        let mut tags: Vec<_> = self.token.word.tags.iter().map(|x| x.pos_id).collect();
+    fn tags(&self) -> Vec<&str> {
+        let mut tags: Vec<_> = self
+            .token
+            .word
+            .tags
+            .iter()
+            .map(|x| self.tagger.id_to_tag(x.pos_id))
+            .collect();
         tags.sort_unstable();
         tags.dedup();
         tags
@@ -498,7 +505,12 @@ impl PyTokenizer {
                     .disambiguate(self.tokenizer.tokenize(&sentence)),
             )
             .into_iter()
-            .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
+            .map(|x| {
+                PyCell::new(
+                    py,
+                    PyToken::new(x.to_owned_token(), self.tokenizer.tagger().clone()),
+                )
+            })
             .collect::<PyResult<Vec<_>>>()
         })
     }
@@ -520,7 +532,12 @@ impl PyTokenizer {
                             .disambiguate(self.tokenizer.tokenize(&sentence)),
                     )
                     .into_iter()
-                    .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
+                    .map(|x| {
+                        PyCell::new(
+                            py,
+                            PyToken::new(x.to_owned_token(), self.tokenizer.tagger().clone()),
+                        )
+                    })
                     .collect::<PyResult<Vec<_>>>()?;
                     output.extend(tokens);
                 }
