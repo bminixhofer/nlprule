@@ -14,6 +14,6 @@ if __name__ == "__main__":
     for language in args.languages:
         with open(args.out_pattern.format(language), "w") as f:
             # wordfreq lists lowercase all words
-            for word in wordfreq.top_n_list("de", args.top_n):
+            for word in wordfreq.top_n_list(language, args.top_n):
                 f.write(word + "\n")
                 f.write(word.title() + "\n")
