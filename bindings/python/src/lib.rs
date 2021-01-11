@@ -263,7 +263,7 @@ impl PyTagger {
     ///         A list of tuples of (lemma, POS).
     ///         Not contextualized so it can be thought of as possible lemma / POS of the given word.
     #[text_signature = "(word, add_lower=None)"]
-    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, String)> {
+    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, &str)> {
         self.tagger
             .get_tags(
                 word,
@@ -271,7 +271,7 @@ impl PyTagger {
                 self.options.use_compound_split_heuristic,
             )
             .into_iter()
-            .map(|x| (x.lemma.to_string(), x.pos_id.to_string()))
+            .map(|x| (x.lemma.to_string(), self.tagger.id_to_tag(x.pos_id)))
             .collect()
     }
 
