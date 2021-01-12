@@ -114,9 +114,10 @@ if __name__ == "__main__":
 
     json.dump(
         {
-            "token_model": {"model": token_model},
-            "pos_model": {"model": pos_model, "tagdict": tagdict},
-            "chunk_model": {"model": chunk_model},
+            "token_model": token_model,
+            "pos_model": pos_model,
+            "pos_tagdict": tagdict,
+            "chunk_model": chunk_model,
         },
         open(args.out, "w"),
         indent=4,

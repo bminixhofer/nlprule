@@ -1,7 +1,11 @@
 use clap::Clap;
 use nlprule::{
     rules::{Rules, RulesOptions},
-    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
+    tokenizer::{
+        chunk::{self, Chunker},
+        tag::Tagger,
+        Tokenizer, TokenizerOptions,
+    },
 };
 use std::{
     collections::HashSet,
@@ -66,7 +70,7 @@ fn main() {
         Arc::new(tagger),
         if let Some(path) = opts.chunker_path {
             let reader = BufReader::new(File::open(path).unwrap());
-            let chunker: Chunker = serde_json::from_reader(reader).unwrap();
+            let chunker = chunk::from_json(reader);
             Some(chunker)
         } else {
             None

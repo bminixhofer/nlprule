@@ -85,23 +85,109 @@ impl<'a> Sequence<'a> {
     }
 }
 
+mod hash {
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
+
+    pub fn hash_str(string: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        string.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn hash_slice(slice: &[&str]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        for s in slice.iter() {
+            hasher.write(s.as_bytes());
+        }
+        // This is intentional.
+        // See https://doc.rust-lang.org/stable/src/core/hash/mod.rs.html#598-603
+        "".hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn same_hash_if_same_join() {
+            let arr = &["ab", "cde", "fg"];
+            let string = "abcdefg";
+
+            assert_eq!(hash_slice(arr), hash_str(string));
+        }
+    }
+}
+
+mod structure {
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct ModelData {
+        outcome_labels: Vec<String>,
+        pmap: HashMap<String, Context>,
+    }
+
+    impl From<ModelData> for Model {
+        fn from(data: ModelData) -> Self {
+            Model {
+                outcome_labels: data.outcome_labels,
+                pmap: data
+                    .pmap
+                    .into_iter()
+                    .map(|(key, value)| (hash::hash_str(&key), value))
+                    .collect(),
+            }
+        }
+    }
+
+    #[cfg(feature = "compile")]
+    pub fn from_json<R: std::io::Read>(reader: R) -> Chunker {
+        #[derive(Serialize, Deserialize)]
+        struct ChunkData {
+            token_model: ModelData,
+            pos_model: ModelData,
+            pos_tagdict: HashMap<String, Vec<String>>,
+            chunk_model: ModelData,
+        }
+
+        let chunk_data: ChunkData = serde_json::from_reader(reader).unwrap();
+        Chunker {
+            token_model: MaxentTokenizer {
+                model: chunk_data.token_model.into(),
+            },
+            pos_model: MaxentPosTagger {
+                model: chunk_data.pos_model.into(),
+                tagdict: chunk_data.pos_tagdict,
+            },
+            chunk_model: MaxentChunker {
+                model: chunk_data.chunk_model.into(),
+            },
+        }
+    }
+}
+
+#[cfg(feature = "compile")]
+pub use structure::from_json;
+
 #[derive(Serialize, Deserialize)]
 struct Model {
     outcome_labels: Vec<String>,
-    pmap: HashMap<String, Context>,
+    pmap: HashMap<u64, Context>,
 }
 
 impl Model {
-    fn eval(&self, context: &[String]) -> Vec<f32> {
-        let scontexts: Vec<Option<&Context>> = context.iter().map(|x| self.pmap.get(x)).collect();
+    fn eval(&self, context: &[u64]) -> Vec<f32> {
+        let scontexts: Vec<&Context> = context.iter().filter_map(|x| self.pmap.get(&x)).collect();
         let mut prior =
             vec![(1. / (self.outcome_labels.len() as f32)).ln(); self.outcome_labels.len()];
 
         for context in scontexts {
-            if let Some(context) = context {
-                for (idx, param) in context.outcomes.iter().zip(context.parameters.iter()) {
-                    prior[*idx] += param;
-                }
+            for (idx, param) in context.outcomes.iter().zip(context.parameters.iter()) {
+                prior[*idx] += param;
             }
         }
 
@@ -122,7 +208,7 @@ impl Model {
 
     fn beam_search<
         S,
-        C: Fn(&[S], &[&str], usize) -> Vec<String>,
+        C: Fn(&[S], &[&str], usize) -> Vec<u64>,
         H: Fn(&[&str], usize) -> u64,
         V: Fn(&[S], &[&str], usize, &str) -> bool,
     >(
@@ -151,16 +237,29 @@ impl Model {
                     cache.insert(hash, self.eval(&context));
                 }
                 let scores = cache.get(&hash).unwrap();
+                let top_n = self.get_top_n(&scores, scores.len());
 
-                for (_, p, pred) in self.get_top_n(&scores, scores.len()) {
+                for (_, p, pred) in &top_n[..size] {
                     if valid_fn(tokens, &seq.outcomes(), i, pred) {
-                        let mut next_outcomes: Vec<_> = seq.outcomes().to_vec();
-                        next_outcomes.push(pred);
-
-                        let mut next_probs: Vec<_> = seq.probs().to_vec();
-                        next_probs.push(p);
+                        let next_outcomes: Vec<_> = [seq.outcomes(), &[pred]].concat();
+                        let next_probs: Vec<_> = [seq.probs(), &[*p]].concat();
 
                         next.push(Sequence::new(next_outcomes, next_probs));
+                    }
+                }
+
+                // if no advanced sequences, advance all valid to match OpenNLP behaviour
+                if next.is_empty() {
+                    for (_, p, pred) in top_n.iter() {
+                        if valid_fn(tokens, &seq.outcomes(), i, pred) {
+                            let mut next_outcomes: Vec<_> = seq.outcomes().to_vec();
+                            next_outcomes.push(pred);
+
+                            let mut next_probs: Vec<_> = seq.probs().to_vec();
+                            next_probs.push(*p);
+
+                            next.push(Sequence::new(next_outcomes, next_probs));
+                        }
                     }
                 }
             }
@@ -181,14 +280,14 @@ struct MaxentTokenizer {
 }
 
 impl MaxentTokenizer {
-    fn add_char_context(key: &str, c: char, context: &mut Vec<String>) {
+    fn add_char_context(key: &str, c: char, context: &mut Vec<u64>) {
         macro_rules! add {
             ($x: expr) => {
-                context.push(format!("{}{}", key, $x));
+                context.push(hash::hash_slice(&[key, $x]));
             };
         }
 
-        context.push(format!("{}={}", key, c));
+        context.push(hash::hash_slice(&[&key, "=", &String::from(c)]));
 
         if c.is_alphabetic() {
             add!("_alpha");
@@ -210,43 +309,55 @@ impl MaxentTokenizer {
         }
     }
 
-    fn context(chars: &[char], i: usize) -> Vec<String> {
+    fn context(chars: &[char], i: usize) -> Vec<u64> {
         let mut context = Vec::new();
 
         let prefix: String = chars[..i].iter().collect();
         let suffix: String = chars[i..].iter().collect();
 
-        context.push(format!("p={}", prefix));
-        context.push(format!("s={}", suffix));
+        context.push(hash::hash_slice(&["p=", &prefix]));
+        context.push(hash::hash_slice(&["s=", &suffix]));
 
         if i > 0 {
             Self::add_char_context("p1", chars[i - 1], &mut context);
             if i > 1 {
                 Self::add_char_context("p2", chars[i - 2], &mut context);
-                context.push(format!("p21={}{}", chars[i - 2], chars[i - 1]));
+                context.push(hash::hash_slice(&[
+                    "p21=",
+                    &String::from(chars[i - 2]),
+                    &String::from(chars[i - 1]),
+                ]));
             } else {
-                context.push("p2=bok".into());
+                context.push(hash::hash_str("p2=bok"));
             }
-            context.push(format!("p1f1={}{}", chars[i - 1], chars[i]));
+            context.push(hash::hash_slice(&[
+                "p1f1=",
+                &String::from(chars[i - 1]),
+                &String::from(chars[i]),
+            ]));
         } else {
-            context.push("b1=bok".into());
+            context.push(hash::hash_str("b1=bok"));
         }
 
         Self::add_char_context("f1", chars[i], &mut context);
         if i + 1 < chars.len() {
             Self::add_char_context("f2", chars[i + 1], &mut context);
-            context.push(format!("f12={}{}", chars[i], chars[i + 1]));
+            context.push(hash::hash_slice(&[
+                "f12=",
+                &String::from(chars[i]),
+                &String::from(chars[i + 1]),
+            ]));
         } else {
-            context.push("f2=bok".into());
+            context.push(hash::hash_str("f2=bok"));
         }
 
         if chars[0] == '&' && chars[chars.len() - 1] == ';' {
-            context.push("cc".into()); // character code
+            context.push(hash::hash_str("cc")); // character code
         }
 
         // TODO: add abbreviations
         if i == chars.len() - 1 && [].contains(&chars) {
-            context.push("pabb".into());
+            context.push(hash::hash_str("pabb"));
         }
 
         context
@@ -300,26 +411,26 @@ struct MaxentPosTagger {
 }
 
 impl MaxentPosTagger {
-    fn get_suffixes_prefixes(string: &str) -> Vec<String> {
+    fn get_suffixes_prefixes(string: &str) -> Vec<u64> {
         let chars: Vec<_> = string.chars().collect();
         let mut output = Vec::new();
 
         for i in 0..4 {
-            output.push(format!(
-                "suf={}",
-                chars[std::cmp::max((chars.len() as isize) - 1 - i, 0) as usize..]
+            output.push(hash::hash_slice(&[
+                "suf=",
+                &chars[std::cmp::max((chars.len() as isize) - 1 - i, 0) as usize..]
                     .iter()
-                    .collect::<String>()
-            ));
+                    .collect::<String>(),
+            ]));
         }
 
         for i in 0..4 {
-            output.push(format!(
-                "pre={}",
-                chars[..std::cmp::min(i + 1, chars.len())]
+            output.push(hash::hash_slice(&[
+                "pre=",
+                &chars[..std::cmp::min(i + 1, chars.len())]
                     .iter()
-                    .collect::<String>()
-            ));
+                    .collect::<String>(),
+            ]));
         }
 
         output
@@ -337,7 +448,7 @@ impl MaxentPosTagger {
         s.finish()
     }
 
-    fn context(tokens: &[&str], tags: &[&str], i: usize) -> Vec<String> {
+    fn context(tokens: &[&str], tags: &[&str], i: usize) -> Vec<u64> {
         let mut context = Vec::new();
 
         let lex = tokens[i];
@@ -362,36 +473,36 @@ impl MaxentPosTagger {
             ("*SB*", None)
         };
 
-        context.push("default".into());
-        context.push(format!("w={}", lex));
+        context.push(hash::hash_str("default"));
+        context.push(hash::hash_slice(&["w=", lex]));
 
         context.extend(Self::get_suffixes_prefixes(&lex));
 
         if lex.contains('-') {
-            context.push("h".into());
+            context.push(hash::hash_str("h"));
         }
         if lex.chars().any(|c| c.is_ascii_uppercase()) {
-            context.push("c".into());
+            context.push(hash::hash_str("c"));
         }
         if lex.chars().any(|c| c.is_ascii_digit()) {
-            context.push("d".into());
+            context.push(hash::hash_str("d"));
         }
 
-        context.push(format!("p={}", prev));
+        context.push(hash::hash_slice(&["p=", prev]));
         if prev != "*SB*" {
-            context.push(format!("pp={}", prevprev));
+            context.push(hash::hash_slice(&["pp=", prevprev]));
         }
 
-        context.push(format!("n={}", next));
+        context.push(hash::hash_slice(&["n=", next]));
         if next != "*SE*" {
-            context.push(format!("nn={}", nextnext));
+            context.push(hash::hash_slice(&["nn=", nextnext]));
         }
 
         if let Some(tagprev) = tagprev {
-            context.push(format!("t={}", tagprev));
+            context.push(hash::hash_slice(&["t=", tagprev]));
 
             if let Some(tagprevprev) = tagprevprev {
-                context.push(format!("t2={},{}", tagprevprev, tagprev));
+                context.push(hash::hash_slice(&["t2=", tagprevprev, ",", tagprev]));
             }
         }
 
@@ -451,7 +562,7 @@ impl MaxentChunker {
         s.finish()
     }
 
-    fn context(input: &[(&str, &str)], preds: &[&str], i: usize) -> Vec<String> {
+    fn context(input: &[(&str, &str)], preds: &[&str], i: usize) -> Vec<u64> {
         let (tokens, tags): (Vec<&str>, Vec<&str>) = input.iter().cloned().unzip();
 
         let (w_2, t_2, p_2) = if i < 2 {
@@ -497,51 +608,51 @@ impl MaxentChunker {
 
         return vec![
             // add word features
-            w_2.clone(),
-            w_1.clone(),
-            w0.clone(),
-            w1.clone(),
-            w2.clone(),
-            w_1.clone() + &w0,
-            w0.clone() + &w1,
+            hash::hash_str(&w_2),
+            hash::hash_str(&w_1),
+            hash::hash_str(&w0),
+            hash::hash_str(&w1),
+            hash::hash_str(&w2),
+            hash::hash_slice(&[&w_1, &w0]),
+            hash::hash_slice(&[&w0, &w1]),
             // add tag features
-            t_2.clone(),
-            t_1.clone(),
-            t0.clone(),
-            t1.clone(),
-            t2.clone(),
-            t_2.clone() + &t_1,
-            t_1.clone() + &t0,
-            t0.clone() + &t1,
-            t1.clone() + &t2,
-            t_2.clone() + &t_1 + &t0,
-            t_1.clone() + &t0 + &t1,
-            t0.clone() + &t1 + &t2,
+            hash::hash_str(&t_2),
+            hash::hash_str(&t_1),
+            hash::hash_str(&t0),
+            hash::hash_str(&t1),
+            hash::hash_str(&t2),
+            hash::hash_slice(&[&t_2, &t_1]),
+            hash::hash_slice(&[&t_1, &t0]),
+            hash::hash_slice(&[&t0, &t1]),
+            hash::hash_slice(&[&t1, &t2]),
+            hash::hash_slice(&[&t_2, &t_1, &t0]),
+            hash::hash_slice(&[&t_1, &t0, &t1]),
+            hash::hash_slice(&[&t0, &t1, &t2]),
             // add pred tags
-            p_2.clone(),
-            p_1.clone(),
-            p_2 + &p_1,
+            hash::hash_str(&p_2),
+            hash::hash_str(&p_1),
+            hash::hash_slice(&[&p_2, &p_1]),
             // add pred and tag
-            p_1.clone() + &t_2,
-            p_1.clone() + &t_1,
-            p_1.clone() + &t0,
-            p_1.clone() + &t1,
-            p_1.clone() + &t2,
-            p_1.clone() + &t_2 + &t_1,
-            p_1.clone() + &t_1 + &t0,
-            p_1.clone() + &t0 + &t1,
-            p_1.clone() + &t1 + &t2,
-            p_1.clone() + &t_2 + &t_1 + &t0,
-            p_1.clone() + &t_1 + &t0 + &t1,
-            p_1.clone() + &t0 + &t1 + &t2,
+            hash::hash_slice(&[&p_1, &t_2]),
+            hash::hash_slice(&[&p_1, &t_1]),
+            hash::hash_slice(&[&p_1, &t0]),
+            hash::hash_slice(&[&p_1, &t1]),
+            hash::hash_slice(&[&p_1, &t2]),
+            hash::hash_slice(&[&p_1, &t_2, &t_1]),
+            hash::hash_slice(&[&p_1, &t_1, &t0]),
+            hash::hash_slice(&[&p_1, &t0, &t1]),
+            hash::hash_slice(&[&p_1, &t1, &t2]),
+            hash::hash_slice(&[&p_1, &t_2, &t_1, &t0]),
+            hash::hash_slice(&[&p_1, &t_1, &t0, &t1]),
+            hash::hash_slice(&[&p_1, &t0, &t1, &t2]),
             // add pred and word
-            p_1.clone() + &w_2,
-            p_1.clone() + &w_1,
-            p_1.clone() + &w0,
-            p_1.clone() + &w1,
-            p_1.clone() + &w2,
-            p_1.clone() + &w_1 + &w0,
-            p_1.clone() + &w0 + &w1,
+            hash::hash_slice(&[&p_1, &w_2]),
+            hash::hash_slice(&[&p_1, &w_1]),
+            hash::hash_slice(&[&p_1, &w0]),
+            hash::hash_slice(&[&p_1, &w1]),
+            hash::hash_slice(&[&p_1, &w2]),
+            hash::hash_slice(&[&p_1, &w_1, &w0]),
+            hash::hash_slice(&[&p_1, &w0, &w1]),
         ];
     }
 
