@@ -1,11 +1,7 @@
 use clap::Clap;
 use nlprule::{
     rules::{Rules, RulesOptions},
-    tokenizer::{
-        chunk::{self, Chunker},
-        tag::Tagger,
-        Tokenizer, TokenizerOptions,
-    },
+    tokenizer::{chunk, tag::Tagger, Tokenizer, TokenizerOptions},
 };
 use std::{
     collections::HashSet,
