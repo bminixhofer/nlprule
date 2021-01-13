@@ -4,7 +4,7 @@
 //! Tokens are *disambiguated* (i. e. information from the initial assignment is changed) in a rule-based way by
 //! [DisambiguationRule][crate::rule::DisambiguationRule]s.
 
-use crate::types::*;
+use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
@@ -231,20 +231,35 @@ impl Tokenizer {
     pub(crate) fn disambiguate_up_to_id<'t>(
         &'t self,
         mut tokens: Vec<IncompleteToken<'t>>,
-        id: &str,
+        id: Option<&str>,
     ) -> Vec<IncompleteToken<'t>> {
-        let mut previously_computed_tokens = None;
+        let n = id.map_or(self.rules.len(), |id| {
+            self.rules.iter().position(|x| x.id == id).unwrap()
+        });
+        let mut i = 0;
 
-        for (i, rule) in self.rules.iter().enumerate() {
-            if rule.id == id {
-                break;
+        while i < n {
+            let finalized = finalize(tokens.clone());
+            let result = self.rules[i..n]
+                .maybe_par_iter()
+                .enumerate()
+                .filter_map(|(j, rule)| {
+                    let skip_mask = self.cache.get_skip_mask(&finalized, j + i);
+                    let changes = rule.apply(&finalized, &self, skip_mask);
+                    if changes.is_empty() {
+                        None
+                    } else {
+                        Some((j + i, changes))
+                    }
+                })
+                .find_first(|_| true);
+
+            if let Some((index, changes)) = result {
+                self.rules[index].change(&mut tokens, &self, changes);
+                i = index + 1;
+            } else {
+                i = n;
             }
-
-            let skip_mask = self.cache.get_skip_mask(&tokens, i);
-            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
-
-            tokens = x.0;
-            previously_computed_tokens = x.1;
         }
 
         tokens
@@ -254,19 +269,9 @@ impl Tokenizer {
     /// This does not change the number of tokens, but can change the content arbitrarily.
     pub fn disambiguate<'t>(
         &'t self,
-        mut tokens: Vec<IncompleteToken<'t>>,
+        tokens: Vec<IncompleteToken<'t>>,
     ) -> Vec<IncompleteToken<'t>> {
-        let mut previously_computed_tokens = None;
-
-        for (i, rule) in self.rules.iter().enumerate() {
-            let skip_mask = self.cache.get_skip_mask(&tokens, i);
-
-            let x = rule.apply(tokens, &self, skip_mask, previously_computed_tokens);
-            tokens = x.0;
-            previously_computed_tokens = x.1;
-        }
-
-        tokens
+        self.disambiguate_up_to_id(tokens, None)
     }
 
     /// Tokenize the given text. This applies chunking and tagging, but does not do disambiguation.

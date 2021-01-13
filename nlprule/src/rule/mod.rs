@@ -52,6 +52,15 @@ pub struct DisambiguationRule {
     pub(crate) tests: Vec<disambiguation::DisambiguationTest>,
 }
 
+#[derive(Default)]
+pub struct Changes(Vec<Vec<HashSet<(usize, usize)>>>);
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 impl DisambiguationRule {
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &str {
@@ -65,13 +74,12 @@ impl DisambiguationRule {
 
     pub(crate) fn apply<'t>(
         &'t self,
-        mut tokens: Vec<IncompleteToken<'t>>,
+        tokens: &[Token<'t>],
         tokenizer: &Tokenizer,
         mut skip_mask: Vec<bool>,
-        complete_tokens: Option<Vec<Token<'t>>>,
-    ) -> (Vec<IncompleteToken<'t>>, Option<Vec<Token<'t>>>) {
+    ) -> Changes {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
-            return (tokens, None);
+            return Changes::default();
         }
 
         for (i, val) in skip_mask.iter_mut().enumerate().filter(|(_, x)| !**x) {
@@ -83,18 +91,10 @@ impl DisambiguationRule {
         }
 
         if skip_mask.iter().all(|x| *x) {
-            return (tokens, None);
+            return Changes::default();
         }
 
-        let complete_tokens = if let Some(complete_tokens) = complete_tokens {
-            complete_tokens
-        } else {
-            finalize(tokens.clone())
-        };
-        // this assumes that finalizing only ever inserts the SENT_START token
-        // works at the moment but not very clean
-        skip_mask.insert(0, false);
-        let refs: Vec<&Token> = complete_tokens.iter().collect();
+        let refs: Vec<&Token> = tokens.iter().collect();
 
         let mut all_byte_spans = Vec::new();
 
@@ -127,13 +127,18 @@ impl DisambiguationRule {
             all_byte_spans.push(byte_spans);
         }
 
-        if all_byte_spans.is_empty() {
-            return (tokens, Some(complete_tokens));
-        }
+        Changes(all_byte_spans)
+    }
 
+    pub fn change<'t>(
+        &'t self,
+        tokens: &mut Vec<IncompleteToken<'t>>,
+        tokenizer: &Tokenizer,
+        changes: Changes,
+    ) {
         log::info!("applying {}", self.id);
 
-        for byte_spans in all_byte_spans {
+        for byte_spans in changes.0 {
             let mut groups = Vec::new();
             let mut refs = tokens.iter_mut().collect::<Vec<_>>();
 
@@ -153,8 +158,6 @@ impl DisambiguationRule {
             self.disambiguations
                 .apply(groups, tokenizer.options().retain_last);
         }
-
-        (tokens, None)
     }
 
     /// Often there are examples associated with a rule.
@@ -168,16 +171,14 @@ impl DisambiguationRule {
                 disambiguation::DisambiguationTest::Changed(x) => x.text.as_str(),
             };
 
-            let tokens_before = tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), &self.id);
+            let tokens_before =
+                tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
+            let finalized = finalize(tokens_before.clone());
+            let changes = self.apply(&finalized, tokenizer, vec![false; finalized.len()]);
             let mut tokens_after = tokens_before.clone();
-            tokens_after = self
-                .apply(
-                    tokens_after,
-                    tokenizer,
-                    vec![false; tokens_before.len()],
-                    None,
-                )
-                .0;
+            if !changes.is_empty() {
+                self.change(&mut tokens_after, tokenizer, changes);
+            }
 
             info!("Tokens: {:#?}", tokens_before);
 
