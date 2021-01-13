@@ -30,8 +30,73 @@ def strip_index(identifier):
 class LanguageTool:
     def __init__(self, lang_code: str, ids: Set[str]):
         lt_code = {"en": "en_US", "de": "de_DE"}[lang_code]
-        self.tool = language_tool_python.LanguageTool(lt_code)
-        self.tool.disabled_rules = {"MORFOLOGIK_RULE_EN_US", "GERMAN_SPELLER_RULE"}
+        self.tool = language_tool_python.LanguageTool(
+            lt_code, remote_server="http://localhost:8081/"
+        )
+        self.tool.disabled_rules = {
+            "MORFOLOGIK_RULE_EN_US",
+            "GERMAN_SPELLER_RULE",
+            "COMMA_PARENTHESIS_WHITESPACE",
+            "DOUBLE_PUNCTUATION",
+            "UPPERCASE_SENTENCE_START",
+            "WHITESPACE_RULE",
+            "SENTENCE_WHITESPACE",
+            "WHITESPACE_PARAGRAPH",
+            "WHITESPACE_PARAGRAPH_BEGIN",
+            "EMPTY_LINE",
+            "TOO_LONG_SENTENCE",
+            "TOO_LONG_PARAGRAPH",
+            "PARAGRAPH_REPEAT_BEGINNING_RULE",
+            "PUNCTUATION_PARAGRAPH_END",
+            "PUNCTUATION_PARAGRAPH_END2",
+            "EN_SPECIFIC_CASE",
+            "EN_UNPAIRED_BRACKETS",
+            "ENGLISH_WORD_REPEAT_RULE",
+            "EN_A_VS_AN",
+            "ENGLISH_WORD_REPEAT_BEGINNING_RULE",
+            "EN_COMPOUNDS",
+            "EN_CONTRACTION_SPELLING",
+            "ENGLISH_WRONG_WORD_IN_CONTEXT",
+            "EN_DASH_RULE",
+            "EN_WORD_COHERENCY",
+            "EN_DIACRITICS_REPLACE",
+            "EN_PLAIN_ENGLISH_REPLACE",
+            "EN_REDUNDANCY_REPLACE",
+            "EN_SIMPLE_REPLACE",
+            "READABILITY_RULE_SIMPLE",
+            "READABILITY_RULE_DIFFICULT",
+            "DE_SIMPLE_REPLACE",
+            "OLD_SPELLING",
+            "DE_SENTENCE_WHITESPACE",
+            "DE_DOUBLE_PUNCTUATION",
+            "MISSING_VERB",
+            "GERMAN_WORD_REPEAT_RULE",
+            "GERMAN_WORD_REPEAT_BEGINNING_RULE",
+            "GERMAN_WRONG_WORD_IN_CONTEXT",
+            "DE_AGREEMENT",
+            "DE_AGREEMENT2",
+            "DE_CASE",
+            "DE_DASH",
+            "DE_VERBAGREEMENT",
+            "DE_SUBJECT_VERB_AGREEMENT",
+            "DE_WORD_COHERENCY",
+            "DE_SIMILAR_NAMES",
+            "DE_WIEDER_VS_WIDER",
+            "STYLE_REPEATED_WORD_RULE_DE",
+            "DE_COMPOUND_COHERENCY",
+            "TOO_LONG_SENTENCE_DE",
+            "FILLER_WORDS_DE",
+            "GERMAN_PARAGRAPH_REPEAT_BEGINNING_RULE",
+            "DE_DU_UPPER_LOWER",
+            "EINHEITEN_METRISCH",
+            "COMMA_BEHIND_RELATIVE_CLAUSE",
+            "COMMA_IN_FRONT_RELATIVE_CLAUSE",
+            "READABILITY_RULE_SIMPLE_DE",
+            "READABILITY_RULE_DIFFICULT_DE",
+            "COMPOUND_INFINITIV_RULE",
+            "STYLE_REPEATED_SHORT_SENTENCES",
+            "STYLE_REPEATED_SENTENCE_BEGINNING",
+        }
 
     def suggest(self, sentence: str) -> Set[Suggestion]:
         suggestions = {
@@ -50,8 +115,8 @@ class LanguageTool:
 
 class NLPRule:
     def __init__(self, lang_code: str):
-        self.tokenizer = nlprule.Tokenizer.load(lang_code)
-        self.rules = nlprule.Rules.load(lang_code, self.tokenizer)
+        self.tokenizer = nlprule.Tokenizer(f"storage/{lang_code}_tokenizer.bin")
+        self.rules = nlprule.Rules(f"storage/{lang_code}_rules.bin", self.tokenizer)
 
     def suggest(self, sentence: str) -> Set[Suggestion]:
         suggestions = {
@@ -108,7 +173,7 @@ if __name__ == "__main__":
     lt_time = 0.0
     nlprule_time = 0.0
 
-    for text in tqdm(texts[: args.n_texts]):
+    for i, text in enumerate(tqdm(texts[: args.n_texts])):
         start = time.time()
         lt_suggestions = lt_instance.suggest(text)
         lt_end = time.time()
@@ -119,8 +184,10 @@ if __name__ == "__main__":
         total_lt_suggestions += len(lt_suggestions)
         total_nlprule_suggestions += len(nlprule_suggestions)
 
-        lt_time += lt_end - start
-        nlprule_time += nlprule_end - lt_end
+        # skip the first 100 measurements to give the JVM time to warm up
+        if i >= 100:
+            lt_time += lt_end - start
+            nlprule_time += nlprule_end - lt_end
 
     print(f"LanguageTool time: {lt_time:.3f}s")
     print(f"NLPRule time: {nlprule_time:.3f}s")
