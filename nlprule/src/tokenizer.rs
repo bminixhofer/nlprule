@@ -70,7 +70,7 @@ fn get_token_strs(text: &str) -> Vec<&str> {
 
 /// *Finalizes* the tokens by e. g. adding a specific UNKNOWN part-of-speech tag.
 /// After finalization grammatical error correction rules can be used on the tokens.
-pub fn finalize<'t>(tokens: Vec<IncompleteToken<'t>>) -> Vec<Token<'t>> {
+pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
     if tokens.is_empty() {
         return Vec::new();
     }

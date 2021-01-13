@@ -27,16 +27,16 @@ rayon-cond = "0.1.0"
 rayon = "1.5"
 
 clap = { version = "3.0.0-beta.1", optional = true }
-env_logger = { version = "0.8.1", optional = true }
+env_logger = { version = "0.8", optional = true }
 
-serde-xml-rs = { git = "https://github.com/RReverser/serde-xml-rs/", optional = true }
+serde-xml-rs = { version = "0.4", optional = true }
 xml-rs = { version = "0.8.3", optional = true }
 roxmltree = { version = "0.14.0", optional = true }
 serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
-quickcheck = "0.9"
-quickcheck_macros = "0.9"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
 
 [features]
 compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json"]

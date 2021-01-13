@@ -821,7 +821,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, tagger: &Tagger) 
             tagger,
         )),
         Some(_) | None => POSFilter::new(PosMatcher::new(
-            Matcher::new_string(either::Left(postag.to_string().into()), false, false, true),
+            Matcher::new_string(either::Left(postag.into()), false, false, true),
             tagger,
         )),
     }

@@ -361,7 +361,14 @@ impl PyToken {
             .word
             .tags
             .iter()
-            .map(|x| self.tagger.id_to_tag(x.pos_id))
+            .filter_map(|x| {
+                let pos = self.tagger.id_to_tag(x.pos_id);
+                if pos.is_empty() {
+                    None
+                } else {
+                    Some(pos)
+                }
+            })
             .collect();
         tags.sort_unstable();
         tags.dedup();
