@@ -50,7 +50,7 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
             let tokens = &group.tokens(graph.tokens());
 
             tokens.iter().all(|token| {
-                if let Some(captures) = self.regexp.captures(&token.word.text) {
+                if let Some(captures) = self.regexp.captures(&token.word.text.as_ref()) {
                     // get group 2 because `must_fully_match` adds one group
                     let tags = tokenizer.tagger().get_tags(
                         &captures.at(2).unwrap(),

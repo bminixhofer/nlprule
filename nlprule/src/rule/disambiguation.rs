@@ -1,7 +1,6 @@
 use crate::types::*;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 use super::engine::composition::PosMatcher;
 
@@ -63,7 +62,8 @@ impl Disambiguation {
                             either::Left(data) => {
                                 token.word.tags.retain(|x| {
                                     !(x.pos_id == data.pos_id
-                                        && (data.lemma.is_empty() || x.lemma == data.lemma))
+                                        && (data.lemma.as_ref().is_empty()
+                                            || x.lemma == data.lemma.as_ref_id()))
                                 });
                             }
                             either::Right(filter) => {
@@ -79,21 +79,19 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(limit) => {
                                 for token in group.into_iter() {
-                                    let last = token
-                                        .word
-                                        .tags
-                                        .get(0)
-                                        .map_or(token.word.text, |x| x.lemma.as_ref())
-                                        .to_string();
+                                    let last = token.word.tags.get(0).map_or_else(
+                                        || token.word.text.clone(),
+                                        |x| x.lemma.clone(),
+                                    );
 
                                     token.word.tags.retain(|x| x.pos_id == limit.pos_id);
 
                                     if token.word.tags.is_empty() {
                                         token.word.tags.push(WordData::new(
                                             if retain_last {
-                                                Cow::Owned(last)
+                                                last
                                             } else {
-                                                token.word.text.into()
+                                                token.word.text.clone()
                                             },
                                             limit.pos_id,
                                         ));
@@ -113,10 +111,10 @@ impl Disambiguation {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
                         let data = WordData::new(
-                            if data.lemma.is_empty() {
-                                token.word.text
+                            if data.lemma.as_ref().is_empty() {
+                                token.word.text.clone()
                             } else {
-                                data.lemma.as_str()
+                                data.lemma.as_ref_id()
                             },
                             data.pos_id,
                         );
@@ -135,10 +133,10 @@ impl Disambiguation {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
                         let data = WordData::new(
-                            if data.lemma.is_empty() {
-                                token.word.text
+                            if data.lemma.as_ref().is_empty() {
+                                token.word.text.clone()
                             } else {
-                                data.lemma.as_str()
+                                data.lemma.as_ref_id()
                             },
                             data.pos_id,
                         );

@@ -59,9 +59,10 @@ fn main() {
         &opts.tag_paths,
         &opts.tag_remove_paths,
         &tokenizer_options.extra_tags,
+        &common_words,
     )
     .unwrap();
-    let mut tokenizer = Tokenizer::from_xml(
+    let tokenizer = Tokenizer::from_xml(
         opts.disambiguation_path,
         Arc::new(tagger),
         if let Some(path) = opts.chunker_path {
@@ -74,13 +75,11 @@ fn main() {
         tokenizer_options,
     )
     .unwrap();
-    tokenizer.populate_cache(&common_words);
 
     let f = BufWriter::new(File::create(&opts.out_tokenizer_path).unwrap());
     bincode::serialize_into(f, &tokenizer).unwrap();
 
-    let mut rules = Rules::from_xml(opts.grammar_path, tokenizer.tagger(), rules_options);
-    rules.populate_cache(&common_words);
+    let rules = Rules::from_xml(opts.grammar_path, tokenizer.tagger(), rules_options);
 
     let f = BufWriter::new(File::create(&opts.out_rules_path).unwrap());
     bincode::serialize_into(f, &rules).unwrap();

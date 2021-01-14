@@ -64,7 +64,9 @@ impl PosReplacer {
             )
             .iter()
             .map(|x| {
-                let group_words = tokenizer.tagger().get_group_members(&x.lemma.to_string());
+                let group_words = tokenizer
+                    .tagger()
+                    .get_group_members(&x.lemma.as_ref().to_string());
                 let mut data = Vec::new();
                 for word in group_words {
                     if let Some(i) = tokenizer
@@ -197,6 +199,7 @@ impl Synthesizer {
                         && first_token
                             .word
                             .text
+                            .as_ref()
                             .chars()
                             .next()
                             .expect("token must have at least one char")

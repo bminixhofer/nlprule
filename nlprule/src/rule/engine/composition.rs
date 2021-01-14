@@ -1,8 +1,13 @@
-use crate::{tokenizer::tag::Tagger, types::Token, utils::regex::SerializeRegex};
+use crate::{
+    tokenizer::tag::Tagger,
+    types::{Token, WordId},
+    utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
+};
 use enum_dispatch::enum_dispatch;
+use fnv::FnvHashMap;
+use fnv::FnvHashSet;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use unicase::UniCase;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
@@ -47,6 +52,14 @@ impl Matcher {
             .any(|x| self.is_match(x.as_ref(), graph, case_sensitive))
     }
 
+    fn needs_graph(&self) -> bool {
+        matches!(&self.matcher, either::Left(either::Right(_)))
+    }
+
+    fn is_regex(&self) -> bool {
+        matches!(&self.matcher, either::Right(_))
+    }
+
     pub fn is_match(&self, input: &str, graph: &MatchGraph, case_sensitive: Option<bool>) -> bool {
         if input.is_empty() {
             return if self.empty_always_false {
@@ -69,9 +82,9 @@ impl Matcher {
                 either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
                     x.tokens(&graph.tokens).get(0).map_or(false, |token| {
                         if case_sensitive {
-                            token.word.text == input
+                            token.word.text.as_ref() == input
                         } else {
-                            UniCase::new(token.word.text) == UniCase::new(input)
+                            UniCase::new(token.word.text.as_ref()) == UniCase::new(input)
                         }
                     })
                 }),
@@ -83,6 +96,65 @@ impl Matcher {
             !matches
         } else {
             matches
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TextMatcher {
+    matcher: Matcher,
+    set: Option<FnvHashSet<u32>>,
+}
+
+impl TextMatcher {
+    pub fn new(matcher: Matcher, tagger: &Tagger) -> Self {
+        let graph = MatchGraph::default();
+
+        let set = if matcher.needs_graph() || !matcher.is_regex() {
+            None
+        } else {
+            let data: Vec<_> = tagger.word_store().iter().collect();
+            let set: FnvHashSet<u32> = data
+                .into_maybe_par_iter()
+                .filter_map(|(word, id)| {
+                    if matcher.is_match(word.as_str(), &graph, None) {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // there are some regexes which match lots of strings
+            // this cutoff is pretty arbitrary but without any threshold the size of some sets blows up
+            // the vast majority of regexes matches less than 100 strings from manual inspection
+            if set.len() > 100 {
+                None
+            } else {
+                Some(set)
+            }
+        };
+
+        TextMatcher { matcher, set }
+    }
+
+    pub fn is_match(
+        &self,
+        word_id: &WordId,
+        graph: &MatchGraph,
+        case_sensitive: Option<bool>,
+    ) -> bool {
+        if self.set.is_none() {
+            return self
+                .matcher
+                .is_match(word_id.as_ref(), graph, case_sensitive);
+        }
+
+        if let Some(id) = word_id.id() {
+            self.set.as_ref().unwrap().contains(id)
+        } else {
+            self.matcher
+                .is_match(word_id.as_ref(), graph, case_sensitive)
         }
     }
 }
@@ -112,32 +184,37 @@ impl PosMatcher {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WordDataMatcher {
     pos_matcher: Option<PosMatcher>,
-    inflect_matcher: Option<Matcher>,
+    inflect_matcher: Option<TextMatcher>,
 }
 
 impl WordDataMatcher {
-    pub fn new(pos_matcher: Option<PosMatcher>, inflect_matcher: Option<Matcher>) -> Self {
+    pub fn new(pos_matcher: Option<PosMatcher>, inflect_matcher: Option<TextMatcher>) -> Self {
         WordDataMatcher {
             pos_matcher,
             inflect_matcher,
         }
     }
 
-    pub fn is_match<S: AsRef<str>>(
+    pub fn is_match(
         &self,
-        input: &[(u16, S)],
+        input: &[(u16, &WordId)],
         graph: &MatchGraph,
         case_sensitive: Option<bool>,
     ) -> bool {
         input.iter().any(|x| {
             let pos_matches = self.pos_matcher.as_ref().map_or(true, |m| m.is_match(x.0));
 
+            // matching part-of-speech tag is faster than inflection, so check POS first and early exit if it doesn't match
+            if !pos_matches {
+                return false;
+            }
+
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.1.as_ref(), graph, case_sensitive));
+                .map_or(true, |m| m.is_match(x.1, graph, case_sensitive));
 
-            pos_matches && inflect_matches
+            inflect_matches
         })
     }
 }
@@ -176,12 +253,12 @@ pub enum Atom {
 }
 
 pub mod concrete {
-    use super::{Atomable, MatchGraph, Matcher, Token, WordDataMatcher};
+    use super::{Atomable, MatchGraph, Matcher, TextMatcher, Token, WordDataMatcher};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TextAtom {
-        matcher: Matcher,
+        matcher: TextMatcher,
     }
 
     impl Atomable for TextAtom {
@@ -192,12 +269,8 @@ pub mod concrete {
     }
 
     impl TextAtom {
-        pub fn new(matcher: Matcher) -> Self {
+        pub fn new(matcher: TextMatcher) -> Self {
             TextAtom { matcher }
-        }
-
-        pub fn matcher(&self) -> &Matcher {
-            &self.matcher
         }
     }
 
@@ -249,7 +322,7 @@ pub mod concrete {
             self.matcher.is_match(
                 &tags
                     .iter()
-                    .map(|x| (x.pos_id, x.lemma.as_ref()))
+                    .map(|x| (x.pos_id, &x.lemma))
                     .collect::<Vec<_>>(),
                 graph,
                 Some(self.case_sensitive),
@@ -458,12 +531,12 @@ impl Group {
 #[derive(Debug)]
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
-    id_to_idx: &'t HashMap<usize, usize>,
+    id_to_idx: &'t FnvHashMap<usize, usize>,
     tokens: Vec<&'t Token<'t>>,
 }
 
 lazy_static! {
-    static ref EMPTY_MAP: HashMap<usize, usize> = HashMap::new();
+    static ref EMPTY_MAP: FnvHashMap<usize, usize> = FnvHashMap::default();
 }
 
 impl<'t> Default for MatchGraph<'t> {
@@ -479,7 +552,7 @@ impl<'t> Default for MatchGraph<'t> {
 impl<'t> MatchGraph<'t> {
     pub fn new(
         groups: Vec<Group>,
-        id_to_idx: &'t HashMap<usize, usize>,
+        id_to_idx: &'t FnvHashMap<usize, usize>,
         tokens: Vec<&'t Token<'t>>,
     ) -> Self {
         MatchGraph {
@@ -582,12 +655,13 @@ impl Part {
 #[derive(Serialize, Deserialize)]
 pub struct Composition {
     pub parts: Vec<Part>,
-    group_ids_to_idx: HashMap<usize, usize>,
+    group_ids_to_idx: FnvHashMap<usize, usize>,
+    can_stop_mask: Vec<bool>,
 }
 
 impl Composition {
     pub fn new(parts: Vec<Part>) -> Self {
-        let mut group_ids_to_idx = HashMap::new();
+        let mut group_ids_to_idx = FnvHashMap::default();
         group_ids_to_idx.insert(0, 0);
         let mut current_id = 1;
 
@@ -598,30 +672,14 @@ impl Composition {
             }
         }
 
+        let can_stop_mask = (0..parts.len())
+            .map(|i| parts[i..].iter().all(|x| x.quantifier.min == 0))
+            .collect();
+
         Composition {
             parts,
             group_ids_to_idx,
-        }
-    }
-
-    pub fn simple_text_atom(&self) -> Option<&concrete::TextAtom> {
-        if self.parts[0].quantifier.min > 0 {
-            if let Atom::TextAtom(atom) = &self.parts[0].atom {
-                Some(atom)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn can_not_match(&self, text: &str) -> bool {
-        if let Some(atom) = self.simple_text_atom() {
-            let graph = MatchGraph::default();
-            !atom.matcher().is_match(text, &graph, None)
-        } else {
-            false
+            can_stop_mask,
         }
     }
 
@@ -650,6 +708,19 @@ impl Composition {
     }
 
     pub fn apply<'t>(&'t self, tokens: &[&'t Token<'t>], start: usize) -> Option<MatchGraph<'t>> {
+        // this path is extremely hot so more optimizations are done
+
+        // the first matcher can never rely on the match graph, so we use an empty default graph for the first match
+        // then allocate a new graph if the first matcher matched
+        lazy_static! {
+            static ref DEFAULT_GRAPH: MatchGraph<'static> = MatchGraph::default();
+        };
+
+        let first_must_match = self.parts[0].quantifier.min > 0;
+        if first_must_match && !self.parts[0].atom.is_match(tokens, &DEFAULT_GRAPH, start) {
+            return None;
+        }
+
         let mut position = start;
 
         let mut cur_count = 0;
@@ -686,7 +757,9 @@ impl Composition {
             {
                 cur_atom_idx += 1;
                 cur_count = 0;
-            } else if part.atom.is_match(tokens, &graph, position) {
+            } else if (first_must_match && position == start && cur_atom_idx == 0) // we already know this must have matched, otherwise it would have early exited above
+                || part.atom.is_match(tokens, &graph, position)
+            {
                 let mut group = &mut graph.groups[cur_atom_idx + 1];
 
                 // set the group beginning if the char end was zero (i. e. the group was empty)
@@ -702,11 +775,7 @@ impl Composition {
             }
         };
 
-        // NB: maybe better way to solve this (probably more logically well-defined matching)
-        is_match = is_match
-            || self.parts[cur_atom_idx..]
-                .iter()
-                .all(|x| x.quantifier.min == 0);
+        is_match = is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx];
 
         if is_match {
             graph.fill_empty();

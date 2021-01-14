@@ -3,19 +3,20 @@
 
 use crate::types::*;
 use bimap::BiMap;
+use fnv::FnvHashMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::collections::HashSet;
 use std::io::BufRead;
+use std::{borrow::Cow, fs::File};
 
 /// The lexical tagger.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tagger {
-    tags: HashMap<u32, IndexMap<u32, Vec<u16>>>,
+    tags: FnvHashMap<u32, IndexMap<u32, Vec<u16>>>,
     tag_store: BiMap<String, u16>,
     word_store: BiMap<String, u32>,
-    groups: HashMap<u32, Vec<u32>>,
+    groups: FnvHashMap<u32, Vec<u32>>,
 }
 
 impl Tagger {
@@ -78,9 +79,10 @@ impl Tagger {
         paths: &[S1],
         remove_paths: &[S2],
         extra_tags: &[S3],
+        common_words: &HashSet<String>,
     ) -> std::io::Result<Self> {
-        let mut tags = HashMap::new();
-        let mut groups = HashMap::new();
+        let mut tags = FnvHashMap::default();
+        let mut groups = FnvHashMap::default();
 
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
@@ -95,6 +97,13 @@ impl Tagger {
         tag_store.extend(extra_tags.iter().map(|x| x.as_ref()));
 
         let lines = Tagger::get_lines(paths, remove_paths)?;
+
+        let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
+        for i in 0..punct.len() {
+            word_store.insert(&punct[i..(i + 1)]);
+        }
+
+        word_store.extend(common_words.iter().map(|x| x.as_str()));
 
         for (word, inflection, tag) in lines.iter() {
             word_store.insert(word);
@@ -150,7 +159,7 @@ impl Tagger {
             for (key, value) in map.iter() {
                 for tag_id in value {
                     output.push(WordData::new(
-                        self.word_store.get_by_right(key).unwrap(),
+                        self.id_word(self.word_store.get_by_right(key).unwrap().as_str().into()),
                         *tag_id,
                     ))
                 }
@@ -186,11 +195,20 @@ impl Tagger {
     }
 
     pub fn tag_to_id(&self, tag: &str) -> u16 {
-        *self.tag_store.get_by_left(&tag.to_string()).unwrap()
+        *self.tag_store.get_by_left(tag).unwrap()
     }
 
     pub fn tag_store(&self) -> &BiMap<String, u16> {
         &self.tag_store
+    }
+
+    pub fn word_store(&self) -> &BiMap<String, u32> {
+        &self.word_store
+    }
+
+    pub fn id_word<'t>(&'t self, text: Cow<'t, str>) -> WordId<'t> {
+        let id = self.word_store.get_by_left(text.as_ref()).copied();
+        WordId::new(text, id)
     }
 
     /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word.
@@ -233,8 +251,10 @@ impl Tagger {
                         tags = next_tags
                             .into_iter()
                             .map(|mut x| {
-                                x.lemma =
-                                    format!("{}{}", &word[..i], x.lemma.to_lowercase()).into();
+                                x.lemma = self.id_word(
+                                    format!("{}{}", &word[..i], x.lemma.as_ref().to_lowercase())
+                                        .into(),
+                                );
                                 x
                             })
                             .collect();

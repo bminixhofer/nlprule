@@ -6,24 +6,59 @@ use std::borrow::Cow;
 
 use crate::tokenizer::tag::Tagger;
 
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+pub struct OwnedWordId(String, Option<u32>);
+
+impl OwnedWordId {
+    pub fn as_ref_id(&self) -> WordId {
+        WordId::new(self.0.as_str().into(), self.1)
+    }
+}
+
+impl AsRef<str> for OwnedWordId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordId<'t>(Cow<'t, str>, Option<u32>);
+
+impl<'t> WordId<'t> {
+    pub fn new(text: Cow<'t, str>, id: Option<u32>) -> Self {
+        WordId(text, id)
+    }
+
+    pub fn to_owned_id(&self) -> OwnedWordId {
+        OwnedWordId(self.0.to_string(), self.1)
+    }
+
+    pub fn id(&self) -> &Option<u32> {
+        &self.1
+    }
+}
+
+impl<'t> AsRef<str> for WordId<'t> {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
-    pub lemma: Cow<'t, str>,
+    pub lemma: WordId<'t>,
     pub pos_id: u16,
 }
 
 impl<'t> WordData<'t> {
-    pub fn new<S: Into<Cow<'t, str>>>(lemma: S, pos_id: u16) -> Self {
-        WordData {
-            lemma: lemma.into(),
-            pos_id,
-        }
+    pub fn new(lemma: WordId<'t>, pos_id: u16) -> Self {
+        WordData { lemma, pos_id }
     }
 
     pub fn to_owned_word_data(&self) -> OwnedWordData {
         OwnedWordData {
-            lemma: self.lemma.to_string(),
+            lemma: self.lemma.to_owned_id(),
             pos_id: self.pos_id,
         }
     }
@@ -32,12 +67,12 @@ impl<'t> WordData<'t> {
 /// An owned version of [WordData] for serialization and use in longer-living structures e. g. rule tests.
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct OwnedWordData {
-    pub lemma: String,
+    pub lemma: OwnedWordId,
     pub pos_id: u16,
 }
 
 impl OwnedWordData {
-    pub fn new(lemma: String, pos_id: u16) -> Self {
+    pub fn new(lemma: OwnedWordId, pos_id: u16) -> Self {
         OwnedWordData { lemma, pos_id }
     }
 }
@@ -46,18 +81,18 @@ impl OwnedWordData {
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word<'t> {
-    pub text: &'t str,
+    pub text: WordId<'t>,
     pub tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Word<'t> {
-    pub fn new_with_tags(text: &'t str, tags: Vec<WordData<'t>>) -> Self {
+    pub fn new_with_tags(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
         Word { text, tags }
     }
 
     pub fn to_owned_word(&self) -> OwnedWord {
         OwnedWord {
-            text: self.text.to_string(),
+            text: self.text.to_owned_id(),
             tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
         }
     }
@@ -66,7 +101,7 @@ impl<'t> Word<'t> {
 /// An owned version of [Word] for serialization and use in longer-living structures e. g. rule tests.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OwnedWord {
-    pub text: String,
+    pub text: OwnedWordId,
     pub tags: Vec<OwnedWordData>,
 }
 
@@ -83,12 +118,6 @@ pub struct IncompleteToken<'t> {
     pub text: &'t str,
     #[derivative(PartialEq = "ignore", Debug = "ignore")]
     pub tagger: &'t Tagger,
-}
-
-impl<'t> AsRef<str> for IncompleteToken<'t> {
-    fn as_ref(&self) -> &str {
-        self.word.text
-    }
 }
 
 /// A finished token with all information set.
@@ -115,21 +144,18 @@ pub struct OwnedToken {
     pub chunks: Vec<String>,
 }
 
-impl<'t> AsRef<str> for Token<'t> {
-    fn as_ref(&self) -> &str {
-        self.word.text
-    }
-}
-
 impl<'t> Token<'t> {
     /// Get the special sentence start token.
     pub fn sent_start(text: &'t str, tagger: &'t Tagger) -> Self {
         Token {
             word: Word::new_with_tags(
-                "",
-                vec![WordData::new("", tagger.tag_to_id("SENT_START"))]
-                    .into_iter()
-                    .collect(),
+                tagger.id_word("".into()),
+                vec![WordData::new(
+                    tagger.id_word("".into()),
+                    tagger.tag_to_id("SENT_START"),
+                )]
+                .into_iter()
+                .collect(),
             ),
             char_span: (0, 0),
             byte_span: (0, 0),
@@ -155,8 +181,10 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
     fn from(data: IncompleteToken<'t>) -> Self {
         let mut word = data.word.clone();
 
-        word.tags
-            .push(WordData::new(data.word.text, data.tagger.tag_to_id("")));
+        word.tags.push(WordData::new(
+            data.word.text.clone(),
+            data.tagger.tag_to_id(""),
+        ));
 
         if word
             .tags
@@ -164,7 +192,7 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             .all(|x| data.tagger.id_to_tag(x.pos_id).is_empty())
         {
             word.tags.push(WordData::new(
-                data.word.text,
+                data.word.text.clone(),
                 data.tagger.tag_to_id("UNKNOWN"),
             ));
         }

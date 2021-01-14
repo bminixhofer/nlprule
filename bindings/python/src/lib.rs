@@ -271,7 +271,12 @@ impl PyTagger {
                 self.options.use_compound_split_heuristic,
             )
             .into_iter()
-            .map(|x| (x.lemma.to_string(), self.tagger.id_to_tag(x.pos_id)))
+            .map(|x| {
+                (
+                    x.lemma.as_ref().to_string(),
+                    self.tagger.id_to_tag(x.pos_id),
+                )
+            })
             .collect()
     }
 
@@ -316,7 +321,7 @@ impl PyToken {
 impl PyToken {
     #[getter]
     fn text(&self) -> &str {
-        &self.token.word.text
+        self.token.word.text.as_ref()
     }
 
     #[getter]
@@ -330,7 +335,7 @@ impl PyToken {
             .word
             .tags
             .iter()
-            .map(|x| (x.lemma.as_str(), self.tagger.id_to_tag(x.pos_id)))
+            .map(|x| (x.lemma.as_ref(), self.tagger.id_to_tag(x.pos_id)))
             .collect()
     }
 
@@ -342,10 +347,10 @@ impl PyToken {
             .tags
             .iter()
             .filter_map(|x| {
-                if x.lemma.is_empty() {
+                if x.lemma.as_ref().is_empty() {
                     None
                 } else {
-                    Some(x.lemma.as_str())
+                    Some(x.lemma.as_ref())
                 }
             })
             .collect();

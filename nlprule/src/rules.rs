@@ -1,12 +1,11 @@
 //! Sets of grammatical error correction rules.
 
-use crate::rule::{Cache, Rule};
+use crate::rule::Rule;
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
     fs::File,
     io::{BufReader, Read},
     path::Path,
@@ -39,7 +38,6 @@ impl Default for RulesOptions {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     rules: Vec<Rule>,
-    cache: Cache,
 }
 
 impl Rules {
@@ -92,10 +90,7 @@ impl Rules {
             warn!("Errors constructing Rules: {:#?}", &errors);
         }
 
-        Rules {
-            rules,
-            cache: Cache::default(),
-        }
+        Rules { rules }
     }
 
     /// Creates a new rules set from a file.
@@ -107,14 +102,6 @@ impl Rules {
     /// Creates a new rules set from a reader.
     pub fn new_from<R: Read>(reader: R) -> bincode::Result<Self> {
         bincode::deserialize_from(reader)
-    }
-
-    /// Populates the cache of the rule set by checking whether the rules can match on a common set of words.
-    pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
-        self.cache.populate(
-            common_words,
-            &self.rules.iter().map(|x| &x.engine).collect::<Vec<_>>(),
-        );
     }
 
     pub fn rules(&self) -> &Vec<Rule> {
@@ -133,10 +120,9 @@ impl Rules {
             .enumerate()
             .filter(|(_, x)| x.on())
             .map(|(i, rule)| {
-                let skip_mask = self.cache.get_skip_mask(tokens, i);
                 let mut output = Vec::new();
 
-                for suggestion in rule.apply(tokens, Some(&skip_mask), tokenizer) {
+                for suggestion in rule.apply(tokens, tokenizer) {
                     output.push((i, suggestion));
                 }
 

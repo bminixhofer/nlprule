@@ -1,12 +1,10 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
+use fnv::FnvHashMap;
+use fnv::FnvHasher;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use super::IncompleteToken;
 
@@ -128,7 +126,7 @@ mod structure {
     #[derive(Serialize, Deserialize)]
     struct ModelData {
         outcome_labels: Vec<String>,
-        pmap: HashMap<String, Context>,
+        pmap: FnvHashMap<String, Context>,
     }
 
     impl From<ModelData> for Model {
@@ -139,7 +137,7 @@ mod structure {
                     .pmap
                     .into_iter()
                     .map(|(key, value)| (hash::hash_str(&key), value))
-                    .collect(),
+                    .collect::<FnvHashMap<_, _>>(),
             }
         }
     }
@@ -150,7 +148,7 @@ mod structure {
         struct ChunkData {
             token_model: ModelData,
             pos_model: ModelData,
-            pos_tagdict: HashMap<String, Vec<String>>,
+            pos_tagdict: FnvHashMap<String, Vec<String>>,
             chunk_model: ModelData,
         }
 
@@ -176,7 +174,7 @@ pub use structure::from_json;
 #[derive(Serialize, Deserialize)]
 struct Model {
     outcome_labels: Vec<String>,
-    pmap: HashMap<u64, Context>,
+    pmap: FnvHashMap<u64, Context>,
 }
 
 impl Model {
@@ -223,7 +221,7 @@ impl Model {
         let mut next: BinaryHeap<Sequence> = BinaryHeap::new();
         prev.push(Sequence::default());
 
-        let mut cache: HashMap<u64, Vec<f32>> = HashMap::new();
+        let mut cache: FnvHashMap<u64, Vec<f32>> = FnvHashMap::default();
 
         for i in 0..tokens.len() {
             while prev.len() > size {
@@ -407,7 +405,7 @@ impl MaxentTokenizer {
 #[derive(Serialize, Deserialize)]
 struct MaxentPosTagger {
     model: Model,
-    tagdict: HashMap<String, Vec<String>>,
+    tagdict: FnvHashMap<String, Vec<String>>,
 }
 
 impl MaxentPosTagger {
@@ -437,7 +435,7 @@ impl MaxentPosTagger {
     }
 
     fn hash(tags: &[&str], i: usize) -> u64 {
-        let mut s = DefaultHasher::new();
+        let mut s = FnvHasher::default();
         if i >= 1 {
             tags[i - 1].hash(&mut s);
         }
@@ -551,7 +549,7 @@ impl MaxentChunker {
     }
 
     fn hash(preds: &[&str], i: usize) -> u64 {
-        let mut s = DefaultHasher::new();
+        let mut s = FnvHasher::default();
         if i >= 1 {
             preds[i - 1].hash(&mut s);
         }
@@ -684,7 +682,7 @@ impl Chunker {
         // replacements must not change char indices
         let text = tokens[0].text.replace('’', "\'");
 
-        let mut byte_to_char_idx: HashMap<usize, usize> = text
+        let mut byte_to_char_idx: FnvHashMap<usize, usize> = text
             .char_indices()
             .enumerate()
             .map(|(ci, (bi, _))| (bi, ci))

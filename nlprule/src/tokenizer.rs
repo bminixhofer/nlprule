@@ -23,7 +23,7 @@ pub mod tag;
 use chunk::Chunker;
 use tag::Tagger;
 
-use crate::rule::{Cache, DisambiguationRule};
+use crate::rule::DisambiguationRule;
 
 // see https://stackoverflow.com/a/40296745
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
@@ -129,7 +129,6 @@ pub struct Tokenizer {
     chunker: Option<Chunker>,
     tagger: Arc<Tagger>,
     options: TokenizerOptions,
-    cache: Cache,
 }
 
 impl Tokenizer {
@@ -189,7 +188,6 @@ impl Tokenizer {
             chunker,
             rules,
             options,
-            cache: Cache::default(),
         })
     }
 
@@ -202,14 +200,6 @@ impl Tokenizer {
     /// Creates a new tokenizer from a reader.
     pub fn new_from<R: Read>(reader: R) -> bincode::Result<Self> {
         bincode::deserialize_from(reader)
-    }
-
-    /// Populates the cache of the tokenizer by checking whether the rules can match on a common set of words.
-    pub fn populate_cache(&mut self, common_words: &HashSet<String>) {
-        self.cache.populate(
-            common_words,
-            &self.rules.iter().map(|x| &x.engine).collect::<Vec<_>>(),
-        );
     }
 
     pub fn rules(&self) -> &Vec<DisambiguationRule> {
@@ -244,8 +234,7 @@ impl Tokenizer {
                 .maybe_par_iter()
                 .enumerate()
                 .filter_map(|(j, rule)| {
-                    let skip_mask = self.cache.get_skip_mask(&finalized, j + i);
-                    let changes = rule.apply(&finalized, &self, skip_mask);
+                    let changes = rule.apply(&finalized, &self);
                     if changes.is_empty() {
                         None
                     } else {
@@ -305,7 +294,7 @@ impl Tokenizer {
 
                 IncompleteToken {
                     word: Word::new_with_tags(
-                        trimmed,
+                        self.tagger.id_word(trimmed.into()),
                         self.tagger.get_tags(
                             trimmed,
                             is_sentence_start || self.options.always_add_lower_tags,
@@ -321,7 +310,7 @@ impl Tokenizer {
                     tagger: self.tagger.as_ref(),
                 }
             })
-            .filter(|token| !token.word.text.is_empty())
+            .filter(|token| !token.word.text.as_ref().is_empty())
             .collect();
 
         if !tokens.is_empty() {

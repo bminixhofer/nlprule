@@ -8,7 +8,7 @@ use crate::{
 };
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 mod disambiguation;
 mod engine;
@@ -72,25 +72,8 @@ impl DisambiguationRule {
         self.id = id;
     }
 
-    pub(crate) fn apply<'t>(
-        &'t self,
-        tokens: &[Token<'t>],
-        tokenizer: &Tokenizer,
-        mut skip_mask: Vec<bool>,
-    ) -> Changes {
+    pub(crate) fn apply<'t>(&'t self, tokens: &[Token<'t>], tokenizer: &Tokenizer) -> Changes {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
-            return Changes::default();
-        }
-
-        for (i, val) in skip_mask.iter_mut().enumerate().filter(|(_, x)| !**x) {
-            *val = if let Engine::Token(engine) = &self.engine {
-                engine.composition.can_not_match(tokens[i].as_ref())
-            } else {
-                false
-            };
-        }
-
-        if skip_mask.iter().all(|x| *x) {
             return Changes::default();
         }
 
@@ -98,10 +81,7 @@ impl DisambiguationRule {
 
         let mut all_byte_spans = Vec::new();
 
-        for graph in self
-            .engine
-            .get_matches(&refs, Some(&skip_mask), self.start, self.end)
-        {
+        for graph in self.engine.get_matches(&refs, self.start, self.end) {
             if let Some(filter) = &self.filter {
                 if !filter.keep(&graph, tokenizer) {
                     continue;
@@ -174,7 +154,7 @@ impl DisambiguationRule {
             let tokens_before =
                 tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
             let finalized = finalize(tokens_before.clone());
-            let changes = self.apply(&finalized, tokenizer, vec![false; finalized.len()]);
+            let changes = self.apply(&finalized, tokenizer);
             let mut tokens_after = tokens_before.clone();
             if !changes.is_empty() {
                 self.change(&mut tokens_after, tokenizer, changes);
@@ -209,7 +189,8 @@ impl DisambiguationRule {
                         .iter()
                         .collect::<HashSet<&OwnedWordData>>();
 
-                    after.word.text == change.after.text && unordered_tags == unordered_tags_change
+                    after.word.text == change.after.text.as_ref_id()
+                        && unordered_tags == unordered_tags_change
                 }
             };
 
@@ -288,19 +269,11 @@ impl Rule {
         self.on = on;
     }
 
-    pub(crate) fn apply(
-        &self,
-        tokens: &[Token],
-        skip_mask: Option<&[bool]>,
-        tokenizer: &Tokenizer,
-    ) -> Vec<Suggestion> {
+    pub(crate) fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
         let refs: Vec<&Token> = tokens.iter().collect();
         let mut suggestions = Vec::new();
 
-        for graph in self
-            .engine
-            .get_matches(&refs, skip_mask, self.start, self.end)
-        {
+        for graph in self.engine.get_matches(&refs, self.start, self.end) {
             let start_group = graph
                 .by_id(self.start)
                 .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));
@@ -370,7 +343,7 @@ impl Rule {
         for test in self.tests.iter() {
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens, None, tokenizer);
+            let suggestions = self.apply(&tokens, tokenizer);
 
             let pass = if suggestions.len() > 1 {
                 false
@@ -394,41 +367,5 @@ impl Rule {
         }
 
         passes.iter().all(|x| *x)
-    }
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub(crate) struct Cache {
-    cache: HashMap<String, Vec<bool>>,
-}
-
-impl Cache {
-    pub fn get_skip_mask<S: AsRef<str>>(&self, texts: &[S], i: usize) -> Vec<bool> {
-        texts
-            .iter()
-            .map(|x| {
-                self.cache
-                    .get(x.as_ref())
-                    .map(|mask| mask[i])
-                    .unwrap_or(false)
-            })
-            .collect()
-    }
-
-    pub fn populate(&mut self, common_words: &HashSet<String>, engines: &[&Engine]) {
-        for engine in engines {
-            for word in common_words {
-                let can_not_match = if let Engine::Token(engine) = engine {
-                    engine.composition.can_not_match(&word)
-                } else {
-                    false
-                };
-
-                self.cache
-                    .entry(word.to_string())
-                    .or_insert_with(Vec::new)
-                    .push(can_not_match);
-            }
-        }
     }
 }

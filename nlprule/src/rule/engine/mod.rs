@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use crate::{types::*, utils::regex::SerializeRegex};
+use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
 #[allow(dead_code)]
 pub mod composition;
@@ -54,14 +53,13 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(SerializeRegex, HashMap<usize, usize>),
+    Text(SerializeRegex, FnvHashMap<usize, usize>),
 }
 
 impl Engine {
     pub fn get_matches<'t>(
         &'t self,
         tokens: &'t [&'t Token],
-        skip_mask: Option<&[bool]>,
         start: usize,
         end: usize,
     ) -> Vec<MatchGraph<'t>> {
@@ -71,7 +69,6 @@ impl Engine {
             Engine::Token(engine) => {
                 let mut graph_info: Vec<_> = (0..tokens.len())
                     .into_iter()
-                    .filter(|i| skip_mask.map_or(true, |x| !x[*i]))
                     .filter_map(|i| {
                         if let Some(graph) = engine.get_match(&tokens, i) {
                             let start_group = graph
@@ -104,7 +101,7 @@ impl Engine {
                 // this is the entire text, NOT the text of one token
                 let text = tokens[0].text;
 
-                let mut byte_to_char_idx: HashMap<usize, usize> = text
+                let mut byte_to_char_idx: FnvHashMap<usize, usize> = text
                     .char_indices()
                     .enumerate()
                     .map(|(ci, (bi, _))| (bi, ci))

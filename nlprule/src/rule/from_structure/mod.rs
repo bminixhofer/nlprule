@@ -1,9 +1,8 @@
 use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
+use fnv::FnvHashMap;
 use lazy_static::lazy_static;
 use onig::Regex;
-use std::collections::HashMap;
-
 mod structure;
 
 pub use structure::{read_disambiguation_rules, read_rules};
@@ -99,7 +98,7 @@ fn parse_match_attribs(
         if inflected {
             inflect_matcher = Some(matcher);
         } else {
-            atoms.push(TextAtom::new(matcher).into());
+            atoms.push(TextAtom::new(TextMatcher::new(matcher, tagger)).into());
         }
     }
 
@@ -119,7 +118,10 @@ fn parse_match_attribs(
     }
 
     if pos_matcher.is_some() || inflect_matcher.is_some() {
-        let matcher = WordDataMatcher::new(pos_matcher, inflect_matcher);
+        let matcher = WordDataMatcher::new(
+            pos_matcher,
+            inflect_matcher.map(|x| TextMatcher::new(x, tagger)),
+        );
         atoms.push(WordDataAtom::new(matcher, case_sensitive).into());
     }
 
@@ -638,7 +640,7 @@ impl Rule {
                 };
                 let mark = regex.mark.map_or(0, |x| x.parse().unwrap());
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
-                let id_to_idx: HashMap<usize, usize> =
+                let id_to_idx: FnvHashMap<usize, usize> =
                     (0..regex.captures_len() + 1).enumerate().collect();
                 Ok((Engine::Text(regex, id_to_idx), mark, mark + 1))
             }
@@ -791,20 +793,25 @@ fn parse_tag_form(form: &str, tagger: &Tagger) -> OwnedWord {
                 None
             } else {
                 Some(OwnedWordData::new(
-                    parts[0].to_string(),
+                    tagger.id_word(parts[0].into()).to_owned_id(),
                     tagger.tag_to_id(parts[1]),
                 ))
             }
         })
         .collect();
 
-    OwnedWord { text, tags }
+    OwnedWord {
+        text: tagger.id_word(text.into()).to_owned_id(),
+        tags,
+    }
 }
 
 impl OwnedWordData {
     fn from_structure(data: structure::WordData, tagger: &Tagger) -> Self {
         OwnedWordData::new(
-            data.lemma.unwrap_or_else(String::new),
+            tagger
+                .id_word(data.lemma.unwrap_or_else(String::new).into())
+                .to_owned_id(),
             tagger.tag_to_id(data.pos.as_str().trim()),
         )
     }
@@ -1085,7 +1092,10 @@ impl DisambiguationRule {
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(vec![Some(either::Left(
-                        OwnedWordData::new(String::new(), tagger.tag_to_id(postag)),
+                        OwnedWordData::new(
+                            tagger.id_word("".into()).to_owned_id(),
+                            tagger.tag_to_id(postag),
+                        ),
                     ))]))
                 } else {
                     Ok(Disambiguation::Filter(
