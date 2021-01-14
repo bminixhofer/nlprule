@@ -691,7 +691,10 @@ impl Composition {
             return false;
         }
 
-        let next_required_pos = match self.can_stop_mask[index + 1..].iter().position(|x| !x) {
+        let next_required_pos = match self.parts[index + 1..]
+            .iter()
+            .position(|x| x.quantifier.min > 0)
+        {
             Some(pos) => index + 1 + pos + 1,
             None => self.parts.len(),
         };
