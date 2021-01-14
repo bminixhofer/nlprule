@@ -121,7 +121,7 @@ impl Engine {
                         }
                     }
 
-                    MatchGraph::new(groups, id_to_idx, tokens.to_vec())
+                    MatchGraph::new(groups, id_to_idx, tokens)
                 }));
             }
         }

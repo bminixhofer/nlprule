@@ -1,6 +1,6 @@
 use crate::{
     tokenizer::tag::Tagger,
-    types::{Token, WordId},
+    types::{Token, WordData, WordId},
     utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
 };
 use enum_dispatch::enum_dispatch;
@@ -197,12 +197,15 @@ impl WordDataMatcher {
 
     pub fn is_match(
         &self,
-        input: &[(u16, &WordId)],
+        input: &[WordData],
         graph: &MatchGraph,
         case_sensitive: Option<bool>,
     ) -> bool {
         input.iter().any(|x| {
-            let pos_matches = self.pos_matcher.as_ref().map_or(true, |m| m.is_match(x.0));
+            let pos_matches = self
+                .pos_matcher
+                .as_ref()
+                .map_or(true, |m| m.is_match(x.pos_id));
 
             // matching part-of-speech tag is faster than inflection, so check POS first and early exit if it doesn't match
             if !pos_matches {
@@ -212,7 +215,7 @@ impl WordDataMatcher {
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.1, graph, case_sensitive));
+                .map_or(true, |m| m.is_match(&x.lemma, graph, case_sensitive));
 
             inflect_matches
         })
@@ -319,14 +322,8 @@ pub mod concrete {
         fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
             let tags = &input[position].word.tags;
 
-            self.matcher.is_match(
-                &tags
-                    .iter()
-                    .map(|x| (x.pos_id, &x.lemma))
-                    .collect::<Vec<_>>(),
-                graph,
-                Some(self.case_sensitive),
-            )
+            self.matcher
+                .is_match(&tags, graph, Some(self.case_sensitive))
         }
     }
 
@@ -532,7 +529,7 @@ impl Group {
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
     id_to_idx: &'t FnvHashMap<usize, usize>,
-    tokens: Vec<&'t Token<'t>>,
+    tokens: &'t [&'t Token<'t>],
 }
 
 lazy_static! {
@@ -544,7 +541,7 @@ impl<'t> Default for MatchGraph<'t> {
         MatchGraph {
             groups: Vec::new(),
             id_to_idx: &(*EMPTY_MAP),
-            tokens: Vec::new(),
+            tokens: &[],
         }
     }
 }
@@ -553,7 +550,7 @@ impl<'t> MatchGraph<'t> {
     pub fn new(
         groups: Vec<Group>,
         id_to_idx: &'t FnvHashMap<usize, usize>,
-        tokens: Vec<&'t Token<'t>>,
+        tokens: &'t [&'t Token<'t>],
     ) -> Self {
         MatchGraph {
             groups,
@@ -683,9 +680,9 @@ impl Composition {
         }
     }
 
-    fn next_can_match(
+    fn next_can_match<'t>(
         &self,
-        tokens: &[&Token],
+        tokens: &'t [&'t Token<'t>],
         graph: &MatchGraph,
         position: usize,
         index: usize,
@@ -694,10 +691,7 @@ impl Composition {
             return false;
         }
 
-        let next_required_pos = match self.parts[index + 1..]
-            .iter()
-            .position(|x| x.quantifier.min > 0)
-        {
+        let next_required_pos = match self.can_stop_mask[index + 1..].iter().position(|x| !x) {
             Some(pos) => index + 1 + pos + 1,
             None => self.parts.len(),
         };
@@ -707,7 +701,11 @@ impl Composition {
             .any(|x| x.atom.is_match(tokens, graph, position))
     }
 
-    pub fn apply<'t>(&'t self, tokens: &[&'t Token<'t>], start: usize) -> Option<MatchGraph<'t>> {
+    pub fn apply<'t>(
+        &'t self,
+        tokens: &'t [&'t Token<'t>],
+        start: usize,
+    ) -> Option<MatchGraph<'t>> {
         // this path is extremely hot so more optimizations are done
 
         // the first matcher can never rely on the match graph, so we use an empty default graph for the first match
@@ -729,7 +727,7 @@ impl Composition {
         let mut graph = MatchGraph::new(
             vec![Group::default(); self.parts.len() + 1],
             &self.group_ids_to_idx,
-            tokens.to_vec(),
+            tokens,
         );
 
         let mut is_match = loop {
