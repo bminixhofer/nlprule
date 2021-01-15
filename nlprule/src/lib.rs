@@ -42,6 +42,8 @@
 //! Almost all structures with a lifetime are bound to this lifetime.
 use thiserror::Error;
 
+#[cfg(feature = "compile")]
+pub mod compile;
 mod filter;
 pub mod rule;
 pub mod rules;

@@ -46,14 +46,10 @@ pub struct Test {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PosReplacer {
-    matcher: PosMatcher,
+    pub(crate) matcher: PosMatcher,
 }
 
 impl PosReplacer {
-    pub fn new(matcher: PosMatcher) -> Self {
-        PosReplacer { matcher }
-    }
-
     fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
         let mut candidates: Vec<_> = tokenizer
             .tagger()
@@ -98,10 +94,10 @@ impl PosReplacer {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Match {
-    id: usize,
-    conversion: Conversion,
-    pos_replacer: Option<PosReplacer>,
-    regex_replacer: Option<(SerializeRegex, String)>,
+    pub(crate) id: usize,
+    pub(crate) conversion: Conversion,
+    pub(crate) pos_replacer: Option<PosReplacer>,
+    pub(crate) regex_replacer: Option<(SerializeRegex, String)>,
 }
 
 impl Match {
@@ -127,20 +123,6 @@ impl Match {
 
         // TODO: maybe return a vector here and propagate accordingly
         Some(self.conversion.convert(&text))
-    }
-
-    pub fn new(
-        id: usize,
-        conversion: Conversion,
-        pos_replacer: Option<PosReplacer>,
-        regex_replacer: Option<(SerializeRegex, String)>,
-    ) -> Self {
-        Match {
-            id,
-            conversion,
-            pos_replacer,
-            regex_replacer,
-        }
     }
 
     fn has_conversion(&self) -> bool {

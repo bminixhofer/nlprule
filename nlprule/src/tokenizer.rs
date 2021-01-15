@@ -125,72 +125,13 @@ impl Default for TokenizerOptions {
 /// The complete Tokenizer doing tagging, chunking and disambiguation.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tokenizer {
-    rules: Vec<DisambiguationRule>,
-    chunker: Option<Chunker>,
-    tagger: Arc<Tagger>,
-    options: TokenizerOptions,
+    pub(crate) rules: Vec<DisambiguationRule>,
+    pub(crate) chunker: Option<Chunker>,
+    pub(crate) tagger: Arc<Tagger>,
+    pub(crate) options: TokenizerOptions,
 }
 
 impl Tokenizer {
-    /// Creates a Tokenizer from a path to an XML file containing disambiguation rules.
-    #[cfg(feature = "compile")]
-    pub fn from_xml<P: AsRef<std::path::Path>>(
-        path: P,
-        build_info: &mut crate::rule::BuildInfo,
-        chunker: Option<Chunker>,
-        options: TokenizerOptions,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        use log::warn;
-
-        let rules = crate::rule::read_disambiguation_rules(path);
-        let mut error = None;
-
-        let rules: Vec<_> = rules
-            .into_iter()
-            .filter_map(|x| match x {
-                Ok((rule_structure, id)) => {
-                    match DisambiguationRule::from_rule_structure(rule_structure, build_info) {
-                        Ok(mut rule) => {
-                            if error.is_none()
-                                && (options.ids.is_empty() || options.ids.contains(&id))
-                                && !options.ignore_ids.contains(&id)
-                            {
-                                rule.set_id(id);
-
-                                Some(rule)
-                            } else {
-                                None
-                            }
-                        }
-                        Err(x) => {
-                            error = Some(format!("[Rule] {}", x));
-                            None
-                        }
-                    }
-                }
-                Err(x) => {
-                    error = Some(format!("[Structure] {}", x));
-                    None
-                }
-            })
-            .collect();
-
-        if let Some(x) = error {
-            if options.allow_errors {
-                warn!("Error constructing Disambiguator: {}", x)
-            } else {
-                return Err(format!("Error constructing Disambiguator: {}", x).into());
-            }
-        }
-
-        Ok(Tokenizer {
-            tagger: build_info.tagger().clone(),
-            chunker,
-            rules,
-            options,
-        })
-    }
-
     /// Creates a new tokenizer from a file.
     pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
         let reader = BufReader::new(File::open(p).unwrap());

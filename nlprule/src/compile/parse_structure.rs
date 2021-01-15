@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
+use super::structure;
 use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
 use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
-mod structure;
 
 pub use structure::{read_disambiguation_rules, read_rules};
 
-use super::disambiguation::*;
-use super::engine::composition::concrete::*;
-use super::engine::composition::*;
-use super::engine::*;
-use super::grammar::*;
-use super::{DisambiguationRule, Rule};
+use crate::rule::disambiguation::*;
+use crate::rule::engine::composition::concrete::*;
+use crate::rule::engine::composition::*;
+use crate::rule::engine::*;
+use crate::rule::grammar::*;
+use crate::rule::{DisambiguationRule, Rule};
 
 // TODO: should be an option in config OR restricted to one sentence
 fn max_matches() -> usize {
@@ -155,7 +155,12 @@ fn parse_match_attribs(
         if inflected {
             inflect_matcher = Some(matcher);
         } else {
-            atoms.push(TextAtom::new(TextMatcher::new(matcher, info)).into());
+            atoms.push(
+                (TextAtom {
+                    matcher: TextMatcher::new(matcher, info),
+                })
+                .into(),
+            );
         }
     }
 
@@ -175,26 +180,36 @@ fn parse_match_attribs(
     }
 
     if pos_matcher.is_some() || inflect_matcher.is_some() {
-        let matcher = WordDataMatcher::new(
+        let matcher = WordDataMatcher {
             pos_matcher,
-            inflect_matcher.map(|x| TextMatcher::new(x, info)),
+            inflect_matcher: inflect_matcher.map(|x| TextMatcher::new(x, info)),
+        };
+        atoms.push(
+            (WordDataAtom {
+                matcher,
+                case_sensitive,
+            })
+            .into(),
         );
-        atoms.push(WordDataAtom::new(matcher, case_sensitive).into());
     }
 
     match (attribs.chunk(), attribs.chunk_re()) {
         (Some(chunk), None) => {
-            let chunk_atom = ChunkAtom::new(Matcher::new_string(
-                either::Left(chunk.trim().to_string()),
-                false,
-                true,
-                true,
-            ));
+            let chunk_atom = ChunkAtom {
+                matcher: Matcher::new_string(
+                    either::Left(chunk.trim().to_string()),
+                    false,
+                    true,
+                    true,
+                ),
+            };
             atoms.push(chunk_atom.into());
         }
         (None, Some(chunk_re)) => {
             let regex = SerializeRegex::new(chunk_re.trim(), true, true)?;
-            let chunk_atom = ChunkAtom::new(Matcher::new_regex(regex, false, true));
+            let chunk_atom = ChunkAtom {
+                matcher: Matcher::new_regex(regex, false, true),
+            };
             atoms.push(chunk_atom.into());
         }
         (None, None) => {}
@@ -202,12 +217,9 @@ fn parse_match_attribs(
     }
 
     if let Some(chunk) = attribs.chunk() {
-        let chunk_atom = ChunkAtom::new(Matcher::new_string(
-            either::Left(chunk.trim().to_string()),
-            false,
-            true,
-            true,
-        ));
+        let chunk_atom = ChunkAtom {
+            matcher: Matcher::new_string(either::Left(chunk.trim().to_string()), false, true, true),
+        };
 
         atoms.push(chunk_atom.into());
     }
@@ -219,7 +231,7 @@ fn parse_match_attribs(
             _ => panic!("unknown spacebefore value {}", space_before),
         };
 
-        atoms.push(SpaceBeforeAtom::new(value).into());
+        atoms.push((SpaceBeforeAtom { value }).into());
     }
 
     Ok(AndAtom::and(atoms))
@@ -332,7 +344,11 @@ fn parse_token(
         get_exceptions(token, case_sensitive, false, info)?,
     ]);
 
-    parts.push(Part::new(atom, quantifier, true));
+    parts.push(Part {
+        atom,
+        quantifier,
+        visible: true,
+    });
 
     if let Some(to_skip) = token.skip.clone() {
         let to_skip = if to_skip == "-1" {
@@ -341,11 +357,11 @@ fn parse_token(
             to_skip.parse().expect("can't parse skip as usize or -1")
         };
 
-        parts.push(Part::new(
-            get_exceptions(token, case_sensitive, true, info)?,
-            Quantifier::new(0, to_skip),
-            false,
-        ));
+        parts.push(Part {
+            atom: get_exceptions(token, case_sensitive, true, info)?,
+            quantifier: Quantifier::new(0, to_skip),
+            visible: false,
+        });
     }
 
     Ok(parts)
@@ -405,7 +421,9 @@ fn parse_match(
             None => Matcher::new_string(either::Left(postag), false, false, true),
             x => panic!("unknown postag_regex value {:?}", x),
         };
-        Some(PosReplacer::new(PosMatcher::new(matcher, info)))
+        Some(PosReplacer {
+            matcher: PosMatcher::new(matcher, info),
+        })
     } else {
         None
     };
@@ -418,9 +436,9 @@ fn parse_match(
         _ => None,
     };
 
-    Ok(Match::new(
+    Ok(Match {
         id,
-        match case_conversion {
+        conversion: match case_conversion {
             Some("alllower") => Conversion::AllLower,
             Some("startlower") => Conversion::StartLower,
             Some("startupper") => Conversion::StartUpper,
@@ -435,7 +453,7 @@ fn parse_match(
         },
         pos_replacer,
         regex_replacer,
-    ))
+    })
 }
 
 fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
@@ -459,12 +477,12 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
-        parts.push(SynthesizerPart::Match(Match::new(
-            index,
-            Conversion::Nop,
-            None,
-            None,
-        )));
+        parts.push(SynthesizerPart::Match(Match {
+            id: index,
+            conversion: Conversion::Nop,
+            pos_replacer: None,
+            regex_replacer: None,
+        }));
         end_index = end;
     }
 
@@ -538,11 +556,19 @@ fn parse_unify_tokens(
             structure::UnifyTokenCombination::And(tokens) => {
                 let atom =
                     AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part::new(atom, Quantifier::new(1, 1), true)]
+                vec![Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                }]
             }
             structure::UnifyTokenCombination::Or(tokens) => {
                 let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part::new(atom, Quantifier::new(1, 1), true)]
+                vec![Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                }]
             }
             structure::UnifyTokenCombination::Feature(_) => vec![],
             structure::UnifyTokenCombination::Ignore(ignore) => {
@@ -567,11 +593,19 @@ fn parse_tokens(
             structure::TokenCombination::And(tokens) => {
                 let atom =
                     AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part::new(atom, Quantifier::new(1, 1), true)]
+                vec![Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                }]
             }
             structure::TokenCombination::Or(tokens) => {
                 let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part::new(atom, Quantifier::new(1, 1), true)]
+                vec![Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                }]
             }
             structure::TokenCombination::Unify(unify) => {
                 parse_unify_tokens(&unify.tokens, case_sensitive, info)?
@@ -611,12 +645,20 @@ fn parse_pattern(
                 let atom =
                     AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
-                composition_parts.push(Part::new(atom, Quantifier::new(1, 1), true));
+                composition_parts.push(Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                });
             }
             structure::PatternPart::Or(tokens) => {
                 let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
-                composition_parts.push(Part::new(atom, Quantifier::new(1, 1), true));
+                composition_parts.push(Part {
+                    atom,
+                    quantifier: Quantifier::new(1, 1),
+                    visible: true,
+                });
             }
             structure::PatternPart::Unify(unify) => {
                 composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive, info)?)

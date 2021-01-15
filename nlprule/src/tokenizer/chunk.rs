@@ -20,7 +20,7 @@ fn softmax(vec: &mut Vec<f32>) {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Context {
+pub(crate) struct Context {
     parameters: Vec<f32>,
     outcomes: Vec<usize>,
 }
@@ -83,7 +83,7 @@ impl<'a> Sequence<'a> {
     }
 }
 
-mod hash {
+pub(crate) mod hash {
     use std::{
         collections::hash_map::DefaultHasher,
         hash::{Hash, Hasher},
@@ -120,61 +120,10 @@ mod hash {
     }
 }
 
-mod structure {
-    use super::*;
-
-    #[derive(Serialize, Deserialize)]
-    struct ModelData {
-        outcome_labels: Vec<String>,
-        pmap: FnvHashMap<String, Context>,
-    }
-
-    impl From<ModelData> for Model {
-        fn from(data: ModelData) -> Self {
-            Model {
-                outcome_labels: data.outcome_labels,
-                pmap: data
-                    .pmap
-                    .into_iter()
-                    .map(|(key, value)| (hash::hash_str(&key), value))
-                    .collect::<FnvHashMap<_, _>>(),
-            }
-        }
-    }
-
-    #[cfg(feature = "compile")]
-    pub fn from_json<R: std::io::Read>(reader: R) -> Chunker {
-        #[derive(Serialize, Deserialize)]
-        struct ChunkData {
-            token_model: ModelData,
-            pos_model: ModelData,
-            pos_tagdict: FnvHashMap<String, Vec<String>>,
-            chunk_model: ModelData,
-        }
-
-        let chunk_data: ChunkData = serde_json::from_reader(reader).unwrap();
-        Chunker {
-            token_model: MaxentTokenizer {
-                model: chunk_data.token_model.into(),
-            },
-            pos_model: MaxentPosTagger {
-                model: chunk_data.pos_model.into(),
-                tagdict: chunk_data.pos_tagdict,
-            },
-            chunk_model: MaxentChunker {
-                model: chunk_data.chunk_model.into(),
-            },
-        }
-    }
-}
-
-#[cfg(feature = "compile")]
-pub use structure::from_json;
-
 #[derive(Serialize, Deserialize)]
-struct Model {
-    outcome_labels: Vec<String>,
-    pmap: FnvHashMap<u64, Context>,
+pub(crate) struct Model {
+    pub(crate) outcome_labels: Vec<String>,
+    pub(crate) pmap: FnvHashMap<u64, Context>,
 }
 
 impl Model {
@@ -273,8 +222,8 @@ impl Model {
 }
 
 #[derive(Serialize, Deserialize)]
-struct MaxentTokenizer {
-    model: Model,
+pub(crate) struct MaxentTokenizer {
+    pub(crate) model: Model,
 }
 
 impl MaxentTokenizer {
@@ -403,9 +352,9 @@ impl MaxentTokenizer {
 }
 
 #[derive(Serialize, Deserialize)]
-struct MaxentPosTagger {
-    model: Model,
-    tagdict: FnvHashMap<String, Vec<String>>,
+pub(crate) struct MaxentPosTagger {
+    pub(crate) model: Model,
+    pub(crate) tagdict: FnvHashMap<String, Vec<String>>,
 }
 
 impl MaxentPosTagger {
@@ -529,8 +478,8 @@ impl MaxentPosTagger {
 }
 
 #[derive(Serialize, Deserialize)]
-struct MaxentChunker {
-    model: Model,
+pub(crate) struct MaxentChunker {
+    pub(crate) model: Model,
 }
 
 impl MaxentChunker {
@@ -671,9 +620,9 @@ impl MaxentChunker {
 /// Grammatical number (i. e. singular and plural) is also assigned through the part-of-speech tags of the tokens.
 #[derive(Serialize, Deserialize)]
 pub struct Chunker {
-    token_model: MaxentTokenizer,
-    pos_model: MaxentPosTagger,
-    chunk_model: MaxentChunker,
+    pub(crate) token_model: MaxentTokenizer,
+    pub(crate) pos_model: MaxentPosTagger,
+    pub(crate) chunk_model: MaxentChunker,
 }
 
 impl Chunker {

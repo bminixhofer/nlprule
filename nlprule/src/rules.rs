@@ -37,62 +37,10 @@ impl Default for RulesOptions {
 /// A set of grammatical error correction rules.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
-    rules: Vec<Rule>,
+    pub(crate) rules: Vec<Rule>,
 }
 
 impl Rules {
-    /// Creates a rule set from a path to an XML file containing grammar rules.
-    #[cfg(feature = "compile")]
-    pub fn from_xml<P: AsRef<std::path::Path>>(
-        path: P,
-        build_info: &mut crate::rule::BuildInfo,
-        options: RulesOptions,
-    ) -> Self {
-        use log::warn;
-        use std::collections::HashMap;
-
-        let rules = crate::rule::read_rules(path);
-        let mut errors: HashMap<String, usize> = HashMap::new();
-
-        let rules: Vec<_> = rules
-            .into_iter()
-            .filter_map(|x| match x {
-                Ok((rule_structure, id, on)) => {
-                    match Rule::from_rule_structure(rule_structure, build_info) {
-                        Ok(mut rule) => {
-                            if (options.ids.is_empty() || options.ids.contains(&id))
-                                && !options.ignore_ids.contains(&id)
-                            {
-                                rule.set_id(id);
-                                rule.set_on(on);
-                                Some(rule)
-                            } else {
-                                None
-                            }
-                        }
-                        Err(x) => {
-                            *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
-                            None
-                        }
-                    }
-                }
-                Err(x) => {
-                    *errors.entry(format!("[Structure] {}", x)).or_insert(0) += 1;
-                    None
-                }
-            })
-            .collect();
-
-        if !errors.is_empty() {
-            let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
-            errors.sort_by_key(|x| -(x.1 as i32));
-
-            warn!("Errors constructing Rules: {:#?}", &errors);
-        }
-
-        Rules { rules }
-    }
-
     /// Creates a new rules set from a file.
     pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
         let reader = BufReader::new(File::open(p).unwrap());

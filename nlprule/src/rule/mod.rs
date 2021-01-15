@@ -4,20 +4,15 @@ use crate::types::*;
 use crate::{
     filter::{Filter, Filterable},
     tokenizer::{finalize, Tokenizer},
-    utils::{self},
+    utils,
 };
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-mod disambiguation;
-mod engine;
-#[cfg(feature = "compile")]
-mod from_structure;
-#[cfg(feature = "compile")]
-pub use from_structure::{read_disambiguation_rules, read_rules, BuildInfo, RegexCache};
-#[allow(dead_code)]
-mod grammar;
+pub(crate) mod disambiguation;
+pub(crate) mod engine;
+pub(crate) mod grammar;
 
 use engine::Engine;
 
@@ -65,11 +60,6 @@ impl DisambiguationRule {
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &str {
         self.id.as_str()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_id(&mut self, id: String) {
-        self.id = id;
     }
 
     pub(crate) fn apply<'t>(&'t self, tokens: &[Token<'t>], tokenizer: &Tokenizer) -> Changes {
@@ -252,11 +242,6 @@ impl Rule {
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &str {
         self.id.as_str()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_id(&mut self, id: String) {
-        self.id = id;
     }
 
     /// Get whether this rule is "turned on" i. e. whether it should be used by the rule set.

@@ -6,15 +6,10 @@ use super::engine::composition::PosMatcher;
 
 #[derive(Serialize, Deserialize)]
 pub struct POSFilter {
-    matcher: PosMatcher,
+    pub matcher: PosMatcher,
 }
 
 impl POSFilter {
-    #[allow(dead_code)]
-    pub fn new(matcher: PosMatcher) -> Self {
-        POSFilter { matcher }
-    }
-
     fn is_word_data_match(&self, data: &WordData) -> bool {
         self.matcher.is_match(data.pos_id)
     }

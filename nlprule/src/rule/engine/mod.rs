@@ -1,7 +1,6 @@
 use crate::{types::*, utils::regex::SerializeRegex};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
-#[allow(dead_code)]
 pub mod composition;
 
 use composition::{Composition, Group, MatchGraph};

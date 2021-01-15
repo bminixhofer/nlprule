@@ -1,47 +1,22 @@
-use std::hash::{Hash, Hasher};
-
 use crate::{
     types::{Token, WordData, WordId},
-    utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
+    utils::regex::SerializeRegex,
 };
 use enum_dispatch::enum_dispatch;
+use fnv::FnvHashMap;
 use fnv::FnvHashSet;
-use fnv::{FnvHashMap, FnvHasher};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
-    negate: bool,
-    case_sensitive: bool,
-    empty_always_false: bool,
+    pub matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
+    pub negate: bool,
+    pub case_sensitive: bool,
+    pub empty_always_false: bool,
 }
 
 impl Matcher {
-    pub fn new_regex(regex: SerializeRegex, negate: bool, empty_always_false: bool) -> Self {
-        Matcher {
-            matcher: either::Right(regex),
-            negate,
-            case_sensitive: true, // handled by regex
-            empty_always_false,
-        }
-    }
-
-    pub fn new_string(
-        string_or_idx: either::Either<String, usize>,
-        negate: bool,
-        case_sensitive: bool,
-        empty_always_false: bool,
-    ) -> Self {
-        Matcher {
-            matcher: either::Left(string_or_idx),
-            negate,
-            case_sensitive,
-            empty_always_false,
-        }
-    }
-
     pub fn is_slice_match<S: AsRef<str>>(
         &self,
         input: &[S],
@@ -51,10 +26,6 @@ impl Matcher {
         input
             .iter()
             .any(|x| self.is_match(x.as_ref(), graph, case_sensitive))
-    }
-
-    fn needs_graph(&self) -> bool {
-        matches!(&self.matcher, either::Left(either::Right(_)))
     }
 
     pub fn is_match(&self, input: &str, graph: &MatchGraph, case_sensitive: Option<bool>) -> bool {
@@ -99,54 +70,11 @@ impl Matcher {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TextMatcher {
-    matcher: Matcher,
-    set: Option<FnvHashSet<u32>>,
+    pub matcher: Matcher,
+    pub set: Option<FnvHashSet<u32>>,
 }
 
 impl TextMatcher {
-    #[cfg(feature = "compile")]
-    pub fn new(matcher: Matcher, info: &mut crate::rule::BuildInfo) -> Self {
-        let graph = MatchGraph::default();
-
-        let set = if matcher.needs_graph() {
-            None
-        } else if let either::Right(regex) = &matcher.matcher {
-            let mut hasher = FnvHasher::default();
-            regex.hash(&mut hasher);
-            matcher.negate.hash(&mut hasher);
-            matcher.empty_always_false.hash(&mut hasher);
-            let matcher_hash = hasher.finish();
-
-            if let Some(set) = info.mut_regex_cache().get(&matcher_hash) {
-                set.clone()
-            } else {
-                let data: Vec<_> = info.tagger().word_store().iter().collect();
-
-                let set: FnvHashSet<u32> = data
-                    .into_maybe_par_iter()
-                    .filter_map(|(word, id)| {
-                        if matcher.is_match(word.as_str(), &graph, None) {
-                            Some(*id)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // there are some regexes which match lots of strings
-                // this cutoff is pretty arbitrary but without any threshold the size of some sets blows up
-                // the vast majority of regexes matches less than 100 strings from manual inspection
-                let set = if set.len() > 100 { None } else { Some(set) };
-                info.mut_regex_cache().insert(matcher_hash, set.clone());
-                set
-            }
-        } else {
-            None
-        };
-
-        TextMatcher { matcher, set }
-    }
-
     pub fn is_match(
         &self,
         word_id: &WordId,
@@ -170,22 +98,10 @@ impl TextMatcher {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PosMatcher {
-    mask: Vec<bool>,
+    pub mask: Vec<bool>,
 }
 
 impl PosMatcher {
-    #[cfg(feature = "compile")]
-    pub fn new(matcher: Matcher, info: &mut crate::rule::BuildInfo) -> Self {
-        let mut mask = vec![false; info.tagger().tag_store().len()];
-        let graph = MatchGraph::default();
-
-        for (word, id) in info.tagger().tag_store().iter() {
-            mask[*id as usize] = matcher.is_match(word.as_str(), &graph, None);
-        }
-
-        PosMatcher { mask }
-    }
-
     pub fn is_match(&self, pos_id: u16) -> bool {
         self.mask[pos_id as usize]
     }
@@ -193,18 +109,11 @@ impl PosMatcher {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WordDataMatcher {
-    pos_matcher: Option<PosMatcher>,
-    inflect_matcher: Option<TextMatcher>,
+    pub(crate) pos_matcher: Option<PosMatcher>,
+    pub(crate) inflect_matcher: Option<TextMatcher>,
 }
 
 impl WordDataMatcher {
-    pub fn new(pos_matcher: Option<PosMatcher>, inflect_matcher: Option<TextMatcher>) -> Self {
-        WordDataMatcher {
-            pos_matcher,
-            inflect_matcher,
-        }
-    }
-
     pub fn is_match(
         &self,
         input: &[WordData],
@@ -238,13 +147,6 @@ pub struct Quantifier {
     pub max: usize,
 }
 
-impl Quantifier {
-    pub fn new(min: usize, max: usize) -> Self {
-        assert!(max >= min);
-        Quantifier { min, max }
-    }
-}
-
 #[enum_dispatch]
 pub trait Atomable: Send + Sync {
     fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool;
@@ -271,7 +173,7 @@ pub mod concrete {
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TextAtom {
-        matcher: TextMatcher,
+        pub(crate) matcher: TextMatcher,
     }
 
     impl Atomable for TextAtom {
@@ -281,15 +183,9 @@ pub mod concrete {
         }
     }
 
-    impl TextAtom {
-        pub fn new(matcher: TextMatcher) -> Self {
-            TextAtom { matcher }
-        }
-    }
-
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ChunkAtom {
-        matcher: Matcher,
+        pub(crate) matcher: Matcher,
     }
 
     impl Atomable for ChunkAtom {
@@ -299,15 +195,9 @@ pub mod concrete {
         }
     }
 
-    impl ChunkAtom {
-        pub fn new(matcher: Matcher) -> Self {
-            ChunkAtom { matcher }
-        }
-    }
-
     #[derive(Debug, Serialize, Deserialize)]
     pub struct SpaceBeforeAtom {
-        value: bool,
+        pub(crate) value: bool,
     }
 
     impl Atomable for SpaceBeforeAtom {
@@ -316,16 +206,10 @@ pub mod concrete {
         }
     }
 
-    impl SpaceBeforeAtom {
-        pub fn new(value: bool) -> Self {
-            SpaceBeforeAtom { value }
-        }
-    }
-
     #[derive(Debug, Serialize, Deserialize)]
     pub struct WordDataAtom {
-        matcher: WordDataMatcher,
-        case_sensitive: bool,
+        pub(crate) matcher: WordDataMatcher,
+        pub(crate) case_sensitive: bool,
     }
 
     impl Atomable for WordDataAtom {
@@ -336,18 +220,9 @@ pub mod concrete {
                 .is_match(&tags, graph, Some(self.case_sensitive))
         }
     }
-
-    impl WordDataAtom {
-        pub fn new(matcher: WordDataMatcher, case_sensitive: bool) -> Self {
-            WordDataAtom {
-                matcher,
-                case_sensitive,
-            }
-        }
-    }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
@@ -356,19 +231,7 @@ impl Atomable for TrueAtom {
     }
 }
 
-impl TrueAtom {
-    pub fn new() -> Self {
-        TrueAtom {}
-    }
-}
-
-impl Default for TrueAtom {
-    fn default() -> Self {
-        TrueAtom::new()
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct FalseAtom {}
 
 impl Atomable for FalseAtom {
@@ -377,38 +240,9 @@ impl Atomable for FalseAtom {
     }
 }
 
-impl FalseAtom {
-    pub fn new() -> Self {
-        FalseAtom {}
-    }
-}
-
-impl Default for FalseAtom {
-    fn default() -> Self {
-        FalseAtom::new()
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AndAtom {
-    atoms: Vec<Atom>,
-}
-
-impl AndAtom {
-    pub fn and(atoms: Vec<Atom>) -> Atom {
-        let mut atoms: Vec<_> = atoms
-            .into_iter()
-            .filter(|x| !matches!(x, Atom::TrueAtom { .. }))
-            .collect();
-
-        if atoms.is_empty() {
-            (TrueAtom {}).into()
-        } else if atoms.len() == 1 {
-            atoms.remove(0)
-        } else {
-            (AndAtom { atoms }).into()
-        }
-    }
+    pub(crate) atoms: Vec<Atom>,
 }
 
 impl Atomable for AndAtom {
@@ -421,24 +255,7 @@ impl Atomable for AndAtom {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrAtom {
-    atoms: Vec<Atom>,
-}
-
-impl OrAtom {
-    pub fn or(atoms: Vec<Atom>) -> Atom {
-        let mut atoms: Vec<_> = atoms
-            .into_iter()
-            .filter(|x| !matches!(x, Atom::FalseAtom { .. }))
-            .collect();
-
-        if atoms.is_empty() {
-            (FalseAtom {}).into()
-        } else if atoms.len() == 1 {
-            atoms.remove(0)
-        } else {
-            (OrAtom { atoms }).into()
-        }
-    }
+    pub(crate) atoms: Vec<Atom>,
 }
 
 impl Atomable for OrAtom {
@@ -451,17 +268,7 @@ impl Atomable for OrAtom {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotAtom {
-    atom: Box<Atom>,
-}
-
-impl NotAtom {
-    pub fn not(atom: Atom) -> Atom {
-        match atom {
-            Atom::TrueAtom { .. } => FalseAtom::new().into(),
-            Atom::FalseAtom { .. } => TrueAtom::new().into(),
-            x => (NotAtom { atom: Box::new(x) }).into(),
-        }
-    }
+    pub(crate) atom: Box<Atom>,
 }
 
 impl Atomable for NotAtom {
@@ -472,8 +279,8 @@ impl Atomable for NotAtom {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OffsetAtom {
-    atom: Box<Atom>,
-    offset: isize,
+    pub(crate) atom: Box<Atom>,
+    pub(crate) offset: isize,
 }
 
 impl Atomable for OffsetAtom {
@@ -484,15 +291,6 @@ impl Atomable for OffsetAtom {
             false
         } else {
             self.atom.is_match(input, graph, new_position as usize)
-        }
-    }
-}
-
-impl OffsetAtom {
-    pub fn new(atom: Atom, offset: isize) -> Self {
-        OffsetAtom {
-            atom: Box::new(atom),
-            offset,
         }
     }
 }
@@ -649,47 +447,14 @@ pub struct Part {
     pub visible: bool,
 }
 
-impl Part {
-    pub fn new(atom: Atom, quantifier: Quantifier, visible: bool) -> Self {
-        Part {
-            atom,
-            quantifier,
-            visible,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct Composition {
-    pub parts: Vec<Part>,
-    group_ids_to_idx: FnvHashMap<usize, usize>,
-    can_stop_mask: Vec<bool>,
+    pub(crate) parts: Vec<Part>,
+    pub(crate) group_ids_to_idx: FnvHashMap<usize, usize>,
+    pub(crate) can_stop_mask: Vec<bool>,
 }
 
 impl Composition {
-    pub fn new(parts: Vec<Part>) -> Self {
-        let mut group_ids_to_idx = FnvHashMap::default();
-        group_ids_to_idx.insert(0, 0);
-        let mut current_id = 1;
-
-        for (i, part) in parts.iter().enumerate() {
-            if part.visible {
-                group_ids_to_idx.insert(current_id, i + 1);
-                current_id += 1;
-            }
-        }
-
-        let can_stop_mask = (0..parts.len())
-            .map(|i| parts[i..].iter().all(|x| x.quantifier.min == 0))
-            .collect();
-
-        Composition {
-            parts,
-            group_ids_to_idx,
-            can_stop_mask,
-        }
-    }
-
     fn next_can_match<'t>(
         &self,
         tokens: &'t [&'t Token<'t>],
