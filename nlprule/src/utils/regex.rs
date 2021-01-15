@@ -1,6 +1,7 @@
 use crate::Error;
 use onig::{Regex, RegexOptions};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
@@ -25,6 +26,13 @@ pub struct SerializeRegex {
     case_sensitive: bool,
     #[serde(skip_serializing)]
     regex: Regex,
+}
+
+impl Hash for SerializeRegex {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.regex_str.hash(state);
+        self.case_sensitive.hash(state);
+    }
 }
 
 impl<'de> Deserialize<'de> for SerializeRegex {

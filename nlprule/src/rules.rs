@@ -45,7 +45,7 @@ impl Rules {
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
-        tagger: &crate::tokenizer::tag::Tagger,
+        build_info: &mut crate::rule::BuildInfo,
         options: RulesOptions,
     ) -> Self {
         use log::warn;
@@ -58,7 +58,7 @@ impl Rules {
             .into_iter()
             .filter_map(|x| match x {
                 Ok((rule_structure, id, on)) => {
-                    match Rule::from_rule_structure(rule_structure, tagger) {
+                    match Rule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if (options.ids.is_empty() || options.ids.contains(&id))
                                 && !options.ignore_ids.contains(&id)

@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use onig::Regex;
+use serde::{Deserialize, Serialize};
 mod structure;
 
 pub use structure::{read_disambiguation_rules, read_rules};
@@ -19,12 +22,66 @@ fn max_matches() -> usize {
     20
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RegexCache {
+    cache: FnvHashMap<u64, Option<FnvHashSet<u32>>>,
+    // this is compared with the hash of the word store of the tagger
+    word_hash: u64,
+}
+
+impl RegexCache {
+    pub fn new(word_hash: u64) -> Self {
+        RegexCache {
+            cache: FnvHashMap::default(),
+            word_hash,
+        }
+    }
+
+    pub fn word_hash(&self) -> &u64 {
+        &self.word_hash
+    }
+
+    pub fn set_word_hash(&self) -> &u64 {
+        &self.word_hash
+    }
+
+    pub fn get(&self, key: &u64) -> Option<&Option<FnvHashSet<u32>>> {
+        self.cache.get(key)
+    }
+
+    pub fn insert(&mut self, key: u64, value: Option<FnvHashSet<u32>>) {
+        self.cache.insert(key, value);
+    }
+}
+
+pub struct BuildInfo {
+    tagger: Arc<Tagger>,
+    regex_cache: RegexCache,
+}
+
+impl BuildInfo {
+    pub fn new(tagger: Arc<Tagger>, regex_cache: RegexCache) -> Self {
+        BuildInfo {
+            tagger,
+            regex_cache,
+        }
+    }
+
+    pub fn tagger(&self) -> &Arc<Tagger> {
+        &self.tagger
+    }
+
+    pub fn mut_regex_cache(&mut self) -> &mut RegexCache {
+        &mut self.regex_cache
+    }
+}
+
 fn parse_match_attribs(
     attribs: impl structure::MatchAttributes,
     text: Option<&str>,
     case_sensitive: bool,
     text_match_idx: Option<usize>,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Atom, Error> {
     let mut atoms: Vec<Atom> = Vec::new();
 
@@ -98,7 +155,7 @@ fn parse_match_attribs(
         if inflected {
             inflect_matcher = Some(matcher);
         } else {
-            atoms.push(TextAtom::new(TextMatcher::new(matcher, tagger)).into());
+            atoms.push(TextAtom::new(TextMatcher::new(matcher, info)).into());
         }
     }
 
@@ -114,13 +171,13 @@ fn parse_match_attribs(
                 true,
             )
         };
-        pos_matcher = Some(PosMatcher::new(raw_matcher, tagger));
+        pos_matcher = Some(PosMatcher::new(raw_matcher, info));
     }
 
     if pos_matcher.is_some() || inflect_matcher.is_some() {
         let matcher = WordDataMatcher::new(
             pos_matcher,
-            inflect_matcher.map(|x| TextMatcher::new(x, tagger)),
+            inflect_matcher.map(|x| TextMatcher::new(x, info)),
         );
         atoms.push(WordDataAtom::new(matcher, case_sensitive).into());
     }
@@ -172,7 +229,7 @@ fn get_exceptions(
     token: &structure::Token,
     case_sensitive: bool,
     only_shifted: bool,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Atom, Error> {
     if let Some(parts) = &token.parts {
         let exceptions: Vec<Atom> = parts
@@ -188,7 +245,7 @@ fn get_exceptions(
                     None
                 };
                 let mut atom =
-                    parse_match_attribs(x, exception_text, case_sensitive, None, tagger).unwrap();
+                    parse_match_attribs(x, exception_text, case_sensitive, None, info).unwrap();
 
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
@@ -221,7 +278,7 @@ fn get_exceptions(
 fn parse_token(
     token: &structure::Token,
     case_sensitive: bool,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Vec<Part>, Error> {
     let mut parts = Vec::new();
     let text = if let Some(parts) = &token.parts {
@@ -269,10 +326,10 @@ fn parse_token(
     }
 
     let quantifier = Quantifier::new(min, max);
-    let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx, tagger)?;
+    let mut atom = parse_match_attribs(token, text, case_sensitive, text_match_idx, info)?;
     atom = AndAtom::and(vec![
         atom,
-        get_exceptions(token, case_sensitive, false, tagger)?,
+        get_exceptions(token, case_sensitive, false, info)?,
     ]);
 
     parts.push(Part::new(atom, quantifier, true));
@@ -285,7 +342,7 @@ fn parse_token(
         };
 
         parts.push(Part::new(
-            get_exceptions(token, case_sensitive, true, tagger)?,
+            get_exceptions(token, case_sensitive, true, info)?,
             Quantifier::new(0, to_skip),
             false,
         ));
@@ -297,7 +354,7 @@ fn parse_token(
 fn parse_match(
     m: structure::Match,
     composition: &Option<&Composition>,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Match, Error> {
     if m.postag.is_some()
         || m.postag_regex.is_some()
@@ -348,7 +405,7 @@ fn parse_match(
             None => Matcher::new_string(either::Left(postag), false, false, true),
             x => panic!("unknown postag_regex value {:?}", x),
         };
-        Some(PosReplacer::new(PosMatcher::new(matcher, tagger)))
+        Some(PosReplacer::new(PosMatcher::new(matcher, info)))
     } else {
         None
     };
@@ -420,7 +477,7 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
 fn parse_suggestion(
     data: structure::Suggestion,
     composition: &Option<&Composition>,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Synthesizer, Error> {
     let mut parts = Vec::new();
     for part in data.parts {
@@ -429,7 +486,7 @@ fn parse_suggestion(
                 parts.extend(parse_synthesizer_text(text.as_str()));
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(SynthesizerPart::Match(parse_match(m, composition, tagger)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, composition, info)?));
             }
         }
     }
@@ -448,12 +505,12 @@ fn get_last_id(parts: &[Part]) -> isize {
 fn parse_parallel_tokens(
     tokens: &[structure::Token],
     case_sensitive: bool,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Vec<Atom>, Error> {
     tokens
         .iter()
         .map(|x| {
-            let mut parsed = parse_token(x, case_sensitive, tagger)?;
+            let mut parsed = parse_token(x, case_sensitive, info)?;
 
             if parsed.len() != 1 || parsed[0].quantifier.min != 1 || parsed[0].quantifier.max != 1 {
                 return Err(Error::Unimplemented(
@@ -469,34 +526,27 @@ fn parse_parallel_tokens(
 fn parse_unify_tokens(
     tokens: &[structure::UnifyTokenCombination],
     case_sensitive: bool,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Vec<Part>, Error> {
     let mut out = Vec::new();
 
     for token_combination in tokens {
         out.extend(match token_combination {
             structure::UnifyTokenCombination::Token(token) => {
-                parse_token(token, case_sensitive, tagger)?
+                parse_token(token, case_sensitive, info)?
             }
             structure::UnifyTokenCombination::And(tokens) => {
-                let atom = AndAtom::and(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom =
+                    AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Or(tokens) => {
-                let atom = OrAtom::or(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
             }
             structure::UnifyTokenCombination::Feature(_) => vec![],
             structure::UnifyTokenCombination::Ignore(ignore) => {
-                parse_tokens(&ignore.tokens, case_sensitive, tagger)?
+                parse_tokens(&ignore.tokens, case_sensitive, info)?
             }
         });
     }
@@ -507,33 +557,24 @@ fn parse_unify_tokens(
 fn parse_tokens(
     tokens: &[structure::TokenCombination],
     case_sensitive: bool,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<Vec<Part>, Error> {
     let mut out = Vec::new();
 
     for token_combination in tokens {
         out.extend(match token_combination {
-            structure::TokenCombination::Token(token) => {
-                parse_token(token, case_sensitive, tagger)?
-            }
+            structure::TokenCombination::Token(token) => parse_token(token, case_sensitive, info)?,
             structure::TokenCombination::And(tokens) => {
-                let atom = AndAtom::and(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom =
+                    AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Or(tokens) => {
-                let atom = OrAtom::or(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part::new(atom, Quantifier::new(1, 1), true)]
             }
             structure::TokenCombination::Unify(unify) => {
-                parse_unify_tokens(&unify.tokens, case_sensitive, tagger)?
+                parse_unify_tokens(&unify.tokens, case_sensitive, info)?
             }
         });
     }
@@ -543,7 +584,7 @@ fn parse_tokens(
 
 fn parse_pattern(
     pattern: structure::Pattern,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> Result<(Composition, usize, usize), Error> {
     let mut start = None;
     let mut end = None;
@@ -557,35 +598,28 @@ fn parse_pattern(
     for part in &pattern.parts {
         match part {
             structure::PatternPart::Token(token) => {
-                composition_parts.extend(parse_token(token, case_sensitive, tagger)?)
+                composition_parts.extend(parse_token(token, case_sensitive, info)?)
             }
             structure::PatternPart::Marker(marker) => {
                 start = Some(get_last_id(&composition_parts));
 
-                composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive, tagger)?);
+                composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive, info)?);
 
                 end = Some(get_last_id(&composition_parts));
             }
             structure::PatternPart::And(tokens) => {
-                let atom = AndAtom::and(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom =
+                    AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
                 composition_parts.push(Part::new(atom, Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Or(tokens) => {
-                let atom = OrAtom::or(parse_parallel_tokens(
-                    &tokens.tokens,
-                    case_sensitive,
-                    tagger,
-                )?);
+                let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
                 composition_parts.push(Part::new(atom, Quantifier::new(1, 1), true));
             }
             structure::PatternPart::Unify(unify) => {
-                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive, tagger)?)
+                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive, info)?)
             }
         }
     }
@@ -599,7 +633,7 @@ fn parse_pattern(
 }
 
 impl Rule {
-    pub fn from_rule_structure(data: structure::Rule, tagger: &Tagger) -> Result<Rule, Error> {
+    pub fn from_rule_structure(data: structure::Rule, info: &mut BuildInfo) -> Result<Rule, Error> {
         if data.filter.is_some() {
             return Err(Error::Unimplemented(
                 "rules with filter are not implemented.".into(),
@@ -614,7 +648,7 @@ impl Rule {
                 "either `pattern` or `regexp` must be supplied.".into(),
             )),
             (Some(pattern), None) => {
-                let (composition, start, end) = parse_pattern(pattern, tagger)?;
+                let (composition, start, end) = parse_pattern(pattern, info)?;
 
                 Ok((
                     Engine::Token(TokenEngine {
@@ -622,7 +656,7 @@ impl Rule {
                         antipatterns: if let Some(antipatterns) = data.antipatterns {
                             antipatterns
                                 .into_iter()
-                                .map(|pattern| parse_pattern(pattern, tagger).map(|x| x.0))
+                                .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
                                 .collect::<Result<Vec<_>, Error>>()?
                         } else {
                             Vec::new()
@@ -658,11 +692,10 @@ impl Rule {
         for part in data.message.parts {
             match part {
                 structure::MessagePart::Suggestion(suggestion) => {
-                    let suggester =
-                        parse_suggestion(suggestion.clone(), &maybe_composition, tagger)?;
+                    let suggester = parse_suggestion(suggestion.clone(), &maybe_composition, info)?;
                     // simpler to just parse a second time than cloning the result
                     message_parts
-                        .extend(parse_suggestion(suggestion, &maybe_composition, tagger)?.parts);
+                        .extend(parse_suggestion(suggestion, &maybe_composition, info)?.parts);
                     suggesters.push(suggester);
                 }
                 structure::MessagePart::Text(text) => {
@@ -672,7 +705,7 @@ impl Rule {
                     message_parts.push(SynthesizerPart::Match(parse_match(
                         m,
                         &maybe_composition,
-                        tagger,
+                        info,
                     )?));
                 }
             }
@@ -680,7 +713,7 @@ impl Rule {
 
         if let Some(suggestions) = data.suggestions {
             for suggestion in suggestions {
-                suggesters.push(parse_suggestion(suggestion, &maybe_composition, tagger)?);
+                suggesters.push(parse_suggestion(suggestion, &maybe_composition, info)?);
             }
         }
 
@@ -771,7 +804,7 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, tagger: &Tagger) -> OwnedWord {
+fn parse_tag_form(form: &str, info: &mut BuildInfo) -> OwnedWord {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
     }
@@ -793,31 +826,31 @@ fn parse_tag_form(form: &str, tagger: &Tagger) -> OwnedWord {
                 None
             } else {
                 Some(OwnedWordData::new(
-                    tagger.id_word(parts[0].into()).to_owned_id(),
-                    tagger.tag_to_id(parts[1]),
+                    info.tagger.id_word(parts[0].into()).to_owned_id(),
+                    info.tagger.tag_to_id(parts[1]),
                 ))
             }
         })
         .collect();
 
     OwnedWord {
-        text: tagger.id_word(text.into()).to_owned_id(),
+        text: info.tagger.id_word(text.into()).to_owned_id(),
         tags,
     }
 }
 
 impl OwnedWordData {
-    fn from_structure(data: structure::WordData, tagger: &Tagger) -> Self {
+    fn from_structure(data: structure::WordData, info: &mut BuildInfo) -> Self {
         OwnedWordData::new(
-            tagger
+            info.tagger
                 .id_word(data.lemma.unwrap_or_else(String::new).into())
                 .to_owned_id(),
-            tagger.tag_to_id(data.pos.as_str().trim()),
+            info.tagger.tag_to_id(data.pos.as_str().trim()),
         )
     }
 }
 
-fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, tagger: &Tagger) -> POSFilter {
+fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> POSFilter {
     match postag_regexp.as_deref() {
         Some("yes") => POSFilter::new(PosMatcher::new(
             Matcher::new_regex(
@@ -825,11 +858,11 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, tagger: &Tagger) 
                 false,
                 true,
             ),
-            tagger,
+            info,
         )),
         Some(_) | None => POSFilter::new(PosMatcher::new(
             Matcher::new_string(either::Left(postag.into()), false, false, true),
-            tagger,
+            info,
         )),
     }
 }
@@ -837,7 +870,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, tagger: &Tagger) 
 fn parse_unify(
     unify: &structure::Unify,
     unifications: &Option<Vec<structure::Unification>>,
-    tagger: &Tagger,
+    info: &mut BuildInfo,
 ) -> (Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>) {
     let mut filters = Vec::new();
     let mut disambig = Vec::new();
@@ -862,7 +895,7 @@ fn parse_unify(
                             parse_pos_filter(
                                 &equiv.token.postag,
                                 equiv.token.postag_regexp.as_deref(),
-                                tagger,
+                                info,
                             )
                         })
                         .collect(),
@@ -871,9 +904,11 @@ fn parse_unify(
             structure::UnifyTokenCombination::And(tokens)
             | structure::UnifyTokenCombination::Or(tokens) => {
                 mask.push(true);
-                disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
-                    parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), tagger)
-                }))
+                disambig.push(
+                    tokens.tokens[0].postag.as_ref().map(|x| {
+                        parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
+                    }),
+                )
             }
             structure::UnifyTokenCombination::Token(token) => {
                 mask.push(true);
@@ -881,7 +916,7 @@ fn parse_unify(
                     token
                         .postag
                         .as_ref()
-                        .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref(), tagger)),
+                        .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref(), info)),
                 )
             }
             structure::UnifyTokenCombination::Ignore(tokens) => {
@@ -891,18 +926,16 @@ fn parse_unify(
                         | structure::TokenCombination::Or(tokens) => {
                             mask.push(false);
                             disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
-                                parse_pos_filter(
-                                    x,
-                                    tokens.tokens[0].postag_regexp.as_deref(),
-                                    tagger,
-                                )
+                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
                             }))
                         }
                         structure::TokenCombination::Token(token) => {
                             mask.push(false);
-                            disambig.push(token.postag.as_ref().map(|x| {
-                                parse_pos_filter(x, token.postag_regexp.as_deref(), tagger)
-                            }))
+                            disambig.push(
+                                token.postag.as_ref().map(|x| {
+                                    parse_pos_filter(x, token.postag_regexp.as_deref(), info)
+                                }),
+                            )
                         }
                         structure::TokenCombination::Unify(_) => {
                             panic!("nested unify not supported")
@@ -919,15 +952,15 @@ fn parse_unify(
 impl DisambiguationRule {
     pub fn from_rule_structure(
         data: structure::DisambiguationRule,
-        tagger: &Tagger,
+        info: &mut BuildInfo,
     ) -> Result<DisambiguationRule, Error> {
         // might need the pattern later so clone it here
-        let (composition, start, end) = parse_pattern(data.pattern.clone(), tagger)?;
+        let (composition, start, end) = parse_pattern(data.pattern.clone(), info)?;
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
                 .into_iter()
-                .map(|pattern| parse_pattern(pattern, tagger).map(|x| x.0))
+                .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
                 .collect::<Result<Vec<_>, Error>>()?
         } else {
             Vec::new()
@@ -937,12 +970,12 @@ impl DisambiguationRule {
             wds.into_iter()
                 .map(|part| match part {
                     structure::DisambiguationPart::WordData(x) => {
-                        either::Left(OwnedWordData::from_structure(x, tagger))
+                        either::Left(OwnedWordData::from_structure(x, info))
                     }
                     structure::DisambiguationPart::Match(x) => either::Right(parse_pos_filter(
                         &x.postag.unwrap(),
                         x.postag_regexp.as_deref(),
-                        tagger,
+                        info,
                     )),
                 })
                 .collect()
@@ -954,7 +987,7 @@ impl DisambiguationRule {
             Some("remove") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Remove(vec![either::Right(
-                        parse_pos_filter(postag, Some("yes"), tagger),
+                        parse_pos_filter(postag, Some("yes"), info),
                     )]))
                 } else {
                     Ok(Disambiguation::Remove(word_datas.into_iter().collect()))
@@ -1012,7 +1045,7 @@ impl DisambiguationRule {
                                     either::Right(parse_pos_filter(
                                         x,
                                         token.postag_regexp.as_deref(),
-                                        tagger,
+                                        info,
                                     ))
                                 }));
                             }
@@ -1022,7 +1055,7 @@ impl DisambiguationRule {
                                 either::Right(parse_pos_filter(
                                     x,
                                     token.postag_regexp.as_deref(),
-                                    tagger,
+                                    info,
                                 ))
                             }))
                         }
@@ -1032,7 +1065,7 @@ impl DisambiguationRule {
                                 either::Right(parse_pos_filter(
                                     x,
                                     tokens.tokens[0].postag_regexp.as_deref(),
-                                    tagger,
+                                    info,
                                 ))
                             }))
                         }
@@ -1055,7 +1088,7 @@ impl DisambiguationRule {
             Some("filter") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(vec![Some(either::Right(
-                        parse_pos_filter(postag, Some("yes"), tagger),
+                        parse_pos_filter(postag, Some("yes"), info),
                     ))]))
                 } else {
                     Ok(Disambiguation::Filter(
@@ -1071,7 +1104,7 @@ impl DisambiguationRule {
                 match &data.pattern.parts[..] {
                     [.., structure::PatternPart::Marker(marker)] => match &marker.tokens[..] {
                         [structure::TokenCombination::Unify(unify)] => {
-                            let (f, d, m) = parse_unify(&unify, &data.unifications, tagger);
+                            let (f, d, m) = parse_unify(&unify, &data.unifications, info);
                             filters.extend(f);
                             disambig.extend(d);
                             mask.extend(m);
@@ -1079,7 +1112,7 @@ impl DisambiguationRule {
                         _ => panic!("only `unify` as only element in `marker` is implemented"),
                     },
                     [structure::PatternPart::Unify(unify)] => {
-                        let (f, d, m) = parse_unify(&unify, &data.unifications, tagger);
+                        let (f, d, m) = parse_unify(&unify, &data.unifications, info);
                         filters.extend(f);
                         disambig.extend(d);
                         mask.extend(m);
@@ -1093,8 +1126,8 @@ impl DisambiguationRule {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(vec![Some(either::Left(
                         OwnedWordData::new(
-                            tagger.id_word("".into()).to_owned_id(),
-                            tagger.tag_to_id(postag),
+                            info.tagger.id_word("".into()).to_owned_id(),
+                            info.tagger.tag_to_id(postag),
                         ),
                     ))]))
                 } else {
@@ -1169,14 +1202,14 @@ impl DisambiguationRule {
                                 .inputform
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
-                            tagger,
+                            info,
                         ),
                         after: parse_tag_form(
                             &example
                                 .outputform
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
-                            tagger,
+                            info,
                         ),
                         char_span: char_span.expect("must have marker when ambiguous example"),
                     }),

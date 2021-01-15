@@ -111,6 +111,14 @@ impl Tagger {
             tag_store.insert(tag);
         }
 
+        // word store ids should be consistent across runs
+        let mut word_store: Vec<_> = word_store.iter().collect();
+        word_store.sort();
+
+        //  tag store ids should be consistent across runs
+        let mut tag_store: Vec<_> = tag_store.iter().collect();
+        tag_store.sort();
+
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()

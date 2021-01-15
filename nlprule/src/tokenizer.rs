@@ -136,7 +136,7 @@ impl Tokenizer {
     #[cfg(feature = "compile")]
     pub fn from_xml<P: AsRef<std::path::Path>>(
         path: P,
-        tagger: Arc<Tagger>,
+        build_info: &mut crate::rule::BuildInfo,
         chunker: Option<Chunker>,
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -149,7 +149,7 @@ impl Tokenizer {
             .into_iter()
             .filter_map(|x| match x {
                 Ok((rule_structure, id)) => {
-                    match DisambiguationRule::from_rule_structure(rule_structure, tagger.as_ref()) {
+                    match DisambiguationRule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if error.is_none()
                                 && (options.ids.is_empty() || options.ids.contains(&id))
@@ -184,7 +184,7 @@ impl Tokenizer {
         }
 
         Ok(Tokenizer {
-            tagger,
+            tagger: build_info.tagger().clone(),
             chunker,
             rules,
             options,

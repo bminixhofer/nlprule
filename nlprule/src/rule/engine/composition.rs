@@ -1,11 +1,12 @@
+use std::hash::{Hash, Hasher};
+
 use crate::{
-    tokenizer::tag::Tagger,
     types::{Token, WordData, WordId},
     utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
 };
 use enum_dispatch::enum_dispatch;
-use fnv::FnvHashMap;
 use fnv::FnvHashSet;
+use fnv::{FnvHashMap, FnvHasher};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
@@ -56,10 +57,6 @@ impl Matcher {
         matches!(&self.matcher, either::Left(either::Right(_)))
     }
 
-    fn is_regex(&self) -> bool {
-        matches!(&self.matcher, either::Right(_))
-    }
-
     pub fn is_match(&self, input: &str, graph: &MatchGraph, case_sensitive: Option<bool>) -> bool {
         if input.is_empty() {
             return if self.empty_always_false {
@@ -107,32 +104,42 @@ pub struct TextMatcher {
 }
 
 impl TextMatcher {
-    pub fn new(matcher: Matcher, tagger: &Tagger) -> Self {
+    #[cfg(feature = "compile")]
+    pub fn new(matcher: Matcher, info: &mut crate::rule::BuildInfo) -> Self {
         let graph = MatchGraph::default();
 
-        let set = if matcher.needs_graph() || !matcher.is_regex() {
+        let set = if matcher.needs_graph() {
             None
-        } else {
-            let data: Vec<_> = tagger.word_store().iter().collect();
-            let set: FnvHashSet<u32> = data
-                .into_maybe_par_iter()
-                .filter_map(|(word, id)| {
-                    if matcher.is_match(word.as_str(), &graph, None) {
-                        Some(*id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        } else if let either::Right(regex) = &matcher.matcher {
+            let mut hasher = FnvHasher::default();
+            regex.hash(&mut hasher);
+            let regex_hash = hasher.finish();
 
-            // there are some regexes which match lots of strings
-            // this cutoff is pretty arbitrary but without any threshold the size of some sets blows up
-            // the vast majority of regexes matches less than 100 strings from manual inspection
-            if set.len() > 100 {
-                None
+            if let Some(set) = info.mut_regex_cache().get(&regex_hash) {
+                set.clone()
             } else {
-                Some(set)
+                let data: Vec<_> = info.tagger().word_store().iter().collect();
+
+                let set: FnvHashSet<u32> = data
+                    .into_maybe_par_iter()
+                    .filter_map(|(word, id)| {
+                        if matcher.is_match(word.as_str(), &graph, None) {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                // there are some regexes which match lots of strings
+                // this cutoff is pretty arbitrary but without any threshold the size of some sets blows up
+                // the vast majority of regexes matches less than 100 strings from manual inspection
+                let set = if set.len() > 100 { None } else { Some(set) };
+                info.mut_regex_cache().insert(regex_hash, set.clone());
+                set
             }
+        } else {
+            None
         };
 
         TextMatcher { matcher, set }
@@ -165,11 +172,12 @@ pub struct PosMatcher {
 }
 
 impl PosMatcher {
-    pub fn new(matcher: Matcher, tagger: &Tagger) -> Self {
-        let mut mask = vec![false; tagger.tag_store().len()];
+    #[cfg(feature = "compile")]
+    pub fn new(matcher: Matcher, info: &mut crate::rule::BuildInfo) -> Self {
+        let mut mask = vec![false; info.tagger().tag_store().len()];
         let graph = MatchGraph::default();
 
-        for (word, id) in tagger.tag_store().iter() {
+        for (word, id) in info.tagger().tag_store().iter() {
             mask[*id as usize] = matcher.is_match(word.as_str(), &graph, None);
         }
 

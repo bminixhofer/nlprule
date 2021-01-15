@@ -15,7 +15,7 @@ mod engine;
 #[cfg(feature = "compile")]
 mod from_structure;
 #[cfg(feature = "compile")]
-pub(crate) use from_structure::{read_disambiguation_rules, read_rules};
+pub use from_structure::{read_disambiguation_rules, read_rules, BuildInfo, RegexCache};
 #[allow(dead_code)]
 mod grammar;
 
