@@ -5,6 +5,6 @@ members = [
     "bindings/python"
 ]
 
-[profile.release]
-lto = "fat"
-codegen-units = 1
+# [profile.release] # BUILD_BINDINGS_UNCOMMENT
+# lto = "fat" # BUILD_BINDINGS_UNCOMMENT
+# codegen-units = 1 # BUILD_BINDINGS_UNCOMMENT

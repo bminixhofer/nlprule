@@ -113,9 +113,11 @@ impl TextMatcher {
         } else if let either::Right(regex) = &matcher.matcher {
             let mut hasher = FnvHasher::default();
             regex.hash(&mut hasher);
-            let regex_hash = hasher.finish();
+            matcher.negate.hash(&mut hasher);
+            matcher.empty_always_false.hash(&mut hasher);
+            let matcher_hash = hasher.finish();
 
-            if let Some(set) = info.mut_regex_cache().get(&regex_hash) {
+            if let Some(set) = info.mut_regex_cache().get(&matcher_hash) {
                 set.clone()
             } else {
                 let data: Vec<_> = info.tagger().word_store().iter().collect();
@@ -135,7 +137,7 @@ impl TextMatcher {
                 // this cutoff is pretty arbitrary but without any threshold the size of some sets blows up
                 // the vast majority of regexes matches less than 100 strings from manual inspection
                 let set = if set.len() > 100 { None } else { Some(set) };
-                info.mut_regex_cache().insert(regex_hash, set.clone());
+                info.mut_regex_cache().insert(matcher_hash, set.clone());
                 set
             }
         } else {

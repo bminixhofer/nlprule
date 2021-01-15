@@ -13,9 +13,11 @@ function build_change {
 
 cp bindings/python/Cargo.toml bindings/python/.Cargo.toml.bak
 cp nlprule/Cargo.toml nlprule/.Cargo.toml.bak
+cp Cargo.toml .Cargo.toml.bak
 
 build_change bindings/python/Cargo.toml
 build_change nlprule/Cargo.toml
+build_change Cargo.toml
 
 cd bindings/python
 maturin $@
@@ -24,5 +26,6 @@ cd ../..
 
 mv bindings/python/.Cargo.toml.bak bindings/python/Cargo.toml
 mv nlprule/.Cargo.toml.bak nlprule/Cargo.toml
+mv .Cargo.toml.bak Cargo.toml
 
 exit $exit_code
