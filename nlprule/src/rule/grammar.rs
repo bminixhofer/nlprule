@@ -73,7 +73,7 @@ impl PosReplacer {
                             tokenizer.options().use_compound_split_heuristic,
                         )
                         .iter()
-                        .position(|x| self.matcher.is_match(x.pos_id))
+                        .position(|x| self.matcher.is_match(&x.pos))
                     {
                         data.push((word.to_string(), i));
                     }

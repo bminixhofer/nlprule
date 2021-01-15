@@ -1,7 +1,4 @@
-use crate::{
-    types::{Token, WordData, WordId},
-    utils::regex::SerializeRegex,
-};
+use crate::{types::*, utils::regex::SerializeRegex};
 use enum_dispatch::enum_dispatch;
 use fnv::FnvHashMap;
 use fnv::FnvHashSet;
@@ -102,8 +99,8 @@ pub struct PosMatcher {
 }
 
 impl PosMatcher {
-    pub fn is_match(&self, pos_id: u16) -> bool {
-        self.mask[pos_id as usize]
+    pub fn is_match(&self, pos: &PosId) -> bool {
+        self.mask[*pos.id() as usize]
     }
 }
 
@@ -124,7 +121,7 @@ impl WordDataMatcher {
             let pos_matches = self
                 .pos_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(x.pos_id));
+                .map_or(true, |m| m.is_match(&x.pos));
 
             // matching part-of-speech tag is faster than inflection, so check POS first and early exit if it doesn't match
             if !pos_matches {

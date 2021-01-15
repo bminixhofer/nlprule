@@ -58,10 +58,8 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
                         tokenizer.options().use_compound_split_heuristic,
                     );
 
-                    tags.iter().any(|x| {
-                        self.postag_regexp
-                            .is_match(token.tagger.id_to_tag(x.pos_id))
-                    })
+                    tags.iter()
+                        .any(|x| self.postag_regexp.is_match(x.pos.as_ref()))
                 } else {
                     false
                 }

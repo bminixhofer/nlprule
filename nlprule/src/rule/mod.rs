@@ -48,7 +48,7 @@ pub struct DisambiguationRule {
 }
 
 #[derive(Default)]
-pub struct Changes(Vec<Vec<HashSet<(usize, usize)>>>);
+pub(crate) struct Changes(Vec<Vec<HashSet<(usize, usize)>>>);
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
@@ -100,7 +100,7 @@ impl DisambiguationRule {
         Changes(all_byte_spans)
     }
 
-    pub fn change<'t>(
+    pub(crate) fn change<'t>(
         &'t self,
         tokens: &mut Vec<IncompleteToken<'t>>,
         tokenizer: &Tokenizer,
@@ -170,14 +170,14 @@ impl DisambiguationRule {
                         .tags
                         .iter()
                         .map(|x| x.to_owned_word_data())
-                        .collect::<HashSet<OwnedWordData>>();
+                        .collect::<HashSet<owned::WordData>>();
                     // need references to compare
                     let unordered_tags: HashSet<_> = unordered_tags.iter().collect();
                     let unordered_tags_change = change
                         .after
                         .tags
                         .iter()
-                        .collect::<HashSet<&OwnedWordData>>();
+                        .collect::<HashSet<&owned::WordData>>();
 
                     after.word.text == change.after.text.as_ref_id()
                         && unordered_tags == unordered_tags_change

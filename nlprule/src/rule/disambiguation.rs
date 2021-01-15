@@ -11,7 +11,7 @@ pub struct POSFilter {
 
 impl POSFilter {
     fn is_word_data_match(&self, data: &WordData) -> bool {
-        self.matcher.is_match(data.pos_id)
+        self.matcher.is_match(&data.pos)
     }
 
     fn keep(&self, data: &mut Word) {
@@ -39,10 +39,10 @@ impl POSFilter {
 
 #[derive(Serialize, Deserialize)]
 pub enum Disambiguation {
-    Remove(Vec<either::Either<OwnedWordData, POSFilter>>),
-    Add(Vec<OwnedWordData>),
-    Replace(Vec<OwnedWordData>),
-    Filter(Vec<Option<either::Either<OwnedWordData, POSFilter>>>),
+    Remove(Vec<either::Either<owned::WordData, POSFilter>>),
+    Add(Vec<owned::WordData>),
+    Replace(Vec<owned::WordData>),
+    Filter(Vec<Option<either::Either<owned::WordData, POSFilter>>>),
     Unify(Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>),
     Nop,
 }
@@ -56,7 +56,7 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(data) => {
                                 token.word.tags.retain(|x| {
-                                    !(x.pos_id == data.pos_id
+                                    !(x.pos == data.pos.as_ref_id()
                                         && (data.lemma.as_ref().is_empty()
                                             || x.lemma == data.lemma.as_ref_id()))
                                 });
@@ -79,7 +79,7 @@ impl Disambiguation {
                                         |x| x.lemma.clone(),
                                     );
 
-                                    token.word.tags.retain(|x| x.pos_id == limit.pos_id);
+                                    token.word.tags.retain(|x| x.pos == limit.pos.as_ref_id());
 
                                     if token.word.tags.is_empty() {
                                         token.word.tags.push(WordData::new(
@@ -88,7 +88,7 @@ impl Disambiguation {
                                             } else {
                                                 token.word.text.clone()
                                             },
-                                            limit.pos_id,
+                                            limit.pos.as_ref_id(),
                                         ));
                                     }
                                 }
@@ -111,16 +111,11 @@ impl Disambiguation {
                             } else {
                                 data.lemma.as_ref_id()
                             },
-                            data.pos_id,
+                            data.pos.as_ref_id(),
                         );
 
                         token.word.tags.push(data);
-                        let tagger = token.tagger;
-
-                        token
-                            .word
-                            .tags
-                            .retain(|x| !tagger.id_to_tag(x.pos_id).is_empty());
+                        token.word.tags.retain(|x| !x.pos.as_ref().is_empty());
                     }
                 }
             }
@@ -133,7 +128,7 @@ impl Disambiguation {
                             } else {
                                 data.lemma.as_ref_id()
                             },
-                            data.pos_id,
+                            data.pos.as_ref_id(),
                         );
 
                         token.word.tags.clear();
@@ -204,8 +199,8 @@ impl Disambiguation {
 pub struct DisambiguationChange {
     pub text: String,
     pub char_span: (usize, usize),
-    pub before: OwnedWord,
-    pub after: OwnedWord,
+    pub before: owned::Word,
+    pub after: owned::Word,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

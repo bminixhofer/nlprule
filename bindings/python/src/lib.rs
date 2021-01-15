@@ -263,7 +263,7 @@ impl PyTagger {
     ///         A list of tuples of (lemma, POS).
     ///         Not contextualized so it can be thought of as possible lemma / POS of the given word.
     #[text_signature = "(word, add_lower=None)"]
-    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, &str)> {
+    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, String)> {
         self.tagger
             .get_tags(
                 word,
@@ -271,12 +271,7 @@ impl PyTagger {
                 self.options.use_compound_split_heuristic,
             )
             .into_iter()
-            .map(|x| {
-                (
-                    x.lemma.as_ref().to_string(),
-                    self.tagger.id_to_tag(x.pos_id),
-                )
-            })
+            .map(|x| (x.lemma.as_ref().to_string(), x.pos.as_ref().to_string()))
             .collect()
     }
 
@@ -307,13 +302,12 @@ impl PyTagger {
 /// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
-    token: OwnedToken,
-    tagger: Arc<Tagger>,
+    token: owned::Token,
 }
 
-impl PyToken {
-    fn new(token: OwnedToken, tagger: Arc<Tagger>) -> Self {
-        PyToken { token, tagger }
+impl From<owned::Token> for PyToken {
+    fn from(token: owned::Token) -> Self {
+        PyToken { token }
     }
 }
 
@@ -335,7 +329,7 @@ impl PyToken {
             .word
             .tags
             .iter()
-            .map(|x| (x.lemma.as_ref(), self.tagger.id_to_tag(x.pos_id)))
+            .map(|x| (x.lemma.as_ref(), x.pos.as_ref()))
             .collect()
     }
 
@@ -367,11 +361,10 @@ impl PyToken {
             .tags
             .iter()
             .filter_map(|x| {
-                let pos = self.tagger.id_to_tag(x.pos_id);
-                if pos.is_empty() {
+                if x.pos.as_ref().is_empty() {
                     None
                 } else {
-                    Some(pos)
+                    Some(x.pos.as_ref())
                 }
             })
             .collect();
@@ -517,12 +510,7 @@ impl PyTokenizer {
                     .disambiguate(self.tokenizer.tokenize(&sentence)),
             )
             .into_iter()
-            .map(|x| {
-                PyCell::new(
-                    py,
-                    PyToken::new(x.to_owned_token(), self.tokenizer.tagger().clone()),
-                )
-            })
+            .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
             .collect::<PyResult<Vec<_>>>()
         })
     }
@@ -544,12 +532,7 @@ impl PyTokenizer {
                             .disambiguate(self.tokenizer.tokenize(&sentence)),
                     )
                     .into_iter()
-                    .map(|x| {
-                        PyCell::new(
-                            py,
-                            PyToken::new(x.to_owned_token(), self.tokenizer.tagger().clone()),
-                        )
-                    })
+                    .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
                     .collect::<PyResult<Vec<_>>>()?;
                     output.extend(tokens);
                 }

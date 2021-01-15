@@ -846,7 +846,7 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, info: &mut BuildInfo) -> OwnedWord {
+fn parse_tag_form(form: &str, info: &mut BuildInfo) -> owned::Word {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
     }
@@ -867,27 +867,27 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> OwnedWord {
             if parts.len() < 2 {
                 None
             } else {
-                Some(OwnedWordData::new(
+                Some(owned::WordData::new(
                     info.tagger.id_word(parts[0].into()).to_owned_id(),
-                    info.tagger.tag_to_id(parts[1]),
+                    info.tagger.id_tag(parts[1]).to_owned_id(),
                 ))
             }
         })
         .collect();
 
-    OwnedWord {
+    owned::Word {
         text: info.tagger.id_word(text.into()).to_owned_id(),
         tags,
     }
 }
 
-impl OwnedWordData {
+impl owned::WordData {
     fn from_structure(data: structure::WordData, info: &mut BuildInfo) -> Self {
-        OwnedWordData::new(
+        owned::WordData::new(
             info.tagger
                 .id_word(data.lemma.unwrap_or_else(String::new).into())
                 .to_owned_id(),
-            info.tagger.tag_to_id(data.pos.as_str().trim()),
+            info.tagger.id_tag(data.pos.as_str().trim()).to_owned_id(),
         )
     }
 }
@@ -1012,7 +1012,7 @@ impl DisambiguationRule {
             wds.into_iter()
                 .map(|part| match part {
                     structure::DisambiguationPart::WordData(x) => {
-                        either::Left(OwnedWordData::from_structure(x, info))
+                        either::Left(owned::WordData::from_structure(x, info))
                     }
                     structure::DisambiguationPart::Match(x) => either::Right(parse_pos_filter(
                         &x.postag.unwrap(),
@@ -1167,9 +1167,9 @@ impl DisambiguationRule {
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(vec![Some(either::Left(
-                        OwnedWordData::new(
+                        owned::WordData::new(
                             info.tagger.id_word("".into()).to_owned_id(),
-                            info.tagger.tag_to_id(postag),
+                            info.tagger.id_tag(postag).to_owned_id(),
                         ),
                     ))]))
                 } else {

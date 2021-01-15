@@ -168,7 +168,7 @@ impl Tagger {
                 for tag_id in value {
                     output.push(WordData::new(
                         self.id_word(self.word_store.get_by_right(key).unwrap().as_str().into()),
-                        *tag_id,
+                        self.id_tag(self.tag_store.get_by_right(tag_id).unwrap().as_str()),
                     ))
                 }
             }
@@ -198,14 +198,6 @@ impl Tagger {
         tags
     }
 
-    pub fn id_to_tag(&self, id: u16) -> &str {
-        self.tag_store.get_by_right(&id).unwrap()
-    }
-
-    pub fn tag_to_id(&self, tag: &str) -> u16 {
-        *self.tag_store.get_by_left(tag).unwrap()
-    }
-
     pub fn tag_store(&self) -> &BiMap<String, u16> {
         &self.tag_store
     }
@@ -214,9 +206,13 @@ impl Tagger {
         &self.word_store
     }
 
+    pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
+        PosId(tag, *self.tag_store.get_by_left(tag).unwrap())
+    }
+
     pub fn id_word<'t>(&'t self, text: Cow<'t, str>) -> WordId<'t> {
         let id = self.word_store.get_by_left(text.as_ref()).copied();
-        WordId::new(text, id)
+        WordId(text, id)
     }
 
     /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word.
