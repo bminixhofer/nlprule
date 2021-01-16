@@ -128,11 +128,10 @@ pub(crate) struct Model {
 
 impl Model {
     fn eval(&self, context: &[u64]) -> Vec<f32> {
-        let scontexts: Vec<&Context> = context.iter().filter_map(|x| self.pmap.get(&x)).collect();
         let mut prior =
             vec![(1. / (self.outcome_labels.len() as f32)).ln(); self.outcome_labels.len()];
 
-        for context in scontexts {
+        for context in context.iter().filter_map(|x| self.pmap.get(&x)) {
             for (idx, param) in context.outcomes.iter().zip(context.parameters.iter()) {
                 prior[*idx] += param;
             }
@@ -142,8 +141,12 @@ impl Model {
         prior
     }
 
-    fn get_top_n(&self, probs: &[f32], n: usize) -> Vec<(usize, f32, &str)> {
-        let mut probs: Vec<_> = probs.iter().enumerate().collect();
+    fn get_top_n(&self, probs: &[f32], n: usize, threshold: f32) -> Vec<(usize, f32, &str)> {
+        let mut probs: Vec<_> = probs
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| **x >= threshold) // this is slightly different than LT behaviour but deemed okay as long as all tests pass
+            .collect();
         probs.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
 
         probs
@@ -184,9 +187,9 @@ impl Model {
                     cache.insert(hash, self.eval(&context));
                 }
                 let scores = cache.get(&hash).unwrap();
-                let top_n = self.get_top_n(&scores, scores.len());
+                let top_n = self.get_top_n(&scores, scores.len(), 1e-1);
 
-                for (_, p, pred) in &top_n[..size] {
+                for (_, p, pred) in &top_n[..std::cmp::min(size, top_n.len())] {
                     if valid_fn(tokens, &seq.outcomes(), i, pred) {
                         let next_outcomes: Vec<_> = [seq.outcomes(), &[pred]].concat();
                         let next_probs: Vec<_> = [seq.probs(), &[*p]].concat();
@@ -197,7 +200,8 @@ impl Model {
 
                 // if no advanced sequences, advance all valid to match OpenNLP behaviour
                 if next.is_empty() {
-                    for (_, p, pred) in top_n.iter() {
+                    for (j, p) in scores.iter().enumerate() {
+                        let pred = self.outcome_labels[j].as_str();
                         if valid_fn(tokens, &seq.outcomes(), i, pred) {
                             let mut next_outcomes: Vec<_> = seq.outcomes().to_vec();
                             next_outcomes.push(pred);
@@ -335,7 +339,7 @@ impl MaxentTokenizer {
 
                 for i in 1..token_char_indices.len() {
                     let context = Self::context(&token_chars, i);
-                    let (_, _, best) = self.model.get_top_n(&self.model.eval(&context), 1)[0];
+                    let (_, _, best) = self.model.get_top_n(&self.model.eval(&context), 1, 0.5)[0];
 
                     if best == "T" {
                         tokens.push(&text[start..token_char_indices[i].0]);

@@ -18,7 +18,7 @@ class Suggestion:
     start: int
     end: int
     source: str
-    text: Tuple[str]
+    replacements: Tuple[str]
     # message: str
 
 
@@ -104,7 +104,7 @@ class LanguageTool:
                 start=s.offset,
                 end=s.offset + s.errorLength,
                 source=s.ruleId,
-                text=tuple(s.replacements),
+                replacements=tuple(s.replacements),
                 # there's subtle differences in messages (e. g. in quotation marks) for some reason
                 # message=s.message,
             )
@@ -124,7 +124,7 @@ class NLPRule:
                 start=s.start,
                 end=s.end,
                 source=strip_index(s.source),
-                text=tuple(s.text),
+                replacements=tuple(s.replacements),
                 # message=s.message,
             )
             for s in self.rules.suggest_sentence(sentence)
