@@ -119,7 +119,7 @@ jobs:
           pip install maturin==0.8.3 pytest==6.1.2
          
           bash scripts/maturin.sh build --interpreter python --release --manylinux 1
-          ls target/wheels/* | xargs -n 1 pip install || true
+          pip install target/wheels/*
 
           pytest bindings/python/test.py -s
       - name: Upload wheel as artifact
