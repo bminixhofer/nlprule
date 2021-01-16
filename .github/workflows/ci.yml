@@ -116,7 +116,7 @@ jobs:
       - name: Build
         run: |
           python -m venv venv
-          . ./venv/bin/activate
+          source ./venv/bin/activate
           
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
