@@ -624,6 +624,10 @@ impl PyExample {
 /// * url (Option[str]): A URL for more information.
 /// * short (Option[str]): A short description of this rule e. g. "Possible typo".
 /// * examples (List[Example]): Examples associated with this rule. Always at least one.
+/// * name (str): A human-readable name for this rule.
+/// * category_id (str): ID of the category this rule is in.
+/// * category_name (str): A human-readable name of the category this rule is in.
+/// * category_type (Option[str]): The type of the category this rule is in e. g. "style" or "grammar".
 #[pyclass(name = "Rule", module = "nlprule")]
 struct PyRule {
     id: String,
