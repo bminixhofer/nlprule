@@ -1,10 +1,10 @@
 use flate2::read::GzDecoder;
-use nlprule::types::*;
 use nlprule::{
-    rule::Rule,
+    rule::{Example, Rule},
     rules::{correct, Rules},
     tokenizer::{finalize, tag::Tagger},
     tokenizer::{Tokenizer, TokenizerOptions},
+    types::*,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -403,8 +403,12 @@ impl PySuggestion {
     }
 
     #[getter]
-    fn text(&self) -> Vec<&str> {
-        self.suggestion.text.iter().map(|x| x.as_str()).collect()
+    fn replacements(&self) -> Vec<&str> {
+        self.suggestion
+            .replacements
+            .iter()
+            .map(|x| x.as_str())
+            .collect()
     }
 
     #[getter]
@@ -573,21 +577,73 @@ impl PyTokenizer {
     }
 }
 
+/// An example associated with a grammatical rule.
+///
+/// Attributes:
+/// * text (str): the text of this example
+/// * suggestion (Option[Suggestion]): The suggestion for this example.
+///     If this is None, it is an example of where the rule should not trigger.
+#[pyclass(name = "Example", module = "nlprule")]
+struct PyExample {
+    text: String,
+    suggestion: Option<Py<PySuggestion>>,
+}
+
+impl PyExample {
+    fn from_example(py: Python, example: &Example) -> PyResult<Self> {
+        Ok(PyExample {
+            text: example.text().to_owned(),
+            suggestion: if let Some(suggestion) = example.suggestion() {
+                let suggestion = PySuggestion::from((*suggestion).clone());
+                Some(Py::new(py, suggestion)?)
+            } else {
+                None
+            },
+        })
+    }
+}
+
+#[pymethods]
+impl PyExample {
+    #[getter]
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    #[getter]
+    fn suggestion<'py>(&'py self, py: Python<'py>) -> Option<PyRef<'py, PySuggestion>> {
+        self.suggestion.as_ref().map(|x| x.borrow(py))
+    }
+}
+
 /// One grammatical rule.
 ///
 /// Can not be created directly but accessed by the `.rules` attribute on the rules.
 /// Attributes:
 /// * id (str): The id of this rule.
+/// * url (Option[str]): A URL for more information.
+/// * short (Option[str]): A short description of this rule e. g. "Possible typo".
+/// * examples (List[Example]): Examples associated with this rule. Always at least one.
 #[pyclass(name = "Rule", module = "nlprule")]
 struct PyRule {
     id: String,
+    url: Option<String>,
+    short: Option<String>,
+    examples: Vec<Py<PyExample>>,
 }
 
 impl PyRule {
-    fn from_rule(rule: &Rule) -> Self {
-        PyRule {
-            id: rule.id().to_string(),
-        }
+    fn from_rule(py: Python, rule: &Rule) -> PyResult<Self> {
+        Ok(PyRule {
+            id: rule.id().to_owned(),
+            url: rule.url().map(String::from),
+            short: rule.short().map(String::from),
+            examples: rule
+                .examples()
+                .iter()
+                .map(|x| PyExample::from_example(py, x).and_then(|x| Py::new(py, x)))
+                .collect::<PyResult<Vec<_>>>()?,
+        })
     }
 }
 
@@ -596,6 +652,21 @@ impl PyRule {
     #[getter]
     fn id(&self) -> &str {
         &self.id
+    }
+
+    #[getter]
+    fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
+    #[getter]
+    fn short(&self) -> Option<&str> {
+        self.short.as_deref()
+    }
+
+    #[getter]
+    fn examples<'py>(&'py self, py: Python<'py>) -> Vec<PyRef<'py, PyExample>> {
+        self.examples.iter().map(|x| x.borrow(py)).collect()
     }
 }
 
@@ -666,8 +737,21 @@ impl PyRules {
     }
 
     #[getter]
-    fn rules(&self) -> Vec<PyRule> {
-        self.rules.rules().iter().map(PyRule::from_rule).collect()
+    fn rules(&self, py: Python) -> PyResult<Vec<PyRule>> {
+        self.rules
+            .rules()
+            .iter()
+            .map(|x| PyRule::from_rule(py, x))
+            .collect::<PyResult<Vec<_>>>()
+    }
+
+    /// Finds a rule by ID.
+    fn rule(&self, py: Python, id: &str) -> PyResult<Option<PyRule>> {
+        if let Some(rule) = self.rules.rule(id) {
+            Ok(Some(PyRule::from_rule(py, rule)?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Get suggestions for the given sentence.
@@ -794,7 +878,7 @@ impl PyRules {
                 Suggestion {
                     source: x.source().to_string(),
                     message: x.message().to_string(),
-                    text: x.text().iter().map(|x| x.to_string()).collect(),
+                    replacements: x.replacements().iter().map(|x| x.to_string()).collect(),
                     start: x.start(),
                     end: x.end(),
                 }

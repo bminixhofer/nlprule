@@ -52,8 +52,14 @@ impl Rules {
         bincode::deserialize_from(reader)
     }
 
+    /// All rules ordered by priority.
     pub fn rules(&self) -> &Vec<Rule> {
         &self.rules
+    }
+
+    /// Finds a rule by ID.
+    pub fn rule(&self, id: &str) -> Option<&Rule> {
+        self.rules.iter().find(|x| x.id() == id)
     }
 
     /// Compute the suggestions for the given tokens by checking all rules.
@@ -106,7 +112,7 @@ pub fn correct(text: &str, suggestions: &[Suggestion]) -> String {
     let mut chars: Vec<_> = text.chars().collect();
 
     for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.text[0].chars().collect();
+        let replacement: Vec<_> = suggestion.replacements[0].chars().collect();
         chars.splice(
             (suggestion.start as isize + offset) as usize
                 ..(suggestion.end as isize + offset) as usize,

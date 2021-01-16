@@ -247,7 +247,7 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
 }
 
 /// Suggestion for change in a text.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Suggestion {
     /// The ID of the rule this suggestion is from.
     pub source: String,
@@ -258,5 +258,5 @@ pub struct Suggestion {
     /// The end character index (exclusive).
     pub end: usize,
     /// The suggested replacement options for the text.
-    pub text: Vec<String>,
+    pub replacements: Vec<String>,
 }

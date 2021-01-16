@@ -10,8 +10,8 @@ use std::collections::HashSet;
 
 impl std::cmp::PartialEq for Suggestion {
     fn eq(&self, other: &Suggestion) -> bool {
-        let a: HashSet<&String> = self.text.iter().collect();
-        let b: HashSet<&String> = other.text.iter().collect();
+        let a: HashSet<&String> = self.replacements.iter().collect();
+        let b: HashSet<&String> = other.replacements.iter().collect();
 
         a.intersection(&b).count() > 0 && other.start == self.start && other.end == self.end
     }
@@ -38,10 +38,25 @@ impl Conversion {
     }
 }
 
+/// An example associated with a [Rule][crate::rule::Rule].
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Test {
-    pub text: String,
-    pub suggestion: Option<Suggestion>,
+pub struct Example {
+    pub(crate) text: String,
+    pub(crate) suggestion: Option<Suggestion>,
+}
+
+impl Example {
+    /// Gets the text of this example.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Gets the suggestion for this example.
+    /// * If this is `None`, the associated rule should not trigger for this example.
+    /// * If it is `Some`, the associated rule should return a suggestion with equivalent range and suggestions.
+    pub fn suggestion(&self) -> Option<&Suggestion> {
+        self.suggestion.as_ref()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

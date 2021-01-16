@@ -17,6 +17,7 @@ pub(crate) mod grammar;
 use engine::Engine;
 
 pub(crate) use engine::composition::MatchGraph;
+pub use grammar::Example;
 
 /// A disambiguation rule.
 /// Changes the information associcated with one or more tokens if it matches.
@@ -44,7 +45,7 @@ pub struct DisambiguationRule {
     pub(crate) filter: Option<Filter>,
     pub(crate) start: usize,
     pub(crate) end: usize,
-    pub(crate) tests: Vec<disambiguation::DisambiguationTest>,
+    pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
 }
 
 #[derive(Default)]
@@ -135,10 +136,10 @@ impl DisambiguationRule {
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
-        for (i, test) in self.tests.iter().enumerate() {
+        for (i, test) in self.examples.iter().enumerate() {
             let text = match test {
-                disambiguation::DisambiguationTest::Unchanged(x) => x.as_str(),
-                disambiguation::DisambiguationTest::Changed(x) => x.text.as_str(),
+                disambiguation::DisambiguationExample::Unchanged(x) => x.as_str(),
+                disambiguation::DisambiguationExample::Changed(x) => x.text.as_str(),
             };
 
             let tokens_before =
@@ -153,8 +154,10 @@ impl DisambiguationRule {
             info!("Tokens: {:#?}", tokens_before);
 
             let pass = match test {
-                disambiguation::DisambiguationTest::Unchanged(_) => tokens_before == tokens_after,
-                disambiguation::DisambiguationTest::Changed(change) => {
+                disambiguation::DisambiguationExample::Unchanged(_) => {
+                    tokens_before == tokens_after
+                }
+                disambiguation::DisambiguationExample::Changed(change) => {
                     let _before = tokens_before
                         .iter()
                         .find(|x| x.char_span == change.char_span)
@@ -230,9 +233,11 @@ impl DisambiguationRule {
 pub struct Rule {
     pub(crate) id: String,
     pub(crate) engine: Engine,
-    pub(crate) tests: Vec<grammar::Test>,
+    pub(crate) examples: Vec<Example>,
     pub(crate) suggesters: Vec<grammar::Synthesizer>,
     pub(crate) message: grammar::Synthesizer,
+    pub(crate) url: Option<String>,
+    pub(crate) short: Option<String>,
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) on: bool,
@@ -247,6 +252,21 @@ impl Rule {
     /// Get whether this rule is "turned on" i. e. whether it should be used by the rule set.
     pub fn on(&self) -> bool {
         self.on
+    }
+
+    /// Gets a short text describing this rule e.g. "Possible typo" if there is one.
+    pub fn short(&self) -> Option<&str> {
+        self.short.as_deref()
+    }
+
+    /// Gets an url with more information about this rule if there is one.
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
+    /// Gets the examples associated with this rule.
+    pub fn examples(&self) -> &[Example] {
+        &self.examples
     }
 
     /// Turn this rule on.
@@ -266,13 +286,13 @@ impl Rule {
                 panic!("{} group must exist in graph: {}", self.id, self.end - 1)
             });
 
-            let text: Vec<String> = self
+            let replacements: Vec<String> = self
                 .suggesters
                 .iter()
                 .filter_map(|x| x.apply(&graph, tokenizer, self.start, self.end))
                 .collect();
 
-            let start = if text
+            let start = if replacements
                 .iter()
                 .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
             {
@@ -298,12 +318,12 @@ impl Rule {
             let end = end_group.char_span.1;
 
             // fix e. g. "Super , dass"
-            let text: Vec<String> = text
+            let replacements: Vec<String> = replacements
                 .into_iter()
                 .map(|x| utils::fix_nospace_chars(&x))
                 .collect();
 
-            if !text.is_empty() {
+            if !replacements.is_empty() {
                 suggestions.push(Suggestion {
                     message: self
                         .message
@@ -312,7 +332,7 @@ impl Rule {
                     source: self.id.to_string(),
                     start,
                     end,
-                    text,
+                    replacements,
                 });
             }
         }
@@ -325,15 +345,15 @@ impl Rule {
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
-        for test in self.tests.iter() {
-            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text)));
+        for test in self.examples.iter() {
+            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens, tokenizer);
 
             let pass = if suggestions.len() > 1 {
                 false
             } else {
-                match &test.suggestion {
+                match test.suggestion() {
                     Some(correct_suggestion) => {
                         suggestions.len() == 1 && correct_suggestion == &suggestions[0]
                     }
@@ -344,7 +364,10 @@ impl Rule {
             if !pass {
                 warn!(
                     "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
-                    self.id, test.text, test.suggestion, suggestions
+                    self.id,
+                    test.text(),
+                    test.suggestion(),
+                    suggestions
                 );
             }
 

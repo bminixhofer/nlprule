@@ -204,7 +204,7 @@ pub struct DisambiguationChange {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum DisambiguationTest {
+pub enum DisambiguationExample {
     Unchanged(String),
     Changed(DisambiguationChange),
 }

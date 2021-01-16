@@ -767,7 +767,7 @@ impl Rule {
 
         assert!(!message_parts.is_empty(), "Rules must have a message.");
 
-        let mut tests = Vec::new();
+        let mut examples = Vec::new();
         for example in &data.examples {
             if example.kind.is_some() {
                 return Err(Error::Unimplemented(
@@ -796,18 +796,19 @@ impl Rule {
                         let length = marker.text.chars().count();
 
                         if let Some(correction_text) = &example.correction {
-                            let mut text: Vec<_> =
+                            let mut replacements: Vec<_> =
                                 correction_text.split('|').map(|x| x.to_string()).collect();
 
-                            text = if char_length == 0 {
+                            replacements = if char_length == 0 {
                                 // title case if at start
-                                text.into_iter()
+                                replacements
+                                    .into_iter()
                                     .map(|x| {
                                         utils::apply_to_first(&x, |c| c.to_uppercase().collect())
                                     })
                                     .collect()
                             } else {
-                                text
+                                replacements
                             };
 
                             suggestion = Some(Suggestion {
@@ -815,7 +816,7 @@ impl Rule {
                                 message: "_Test".to_string(),
                                 start: char_length,
                                 end: char_length + length,
-                                text,
+                                replacements,
                             });
                         }
 
@@ -824,7 +825,7 @@ impl Rule {
                 }
             }
 
-            tests.push(Test {
+            examples.push(Example {
                 text: texts.join(""),
                 suggestion,
             });
@@ -832,7 +833,7 @@ impl Rule {
 
         Ok(Rule {
             engine,
-            tests,
+            examples,
             start,
             end,
             suggesters,
@@ -840,6 +841,8 @@ impl Rule {
                 parts: message_parts,
                 use_titlecase_adjust: true,
             },
+            url: data.url.map(|x| x.to_string()),
+            short: data.short.map(|x| x.to_string()),
             id: String::new(),
             on: data.default.map_or(true, |x| x != "off"),
         })
@@ -1202,10 +1205,10 @@ impl DisambiguationRule {
             None
         };
 
-        let mut tests = Vec::new();
+        let mut examples = Vec::new();
 
-        if let Some(examples) = data.examples.as_ref() {
-            for example in examples {
+        if let Some(examples_structure) = data.examples.as_ref() {
+            for example in examples_structure {
                 let mut texts = Vec::new();
                 let mut char_span: Option<(usize, usize)> = None;
                 let mut char_length = 0;
@@ -1236,8 +1239,8 @@ impl DisambiguationRule {
                 let text = texts.join("");
 
                 let test = match example.kind.as_str() {
-                    "untouched" => DisambiguationTest::Unchanged(text),
-                    "ambiguous" => DisambiguationTest::Changed(DisambiguationChange {
+                    "untouched" => DisambiguationExample::Unchanged(text),
+                    "ambiguous" => DisambiguationExample::Changed(DisambiguationChange {
                         text,
                         before: parse_tag_form(
                             example
@@ -1258,7 +1261,7 @@ impl DisambiguationRule {
                     x => panic!("unknown disambiguation example type {}", x),
                 };
 
-                tests.push(test);
+                examples.push(test);
             }
         }
 
@@ -1271,7 +1274,7 @@ impl DisambiguationRule {
             disambiguations,
             start,
             end,
-            tests,
+            examples,
             id: String::new(),
         })
     }
