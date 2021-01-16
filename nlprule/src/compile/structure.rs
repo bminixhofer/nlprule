@@ -7,6 +7,8 @@ mod preprocess {
     use xml::reader::EventReader;
     use xml::writer::EmitterConfig;
 
+    use super::Category;
+
     pub fn sanitize(input: impl std::io::Read, whitespace_sensitive_tags: &[&str]) -> String {
         let mut sanitized = Vec::new();
 
@@ -76,7 +78,7 @@ mod preprocess {
             .to_string()
     }
 
-    pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, bool)> {
+    pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, Option<Category>)> {
         let mut string = String::new();
         xml.read_to_string(&mut string)
             .expect("error writing to string.");
@@ -101,13 +103,37 @@ mod preprocess {
                 let xml = string[x.range()].to_string();
                 let parent = x.parent_element().expect("must have parent");
 
-                (
-                    xml,
-                    parent.attribute("default").map_or(true, |x| x != "off"),
-                )
+                let category = if parent.tag_name().name() == "category" {
+                    Some(Category {
+                        id: parent.attribute("id").unwrap().to_owned(),
+                        name: parent.attribute("name").unwrap().to_owned(),
+                        kind: parent.attribute("type").map(|x| x.to_owned()),
+                        default: parent.attribute("default").map(|x| x.to_owned()),
+                    })
+                } else {
+                    None
+                };
+
+                (xml, category)
             })
             .collect()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    pub default: Option<String>,
+    pub n: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Category {
+    pub id: String,
+    pub name: String,
+    pub kind: Option<String>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -443,7 +469,7 @@ pub struct RuleGroup {
     #[serde(rename = "antipattern")]
     pub antipatterns: Option<Vec<Pattern>>,
     pub default: Option<String>,
-    pub name: Option<String>,
+    pub name: String,
     pub short: Option<XMLText>,
     pub url: Option<XMLText>,
     #[serde(rename = "rule")]
@@ -535,7 +561,7 @@ pub struct DisambiguationRuleGroup {
     pub id: String,
     #[serde(rename = "antipattern")]
     pub antipatterns: Option<Vec<Pattern>>,
-    pub name: Option<String>,
+    pub name: String,
     #[serde(rename = "rule")]
     pub rules: Vec<DisambiguationRule>,
     pub default: Option<String>,
@@ -574,17 +600,21 @@ pub enum DisambiguationRuleContainer {
 }
 
 macro_rules! flatten_group {
-    ($group:expr, $category_on:expr) => {{
-        let rule_group_id = $group.id.clone();
-        let group_antipatterns = if let Some(antipatterns) = $group.antipatterns {
+    ($rulegroup:expr, $category:expr) => {{
+        let group_antipatterns = if let Some(antipatterns) = $rulegroup.antipatterns {
             antipatterns
         } else {
             Vec::new()
         };
 
-        let group_on = $group.default.as_ref().map_or(true, |x| x != "off");
+        let group = Group {
+            id: $rulegroup.id,
+            default: $rulegroup.default,
+            name: $rulegroup.name,
+            n: 0,
+        };
 
-        $group
+        $rulegroup
             .rules
             .into_iter()
             .enumerate()
@@ -594,24 +624,21 @@ macro_rules! flatten_group {
                 } else {
                     rule.antipatterns = Some(group_antipatterns.clone());
                 }
-                let on =
-                    group_on && $category_on && rule.default.as_ref().map_or(true, |x| x != "off");
 
-                let rule_id = rule.id.clone();
-
-                (
-                    rule,
-                    format!("{}.{}", rule_id.unwrap_or_else(|| rule_group_id.clone()), i),
-                    on,
-                )
+                let mut group = group.clone();
+                group.n = i;
+                (rule, Some(group), $category.clone())
             })
             .collect::<Vec<_>>()
     }};
 }
 
+type GrammarRuleReading = (Rule, Option<Group>, Option<Category>);
+type DisambiguationRuleReading = (DisambiguationRule, Option<Group>, Option<Category>);
+
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
-) -> Vec<Result<(Rule, String, bool), serde_xml_rs::Error>> {
+) -> Vec<Result<GrammarRuleReading, serde_xml_rs::Error>> {
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
@@ -620,7 +647,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
 
     rules
         .into_iter()
-        .map(|(xml, category_on)| {
+        .map(|(xml, category)| {
             let mut out = Vec::new();
 
             let deseralized = RuleContainer::deserialize(&mut serde_xml_rs::Deserializer::new(
@@ -630,11 +657,9 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
             out.extend(match deseralized {
                 Ok(rule_container) => match rule_container {
                     RuleContainer::Rule(rule) => {
-                        let id = rule.id.clone().unwrap_or_else(String::new);
-                        let on = category_on && rule.default.as_ref().map_or(true, |x| x != "off");
-                        vec![Ok((rule, id, on))]
+                        vec![Ok((rule, None, category))]
                     }
-                    RuleContainer::RuleGroup(rule_group) => flatten_group!(rule_group, category_on)
+                    RuleContainer::RuleGroup(rule_group) => flatten_group!(rule_group, category)
                         .into_iter()
                         .map(Ok)
                         .collect(),
@@ -649,7 +674,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
 
 pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
     path: P,
-) -> Vec<Result<(DisambiguationRule, String), serde_xml_rs::Error>> {
+) -> Vec<Result<DisambiguationRuleReading, serde_xml_rs::Error>> {
     let file = File::open(path).unwrap();
     let file = BufReader::new(file);
 
@@ -667,16 +692,17 @@ pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
                 &mut serde_xml_rs::Deserializer::new(EventReader::new(xml.as_bytes())),
             );
 
+            let category: Option<Category> = None;
+
             out.extend(match deseralized {
                 Ok(rule_container) => match rule_container {
                     DisambiguationRuleContainer::Rule(rule) => {
-                        let id = rule.id.clone().unwrap_or_else(String::new);
-                        vec![Ok((rule, id))]
+                        vec![Ok((rule, None, category))]
                     }
                     DisambiguationRuleContainer::RuleGroup(rule_group) => {
-                        flatten_group!(rule_group, true)
+                        flatten_group!(rule_group, category)
                             .into_iter()
-                            .map(|x| (Ok((x.0, x.1))))
+                            .map(Ok)
                             .collect()
                     }
                     DisambiguationRuleContainer::Unification(unification) => {

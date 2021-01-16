@@ -843,8 +843,13 @@ impl Rule {
             },
             url: data.url.map(|x| x.to_string()),
             short: data.short.map(|x| x.to_string()),
+            // attributes below need information from rule group / category, so are set later
             id: String::new(),
-            on: data.default.map_or(true, |x| x != "off"),
+            name: String::new(),
+            on: true,
+            category_id: String::new(),
+            category_name: String::new(),
+            category_type: None,
         })
     }
 }

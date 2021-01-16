@@ -25,6 +25,9 @@ def test_correct(tokenizer_and_rules):
         == "Thanks for yours and Lucy’s help."
     )
 
+    # there is a rule for this but it is turned off
+    assert rules.correct("He is friend.") == "He is friend."
+
     assert rules.correct("I can due his homework.") == "I can do his homework."
 
 
@@ -56,10 +59,18 @@ def test_rules_inspectable(tokenizer_and_rules):
     rule = rules.rule(suggestion.source)
     assert rule.id == suggestion.source
 
+    # metadata of the rule itself
     assert rule.short == "Commonly confused word"
     assert rule.url == "https://www.merriam-webster.com/dictionary/take%20aback"
     assert rule.id == "BACK_ABACK"
+    assert rule.name == "taken back (aback) by"
 
+    # category related metadata
+    assert rule.category_id == "CONFUSED_WORDS"
+    assert rule.category_name == "Commonly Confused Words"
+    assert rule.category_type == "misspelling"
+
+    # data related to rule examples
     assert len(rule.examples) == 2
     assert rule.examples[0].text == "He was totally taken back by my response."
     assert rule.examples[0].suggestion is not None

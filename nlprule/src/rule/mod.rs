@@ -236,11 +236,15 @@ pub struct Rule {
     pub(crate) examples: Vec<Example>,
     pub(crate) suggesters: Vec<grammar::Synthesizer>,
     pub(crate) message: grammar::Synthesizer,
-    pub(crate) url: Option<String>,
-    pub(crate) short: Option<String>,
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) on: bool,
+    pub(crate) url: Option<String>,
+    pub(crate) short: Option<String>,
+    pub(crate) name: String,
+    pub(crate) category_id: String,
+    pub(crate) category_name: String,
+    pub(crate) category_type: Option<String>,
 }
 
 impl Rule {
@@ -272,6 +276,26 @@ impl Rule {
     /// Turn this rule on.
     pub fn set_on(&mut self, on: bool) {
         self.on = on;
+    }
+
+    /// Gets a human-readable name of this rule.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Gets the ID of the category this rule is in.
+    pub fn category_id(&self) -> &str {
+        &self.category_id
+    }
+
+    /// Gets a human-readable name of the category this rule is in.
+    pub fn category_name(&self) -> &str {
+        &self.category_name
+    }
+
+    /// Gets the type of the category this rule is in e. g. "style" or "grammar".
+    pub fn category_type(&self) -> Option<&str> {
+        self.category_type.as_deref()
     }
 
     pub(crate) fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {

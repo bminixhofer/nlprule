@@ -630,6 +630,10 @@ struct PyRule {
     url: Option<String>,
     short: Option<String>,
     examples: Vec<Py<PyExample>>,
+    name: String,
+    category_id: String,
+    category_name: String,
+    category_type: Option<String>,
 }
 
 impl PyRule {
@@ -643,6 +647,10 @@ impl PyRule {
                 .iter()
                 .map(|x| PyExample::from_example(py, x).and_then(|x| Py::new(py, x)))
                 .collect::<PyResult<Vec<_>>>()?,
+            name: rule.name().to_owned(),
+            category_id: rule.category_id().to_owned(),
+            category_name: rule.category_name().to_owned(),
+            category_type: rule.category_type().map(String::from),
         })
     }
 }
@@ -667,6 +675,26 @@ impl PyRule {
     #[getter]
     fn examples<'py>(&'py self, py: Python<'py>) -> Vec<PyRef<'py, PyExample>> {
         self.examples.iter().map(|x| x.borrow(py)).collect()
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    fn category_id(&self) -> &str {
+        &self.category_id
+    }
+
+    #[getter]
+    fn category_name(&self) -> &str {
+        &self.category_name
+    }
+
+    #[getter]
+    fn category_type(&self) -> Option<&str> {
+        self.category_type.as_deref()
     }
 }
 

@@ -88,14 +88,45 @@ impl Rules {
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
-                Ok((rule_structure, id, on)) => {
+                Ok((rule_structure, group, category)) => {
+                    let id = rule_structure.id.as_ref().map_or_else(
+                        || {
+                            let group = group.as_ref().expect("must have group if ID not set");
+                            format!("{}.{}", group.id, group.n)
+                        },
+                        |x| x.clone(),
+                    );
+                    let category = category.expect("grammar rules must have category");
+                    let off = rule_structure
+                        .default
+                        .as_ref()
+                        .map(|x| x == "off")
+                        .or_else(|| {
+                            group
+                                .as_ref()
+                                .and_then(|x| x.default.as_ref().map(|x| x == "off"))
+                        })
+                        .or_else(|| category.default.as_ref().map(|x| x == "off"))
+                        .unwrap_or(false);
+                    let name = rule_structure.name.as_ref().map_or_else(
+                        || {
+                            let group = group.as_ref().expect("must have group if name not set");
+                            group.name.clone()
+                        },
+                        |x| x.clone(),
+                    );
+
                     match Rule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if (options.ids.is_empty() || options.ids.contains(&id))
                                 && !options.ignore_ids.contains(&id)
                             {
                                 rule.id = id;
-                                rule.set_on(on);
+                                rule.name = name;
+                                rule.on = !off;
+                                rule.category_id = category.id;
+                                rule.category_name = category.name;
+                                rule.category_type = category.kind;
                                 Some(rule)
                             } else {
                                 None
@@ -140,7 +171,15 @@ impl Tokenizer {
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
-                Ok((rule_structure, id)) => {
+                Ok((rule_structure, group, _)) => {
+                    let id = rule_structure.id.as_ref().map_or_else(
+                        || {
+                            let group = group.expect("must have group if ID not set");
+                            format!("{}.{}", group.id, group.n)
+                        },
+                        |x| x.clone(),
+                    );
+
                     match DisambiguationRule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if error.is_none()
