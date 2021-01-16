@@ -115,16 +115,13 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build
         run: |
-          python -m venv venv
-          source ./venv/bin/activate
-          
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
          
-          bash scripts/maturin.sh develop --release
-          pytest bindings/python/test.py -s
-
           bash scripts/maturin.sh build --interpreter python --release --manylinux 1
+          ls target/wheels/ | xargs -n 1 pip install || true
+
+          pytest bindings/python/test.py -s
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2
         with:
