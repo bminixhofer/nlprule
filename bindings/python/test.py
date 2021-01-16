@@ -5,8 +5,8 @@ from nlprule import Tokenizer, Rules, SplitOn
 
 @pytest.fixture()
 def tokenizer_and_rules():
-    tokenizer = Tokenizer("../../storage/en_tokenizer.bin")
-    rules = Rules("../../storage/en_rules.bin", tokenizer, SplitOn([".", "?", "!"]))
+    tokenizer = Tokenizer("storage/en_tokenizer.bin")
+    rules = Rules("storage/en_rules.bin", tokenizer, SplitOn([".", "?", "!"]))
     return tokenizer, rules
 
 

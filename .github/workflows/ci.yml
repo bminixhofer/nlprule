@@ -89,7 +89,7 @@ jobs:
           filter: '[?runOnEvent==`${{ github.event_name }}` || runOnEvent==`always`]'
 
   python:
-    needs: matrix_prep
+    needs: [matrix_prep, rust]
     strategy:      
       matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
     runs-on: ${{ matrix.os }}
@@ -101,6 +101,10 @@ jobs:
         uses: actions/setup-python@v1
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v2
+        with:
+          name: binaries
+          path: storage
       - name: Install GSED (if needed) # needed by set_version.sh and maturin.sh
         if: matrix.os == 'macos-latest'
         run: |
@@ -111,8 +115,15 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build
         run: |
+          python -m venv venv
+          . venv/bin/activate
+          
           python -m pip install --upgrade pip
-          pip install maturin==0.8.3
+          pip install maturin==0.8.3 pytest==6.1.2
+         
+          bash scripts/maturin.sh develop --release
+          pytest bindings/python/test.py -s
+
           bash scripts/maturin.sh build --interpreter python --release --manylinux 1
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2

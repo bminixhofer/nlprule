@@ -23,7 +23,7 @@
 //!     vec![Suggestion {
 //!         start: 4, // these are character indices!
 //!         end: 16,
-//!         text: vec!["was not".into(), "has not been".into()],
+//!         replacements: vec!["was not".into(), "has not been".into()],
 //!         source: "WAS_BEEN.1".into(),
 //!         message: "Did you mean was not or has not been?".into()
 //!     }]
