@@ -1,9 +1,9 @@
 //! Sets of grammatical error correction rules.
 
-use crate::rule::Rule;
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
+use crate::{rule::Rule, tokenizer::finalize};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -63,7 +63,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given tokens by checking all rules.
-    pub fn suggest(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -103,11 +103,23 @@ impl Rules {
             })
             .collect()
     }
+
+    /// Compute the suggestions for a text by checking all rules.
+    pub fn suggest(&self, text: &str, tokenizer: &Tokenizer) -> Vec<Suggestion> {
+        let tokens = tokenizer.disambiguate(tokenizer.tokenize(text));
+        self.apply(&finalize(tokens), tokenizer)
+    }
+
+    /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
+    pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> String {
+        let suggestions = self.suggest(text, tokenizer);
+        apply_suggestions(text, &suggestions)
+    }
 }
 
 /// Correct a text by applying suggestions to it.
 /// In the case of multiple possible replacements, always chooses the first one.
-pub fn correct(text: &str, suggestions: &[Suggestion]) -> String {
+pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     let mut offset: isize = 0;
     let mut chars: Vec<_> = text.chars().collect();
 

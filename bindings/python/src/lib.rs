@@ -1,7 +1,7 @@
 use flate2::read::GzDecoder;
 use nlprule::{
     rule::{Example, Rule},
-    rules::{correct, Rules},
+    rules::{apply_suggestions, Rules},
     tokenizer::{finalize, tag::Tagger},
     tokenizer::{Tokenizer, TokenizerOptions},
     types::*,
@@ -800,9 +800,8 @@ impl PyRules {
             let tokenizer = self.tokenizer.borrow(py);
             let tokenizer = tokenizer.tokenizer();
 
-            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
             self.rules
-                .suggest(&tokens, &tokenizer)
+                .suggest(&sentence, &tokenizer)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -825,10 +824,9 @@ impl PyRules {
                 let mut offset = 0;
 
                 for sentence in sentences.iter() {
-                    let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(sentence)));
                     let suggestions = self
                         .rules
-                        .suggest(&tokens, &tokenizer)
+                        .suggest(&sentence, &tokenizer)
                         .into_iter()
                         .map(|mut x| {
                             x.start += offset;
@@ -859,9 +857,8 @@ impl PyRules {
             let tokenizer = self.tokenizer.borrow(py);
             let tokenizer = tokenizer.tokenizer();
 
-            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&sentence)));
-            let suggestions = self.rules.suggest(&tokens, &tokenizer);
-            Ok(correct(&sentence, &suggestions))
+            let suggestions = self.rules.suggest(&sentence, &tokenizer);
+            Ok(apply_suggestions(&sentence, &suggestions))
         })
     }
 
@@ -880,9 +877,8 @@ impl PyRules {
                 Ok(sentences
                     .iter()
                     .map(|x| {
-                        let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(x)));
-                        let suggestions = self.rules.suggest(&tokens, &tokenizer);
-                        correct(x, &suggestions)
+                        let suggestions = self.rules.suggest(&x, &tokenizer);
+                        apply_suggestions(x, &suggestions)
                     })
                     .collect::<Vec<_>>()
                     .join(""))
@@ -917,7 +913,7 @@ impl PyRules {
             })
             .collect();
 
-        correct(text, &suggestions)
+        apply_suggestions(text, &suggestions)
     }
 
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {

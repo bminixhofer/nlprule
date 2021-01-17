@@ -2,22 +2,35 @@
 //! # Overview
 //!
 //! NLPRule has the following core abstractions:
-//! - A [Tokenizer][tokenizer::Tokenizer] to split a text into tokens and analyze it.
+//! - A [Tokenizer][tokenizer::Tokenizer] to split a text into tokens and analyze it by chunking, lemmatizing and part-of-speech tagging. Can also be used independently of the grammatical rules.
 //! - A [Rules][rules::Rules] structure containing a set of grammatical error correction rules.
+//!
+//! # Example: correct a text
+//!
+//! ```no_run
+//! use nlprule::{Tokenizer, Rules};
+//!
+//! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
+//! let rules = Rules::new("path/to/en_rules.bin")?;
+//!
+//! assert_eq!(
+//!     rules.correct("She was not been here since Monday.", &tokenizer),
+//!     String::from("She was not here since Monday.")
+//! );
+//! # Ok::<(), bincode::Error>(())
+//! ```
 //!
 //! # Example: get suggestions and correct a text
 //!
 //! ```no_run
-//! use nlprule::types::*;
-//! use nlprule::{tokenizer::{Tokenizer, finalize}, rules::{Rules, correct}};
+//! use nlprule::{Tokenizer, Rules, types::Suggestion, rules::apply_suggestions};
 //!
 //! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
 //! let rules = Rules::new("path/to/en_rules.bin")?;
 //!
 //! let text = "She was not been here since Monday.";
 //!
-//! let tokens = tokenizer.disambiguate(tokenizer.tokenize(text));
-//! let suggestions = rules.suggest(&finalize(tokens), &tokenizer);
+//! let suggestions = rules.suggest(text, &tokenizer);
 //! assert_eq!(
 //!     suggestions,
 //!     vec![Suggestion {
@@ -29,7 +42,7 @@
 //!     }]
 //! );
 //!
-//! let corrected = correct(text, &suggestions);
+//! let corrected = apply_suggestions(text, &suggestions);
 //!
 //! assert_eq!(corrected, "She was not here since Monday.");
 //! # Ok::<(), bincode::Error>(())
@@ -50,6 +63,9 @@ pub mod rules;
 pub mod tokenizer;
 pub mod types;
 pub(crate) mod utils;
+
+pub use rules::Rules;
+pub use tokenizer::Tokenizer;
 
 #[derive(Error, Debug)]
 pub enum Error {

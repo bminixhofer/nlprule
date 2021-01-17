@@ -29,6 +29,6 @@ fn main() {
     println!("Tokens: {:#?}", incomplete_tokens);
     println!(
         "Suggestions: {:#?}",
-        rules.suggest(&finalize(incomplete_tokens), &tokenizer)
+        rules.apply(&finalize(incomplete_tokens), &tokenizer)
     );
 }
