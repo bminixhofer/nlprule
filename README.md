@@ -24,7 +24,7 @@ for s in suggestions:
 # 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 ```
 
-My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed implications) and without all the extra stuff LanguageTool does such as spellchecking, n-gram based error detection, etc.
+My goal with this library was creating a fast, lightweight engine to run natural language rules without having to rely on the JVM (and its speed / memory implications) and without all the extra stuff LanguageTool does such as spellchecking, n-gram based error detection, etc.
 
 NLPRule currently supports English and German.
 
@@ -42,7 +42,7 @@ In [1]: from nlprule import Tokenizer, Rules, SplitOn
    ...: rules = Rules.load("en", tokenizer, SplitOn([".", "?", "!"]))
 
 In [2]: %timeit rules.correct("He wants that you send him an email.")
-4.43 ms ± 15.3 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
+783 µs ± 6.18 µs per loop (mean ± std. dev. of 7 runs, 1000 loops each)
 ```
 
 <sub>Using Intel(R) Core(TM) i5-8600K CPU @ 3.60GHz</sub>
@@ -151,12 +151,12 @@ for token in tokens:
 
 ## Benchmark
 
-NLPRule is approximately 2.3x - 4.7x faster than LanguageTool. See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for details.
+NLPRule is approximately 1.7x - 2.8x faster than LanguageTool. See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for details.
 
-|         | NLPRule time | LanguageTool time  |
-|---------|--------------|--------------------|
-| English | 1            | 4.77               | 
-| German  | 1            | 2.36               |
+|         | NLPRule time | LanguageTool time |
+|---------|--------------|-------------------|
+| English | 1            | 1.7 - 2.0         | 
+| German  | 1            | 2.4 - 2.8         |
 
 ## Maintenance disclaimer
 

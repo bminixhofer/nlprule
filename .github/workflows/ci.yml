@@ -159,7 +159,18 @@ jobs:
       - name: Update version
         run: |
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
-      - name: Run release script
+      - name: Publish on crates.io
+        run: | # --allow-dirty is only needed b/c of the README.md, we can be sure it is clean otherwise anyway because it is freshly checked out
+          cargo login $CARGO_KEY
+
+          cp README.md nlprule/README.md
+
+          cd nlprule
+          cargo publish --allow-dirty
+          rm README.md
+        env:
+          CARGO_KEY: ${{ secrets.CARGO_KEY }}
+      - name: Publish on PyPI
         run: |
           pip install twine==3.3
           twine upload python-wheel/*
