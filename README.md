@@ -1,5 +1,10 @@
 # nlprule
 
+[![PyPI](https://img.shields.io/pypi/v/nlprule)](https://pypi.org/project/nlprule)
+[![Crates.io](https://img.shields.io/crates/v/nlprule)](https://crates.io/crates/nlprule)
+[![Docs.rs](https://docs.rs/nlprule/badge.svg)](https://docs.rs/nlprule)
+![CI](https://github.com/bminixhofer/nlprule/workflows/CI/badge.svg)
+
 NLPRule is a library for rule-based grammatical error correction written in pure Rust with bindings for Python. Rules are sourced from [LanguageTool](https://github.com/languagetool-org/languagetool). 
 
 ```python
@@ -170,4 +175,4 @@ All credit for the rule content goes to [LanguageTool](https://github.com/langua
 
 ## License
 
-NLPRule is licensed under the MIT license.
+NLPRule is licensed under the MIT license or Apache-2.0 license, at your option.
