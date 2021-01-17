@@ -1,7 +1,7 @@
 [package]
 name = "nlprule-python" # BUILD_BINDINGS_COMMENT
 # name = "nlprule" # BUILD_BINDINGS_UNCOMMENT
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 
