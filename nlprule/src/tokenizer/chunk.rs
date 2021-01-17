@@ -1,10 +1,10 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
-use fnv::FnvHashMap;
-use fnv::FnvHasher;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::{cmp::Ordering, collections::BinaryHeap};
+
+use crate::types::{DefaultHashMap, DefaultHasher};
 
 use super::IncompleteToken;
 
@@ -123,7 +123,7 @@ pub(crate) mod hash {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Model {
     pub(crate) outcome_labels: Vec<String>,
-    pub(crate) pmap: FnvHashMap<u64, Context>,
+    pub(crate) pmap: DefaultHashMap<u64, Context>,
 }
 
 impl Model {
@@ -173,7 +173,7 @@ impl Model {
         let mut next: BinaryHeap<Sequence> = BinaryHeap::new();
         prev.push(Sequence::default());
 
-        let mut cache: FnvHashMap<u64, Vec<f32>> = FnvHashMap::default();
+        let mut cache: DefaultHashMap<u64, Vec<f32>> = DefaultHashMap::default();
 
         for i in 0..tokens.len() {
             while prev.len() > size {
@@ -187,12 +187,12 @@ impl Model {
                     cache.insert(hash, self.eval(&context));
                 }
                 let scores = cache.get(&hash).unwrap();
-                let top_n = self.get_top_n(&scores, scores.len(), 1e-1);
+                let top_n = self.get_top_n(&scores, size, 1e-1);
 
-                for (_, p, pred) in &top_n[..std::cmp::min(size, top_n.len())] {
+                for (_, p, pred) in top_n {
                     if valid_fn(tokens, &seq.outcomes(), i, pred) {
                         let next_outcomes: Vec<_> = [seq.outcomes(), &[pred]].concat();
-                        let next_probs: Vec<_> = [seq.probs(), &[*p]].concat();
+                        let next_probs: Vec<_> = [seq.probs(), &[p]].concat();
 
                         next.push(Sequence::new(next_outcomes, next_probs));
                     }
@@ -358,7 +358,7 @@ impl MaxentTokenizer {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct MaxentPosTagger {
     pub(crate) model: Model,
-    pub(crate) tagdict: FnvHashMap<String, Vec<String>>,
+    pub(crate) tagdict: DefaultHashMap<String, Vec<String>>,
 }
 
 impl MaxentPosTagger {
@@ -388,7 +388,7 @@ impl MaxentPosTagger {
     }
 
     fn hash(tags: &[&str], i: usize) -> u64 {
-        let mut s = FnvHasher::default();
+        let mut s = DefaultHasher::default();
         if i >= 1 {
             tags[i - 1].hash(&mut s);
         }
@@ -502,7 +502,7 @@ impl MaxentChunker {
     }
 
     fn hash(preds: &[&str], i: usize) -> u64 {
-        let mut s = FnvHasher::default();
+        let mut s = DefaultHasher::default();
         if i >= 1 {
             preds[i - 1].hash(&mut s);
         }
@@ -635,7 +635,7 @@ impl Chunker {
         // replacements must not change char indices
         let text = tokens[0].text.replace('’', "\'");
 
-        let mut byte_to_char_idx: FnvHashMap<usize, usize> = text
+        let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
             .char_indices()
             .enumerate()
             .map(|(ci, (bi, _))| (bi, ci))

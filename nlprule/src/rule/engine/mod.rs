@@ -1,5 +1,4 @@
 use crate::{types::*, utils::regex::SerializeRegex};
-use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
 pub mod composition;
 
@@ -52,7 +51,7 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(SerializeRegex, FnvHashMap<usize, usize>),
+    Text(SerializeRegex, DefaultHashMap<usize, usize>),
 }
 
 impl Engine {
@@ -100,7 +99,7 @@ impl Engine {
                 // this is the entire text, NOT the text of one token
                 let text = tokens[0].text;
 
-                let mut byte_to_char_idx: FnvHashMap<usize, usize> = text
+                let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
                     .char_indices()
                     .enumerate()
                     .map(|(ci, (bi, _))| (bi, ci))

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use super::structure;
 use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
-use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
@@ -24,7 +23,7 @@ fn max_matches() -> usize {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegexCache {
-    cache: FnvHashMap<u64, Option<FnvHashSet<u32>>>,
+    cache: DefaultHashMap<u64, Option<DefaultHashSet<u32>>>,
     // this is compared with the hash of the word store of the tagger
     word_hash: u64,
 }
@@ -32,7 +31,7 @@ pub struct RegexCache {
 impl RegexCache {
     pub fn new(word_hash: u64) -> Self {
         RegexCache {
-            cache: FnvHashMap::default(),
+            cache: DefaultHashMap::default(),
             word_hash,
         }
     }
@@ -45,11 +44,11 @@ impl RegexCache {
         &self.word_hash
     }
 
-    pub fn get(&self, key: &u64) -> Option<&Option<FnvHashSet<u32>>> {
+    pub fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<u32>>> {
         self.cache.get(key)
     }
 
-    pub fn insert(&mut self, key: u64, value: Option<FnvHashSet<u32>>) {
+    pub fn insert(&mut self, key: u64, value: Option<DefaultHashSet<u32>>) {
         self.cache.insert(key, value);
     }
 }
@@ -716,7 +715,7 @@ impl Rule {
                 };
                 let mark = regex.mark.map_or(0, |x| x.parse().unwrap());
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
-                let id_to_idx: FnvHashMap<usize, usize> =
+                let id_to_idx: DefaultHashMap<usize, usize> =
                     (0..regex.captures_len() + 1).enumerate().collect();
                 Ok((Engine::Text(regex, id_to_idx), mark, mark + 1))
             }

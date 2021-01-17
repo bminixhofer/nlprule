@@ -2,9 +2,16 @@
 
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    collections::{hash_map, HashMap, HashSet},
+};
 
 use crate::tokenizer::tag::Tagger;
+
+pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
+pub(crate) type DefaultHashSet<T> = HashSet<T>;
+pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
 /// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
 pub mod owned {

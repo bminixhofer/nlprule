@@ -3,7 +3,6 @@
 
 use crate::types::*;
 use bimap::BiMap;
-use fnv::FnvHashMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -13,10 +12,10 @@ use std::{borrow::Cow, fs::File};
 /// The lexical tagger.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Tagger {
-    tags: FnvHashMap<u32, IndexMap<u32, Vec<u16>>>,
+    tags: DefaultHashMap<u32, IndexMap<u32, Vec<u16>>>,
     tag_store: BiMap<String, u16>,
     word_store: BiMap<String, u32>,
-    groups: FnvHashMap<u32, Vec<u32>>,
+    groups: DefaultHashMap<u32, Vec<u32>>,
 }
 
 impl Tagger {
@@ -81,8 +80,8 @@ impl Tagger {
         extra_tags: &[S3],
         common_words: &HashSet<String>,
     ) -> std::io::Result<Self> {
-        let mut tags = FnvHashMap::default();
-        let mut groups = FnvHashMap::default();
+        let mut tags = DefaultHashMap::default();
+        let mut groups = DefaultHashMap::default();
 
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();

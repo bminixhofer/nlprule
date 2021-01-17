@@ -1,6 +1,5 @@
 use std::hash::{Hash, Hasher};
 
-use fnv::{FnvHashMap, FnvHashSet, FnvHasher};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -11,6 +10,7 @@ use crate::{
     },
     rules::{Rules, RulesOptions},
     tokenizer::{chunk, Tokenizer, TokenizerOptions},
+    types::*,
     utils::parallelism::MaybeParallelIterator,
 };
 
@@ -23,7 +23,7 @@ impl TextMatcher {
         let set = if matcher.needs_graph() {
             None
         } else if let either::Right(regex) = &matcher.matcher {
-            let mut hasher = FnvHasher::default();
+            let mut hasher = DefaultHasher::default();
             regex.hash(&mut hasher);
             matcher.negate.hash(&mut hasher);
             matcher.empty_always_false.hash(&mut hasher);
@@ -34,7 +34,7 @@ impl TextMatcher {
             } else {
                 let data: Vec<_> = info.tagger().word_store().iter().collect();
 
-                let set: FnvHashSet<u32> = data
+                let set: DefaultHashSet<u32> = data
                     .into_maybe_par_iter()
                     .filter_map(|(word, id)| {
                         if matcher.is_match(word.as_str(), &graph, None) {
@@ -226,7 +226,7 @@ impl Tokenizer {
 #[derive(Serialize, Deserialize)]
 struct ModelData {
     outcome_labels: Vec<String>,
-    pmap: FnvHashMap<String, chunk::Context>,
+    pmap: DefaultHashMap<String, chunk::Context>,
 }
 
 impl From<ModelData> for chunk::Model {
@@ -237,7 +237,7 @@ impl From<ModelData> for chunk::Model {
                 .pmap
                 .into_iter()
                 .map(|(key, value)| (chunk::hash::hash_str(&key), value))
-                .collect::<FnvHashMap<_, _>>(),
+                .collect::<DefaultHashMap<_, _>>(),
         }
     }
 }
@@ -248,7 +248,7 @@ impl chunk::Chunker {
         struct ChunkData {
             token_model: ModelData,
             pos_model: ModelData,
-            pos_tagdict: FnvHashMap<String, Vec<String>>,
+            pos_tagdict: DefaultHashMap<String, Vec<String>>,
             chunk_model: ModelData,
         }
 
@@ -375,7 +375,7 @@ mod composition {
 
     impl Composition {
         pub fn new(parts: Vec<Part>) -> Self {
-            let mut group_ids_to_idx = FnvHashMap::default();
+            let mut group_ids_to_idx = DefaultHashMap::default();
             group_ids_to_idx.insert(0, 0);
             let mut current_id = 1;
 

@@ -7,11 +7,11 @@ use std::{
 };
 
 use clap::Clap;
-use fnv::FnvHasher;
 
 use crate::{
     rules::{Rules, RulesOptions},
     tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
+    types::DefaultHasher,
 };
 
 use self::parse_structure::{BuildInfo, RegexCache};
@@ -75,7 +75,7 @@ pub fn compile(opts: &BuildOptions) {
     )
     .unwrap();
 
-    let mut hasher = FnvHasher::default();
+    let mut hasher = DefaultHasher::default();
     let mut word_store = tagger.word_store().iter().collect::<Vec<_>>();
     word_store.sort_by(|a, b| a.1.cmp(b.1));
     word_store.hash(&mut hasher);

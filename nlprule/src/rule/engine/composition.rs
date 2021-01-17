@@ -1,10 +1,9 @@
 use crate::{types::*, utils::regex::SerializeRegex};
 use enum_dispatch::enum_dispatch;
-use fnv::FnvHashMap;
-use fnv::FnvHashSet;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
     pub matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
@@ -68,7 +67,7 @@ impl Matcher {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TextMatcher {
     pub matcher: Matcher,
-    pub set: Option<FnvHashSet<u32>>,
+    pub set: Option<DefaultHashSet<u32>>,
 }
 
 impl TextMatcher {
@@ -333,12 +332,12 @@ impl Group {
 #[derive(Debug)]
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
-    id_to_idx: &'t FnvHashMap<usize, usize>,
+    id_to_idx: &'t DefaultHashMap<usize, usize>,
     tokens: &'t [&'t Token<'t>],
 }
 
 lazy_static! {
-    static ref EMPTY_MAP: FnvHashMap<usize, usize> = FnvHashMap::default();
+    static ref EMPTY_MAP: DefaultHashMap<usize, usize> = DefaultHashMap::default();
 }
 
 impl<'t> Default for MatchGraph<'t> {
@@ -354,7 +353,7 @@ impl<'t> Default for MatchGraph<'t> {
 impl<'t> MatchGraph<'t> {
     pub fn new(
         groups: Vec<Group>,
-        id_to_idx: &'t FnvHashMap<usize, usize>,
+        id_to_idx: &'t DefaultHashMap<usize, usize>,
         tokens: &'t [&'t Token<'t>],
     ) -> Self {
         MatchGraph {
@@ -447,7 +446,7 @@ pub struct Part {
 #[derive(Serialize, Deserialize)]
 pub struct Composition {
     pub(crate) parts: Vec<Part>,
-    pub(crate) group_ids_to_idx: FnvHashMap<usize, usize>,
+    pub(crate) group_ids_to_idx: DefaultHashMap<usize, usize>,
     pub(crate) can_stop_mask: Vec<bool>,
 }
 
