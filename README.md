@@ -4,6 +4,7 @@
 [![Crates.io](https://img.shields.io/crates/v/nlprule)](https://crates.io/crates/nlprule)
 [![Docs.rs](https://docs.rs/nlprule/badge.svg)](https://docs.rs/nlprule)
 ![CI](https://github.com/bminixhofer/nlprule/workflows/CI/badge.svg)
+[![Downloads](https://pepy.tech/badge/nlprule/month)](https://pepy.tech/project/nlprule)
 
 NLPRule is a library for rule-based grammatical error correction written in pure Rust with bindings for Python. Rules are sourced from [LanguageTool](https://github.com/languagetool-org/languagetool). 
 
