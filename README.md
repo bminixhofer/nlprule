@@ -25,7 +25,7 @@ rules.correct("I can due his homework.")
 
 suggestions = rules.suggest("She was not been here since Monday.")
 for s in suggestions:
-  print(s.start, s.end, s.text, s.source, s.message)
+  print(s.start, s.end, s.replacements, s.source, s.message)
 # prints:
 # 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 ```
@@ -120,7 +120,7 @@ rules.correct("He wants that you send him an email. She was not been here since 
 ```python
 suggestions = rules.suggest_sentence("She was not been here since Monday.")
 for s in suggestions:
-  print(s.start, s.end, s.text, s.source, s.message)
+  print(s.start, s.end, s.replacements, s.source, s.message)
 # prints:
 # 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 ```
