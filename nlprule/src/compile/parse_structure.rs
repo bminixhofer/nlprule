@@ -347,6 +347,7 @@ fn parse_token(
         atom,
         quantifier,
         visible: true,
+        greedy: true,
     });
 
     if let Some(to_skip) = token.skip.clone() {
@@ -360,6 +361,7 @@ fn parse_token(
             atom: get_exceptions(token, case_sensitive, true, info)?,
             quantifier: Quantifier::new(0, to_skip),
             visible: false,
+            greedy: false,
         });
     }
 
@@ -558,6 +560,7 @@ fn parse_unify_tokens(
                 vec![Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 }]
             }
@@ -566,6 +569,7 @@ fn parse_unify_tokens(
                 vec![Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 }]
             }
@@ -595,6 +599,7 @@ fn parse_tokens(
                 vec![Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 }]
             }
@@ -603,6 +608,7 @@ fn parse_tokens(
                 vec![Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 }]
             }
@@ -647,6 +653,7 @@ fn parse_pattern(
                 composition_parts.push(Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 });
             }
@@ -656,6 +663,7 @@ fn parse_pattern(
                 composition_parts.push(Part {
                     atom,
                     quantifier: Quantifier::new(1, 1),
+                    greedy: true,
                     visible: true,
                 });
             }

@@ -329,7 +329,7 @@ impl Group {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
     id_to_idx: &'t DefaultHashMap<usize, usize>,
@@ -440,6 +440,7 @@ impl<'t> MatchGraph<'t> {
 pub struct Part {
     pub atom: Atom,
     pub quantifier: Quantifier,
+    pub greedy: bool,
     pub visible: bool,
 }
 
@@ -458,10 +459,6 @@ impl Composition {
         position: usize,
         index: usize,
     ) -> bool {
-        if index == self.parts.len() - 1 {
-            return false;
-        }
-
         let next_required_pos = match self.parts[index + 1..]
             .iter()
             .position(|x| x.quantifier.min > 0)
@@ -475,36 +472,16 @@ impl Composition {
             .any(|x| x.atom.is_match(tokens, graph, position))
     }
 
-    pub fn apply<'t>(
+    fn apply_recursive<'t>(
         &'t self,
         tokens: &'t [&'t Token<'t>],
-        start: usize,
+        mut position: usize,
+        mut cur_atom_idx: usize,
+        mut graph: MatchGraph<'t>,
     ) -> Option<MatchGraph<'t>> {
-        // this path is extremely hot so more optimizations are done
-
-        // the first matcher can never rely on the match graph, so we use an empty default graph for the first match
-        // then allocate a new graph if the first matcher matched
-        lazy_static! {
-            static ref DEFAULT_GRAPH: MatchGraph<'static> = MatchGraph::default();
-        };
-
-        let first_must_match = self.parts[0].quantifier.min > 0;
-        if first_must_match && !self.parts[0].atom.is_match(tokens, &DEFAULT_GRAPH, start) {
-            return None;
-        }
-
-        let mut position = start;
-
         let mut cur_count = 0;
-        let mut cur_atom_idx = 0;
 
-        let mut graph = MatchGraph::new(
-            vec![Group::default(); self.parts.len() + 1],
-            &self.group_ids_to_idx,
-            tokens,
-        );
-
-        let mut is_match = loop {
+        let is_match = loop {
             if cur_atom_idx >= self.parts.len() {
                 break true;
             }
@@ -524,14 +501,22 @@ impl Composition {
                 break false;
             }
 
-            if cur_count >= part.quantifier.min
-                && self.next_can_match(&tokens, &graph, position, cur_atom_idx)
-            {
-                cur_atom_idx += 1;
-                cur_count = 0;
-            } else if (first_must_match && position == start && cur_atom_idx == 0) // we already know this must have matched, otherwise it would have early exited above
-                || part.atom.is_match(tokens, &graph, position)
-            {
+            if cur_count >= part.quantifier.min && cur_atom_idx + 1 < self.parts.len() {
+                if !part.greedy && self.next_can_match(tokens, &graph, position, cur_atom_idx) {
+                    cur_atom_idx += 1;
+                    cur_count = 0;
+                    continue;
+                }
+                if part.greedy {
+                    if let Some(graph) =
+                        self.apply_recursive(tokens, position, cur_atom_idx + 1, graph.clone())
+                    {
+                        return Some(graph);
+                    }
+                }
+            }
+
+            if part.atom.is_match(tokens, &graph, position) {
                 let mut group = &mut graph.groups[cur_atom_idx + 1];
 
                 // set the group beginning if the char end was zero (i. e. the group was empty)
@@ -547,13 +532,41 @@ impl Composition {
             }
         };
 
-        is_match = is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx];
-
-        if is_match {
+        if is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx] {
             graph.fill_empty();
             Some(graph)
         } else {
             None
         }
+    }
+
+    pub fn apply<'t>(
+        &'t self,
+        tokens: &'t [&'t Token<'t>],
+        start: usize,
+    ) -> Option<MatchGraph<'t>> {
+        // this path is extremely hot so more optimizations are done
+
+        // the first matcher can never rely on the match graph, so we use an empty default graph for the first match
+        // then allocate a new graph if the first matcher matched
+        lazy_static! {
+            static ref DEFAULT_GRAPH: MatchGraph<'static> = MatchGraph::default();
+        };
+
+        if self.parts[0].quantifier.min > 0
+            && !self.parts[0].atom.is_match(tokens, &DEFAULT_GRAPH, start)
+        {
+            return None;
+        }
+
+        let position = start;
+
+        let graph = MatchGraph::new(
+            vec![Group::default(); self.parts.len() + 1],
+            &self.group_ids_to_idx,
+            tokens,
+        );
+
+        self.apply_recursive(tokens, position, 0, graph)
     }
 }
