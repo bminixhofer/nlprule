@@ -6,6 +6,7 @@ use crate::{
     tokenizer::{finalize, Tokenizer},
     utils,
 };
+use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -18,6 +19,34 @@ use engine::Engine;
 
 pub(crate) use engine::composition::MatchGraph;
 pub use grammar::Example;
+
+use self::disambiguation::POSFilter;
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Unification {
+    pub(crate) mask: Vec<bool>,
+    pub(crate) filters: Vec<Vec<POSFilter>>,
+}
+
+impl Unification {
+    pub fn keep(&self, graph: &MatchGraph, tokens: &[&Token]) -> bool {
+        let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
+
+        let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
+
+        for (group, use_mask_val) in graph.groups().iter().zip(self.mask.iter()) {
+            for token in group.tokens(tokens) {
+                if *use_mask_val {
+                    for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
+                        *mask_val = *mask_val && POSFilter::and(filter, &token.word);
+                    }
+                }
+            }
+        }
+
+        filter_mask.iter().any(|x| *x)
+    }
+}
 
 /// A disambiguation rule.
 /// Changes the information associcated with one or more tokens if it matches.
@@ -46,6 +75,7 @@ pub struct DisambiguationRule {
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
+    pub(crate) unification: Option<Unification>,
 }
 
 #[derive(Default)]
@@ -73,6 +103,12 @@ impl DisambiguationRule {
         let mut all_byte_spans = Vec::new();
 
         for graph in self.engine.get_matches(&refs, self.start, self.end) {
+            if let Some(unification) = &self.unification {
+                if !unification.keep(&graph, &refs) {
+                    continue;
+                }
+            }
+
             if let Some(filter) = &self.filter {
                 if !filter.keep(&graph, tokenizer) {
                     continue;

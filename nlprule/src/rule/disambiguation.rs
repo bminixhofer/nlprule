@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::engine::composition::PosMatcher;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct POSFilter {
     pub matcher: PosMatcher,
 }
@@ -22,13 +22,13 @@ impl POSFilter {
         data.tags.retain(|x| !self.is_word_data_match(x))
     }
 
-    fn and(filters: &[&Self], data: &Word) -> bool {
+    pub fn and(filters: &[&Self], data: &Word) -> bool {
         data.tags
             .iter()
             .any(|x| filters.iter().all(|filter| filter.is_word_data_match(x)))
     }
 
-    fn apply(filters: &[Vec<&Self>], data: &mut Word) {
+    pub fn apply(filters: &[Vec<&Self>], data: &mut Word) {
         data.tags.retain(|x| {
             filters
                 .iter()

@@ -194,13 +194,17 @@ impl Tokenizer {
                             }
                         }
                         Err(x) => {
-                            error = Some(format!("[Rule] {}", x));
+                            if error.is_none() {
+                                error = Some(format!("[Rule] {}", x));
+                            }
                             None
                         }
                     }
                 }
                 Err(x) => {
-                    error = Some(format!("[Structure] {}", x));
+                    if error.is_none() {
+                        error = Some(format!("[Structure] {}", x));
+                    }
                     None
                 }
             })

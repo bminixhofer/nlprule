@@ -4,8 +4,11 @@ use std::io::BufReader;
 use xml::reader::EventReader;
 
 mod preprocess {
-    use xml::reader::EventReader;
-    use xml::writer::EmitterConfig;
+    use std::{borrow::Cow, str::FromStr};
+
+    use lazy_static::lazy_static;
+    use xml::{attribute::OwnedAttribute, reader::EventReader};
+    use xml::{name::OwnedName, writer::EmitterConfig};
 
     use super::Category;
 
@@ -32,11 +35,48 @@ mod preprocess {
 
         for event in &events {
             match event {
-                xml::reader::XmlEvent::StartElement { name, .. } => {
+                xml::reader::XmlEvent::StartElement {
+                    name,
+                    attributes,
+                    namespace,
+                } => {
+                    let unify_index = parents.iter().position(|x| *x == "unify");
+                    let ignore_index = parents.iter().position(|x| *x == "unify-ignore");
+
                     parents.push(name.local_name.as_str());
+
+                    let unify = unify_index.map_or(false, |i| {
+                        ignore_index.map_or(true, |ignore_i| i > ignore_i)
+                    });
+
+                    if unify && name.local_name == "token" {
+                        lazy_static! {
+                            static ref UNIFY_ATTRIBUTE: OwnedAttribute =
+                                OwnedAttribute::new(OwnedName::from_str("unify").unwrap(), "yes",);
+                        }
+
+                        out_events.push(xml::writer::XmlEvent::StartElement {
+                            name: name.borrow(),
+                            attributes: attributes
+                                .iter()
+                                .chain(vec![&*UNIFY_ATTRIBUTE])
+                                .map(|a| a.borrow())
+                                .collect(),
+                            namespace: Cow::Borrowed(namespace),
+                        });
+                        continue;
+                    }
+
+                    if ["unify", "unify-ignore"].contains(&name.local_name.as_str()) {
+                        continue;
+                    }
                 }
-                xml::reader::XmlEvent::EndElement { .. } => {
+                xml::reader::XmlEvent::EndElement { name, .. } => {
                     parents.pop();
+
+                    if ["unify", "unify-ignore"].contains(&name.local_name.as_str()) {
+                        continue;
+                    }
                 }
                 xml::reader::XmlEvent::Characters(chars) => {
                     out_events.push(
@@ -281,6 +321,7 @@ pub struct Token {
     pub min: Option<String>,
     pub max: Option<String>,
     pub skip: Option<String>,
+    pub unify: Option<String>,
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
@@ -372,39 +413,13 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Ignore {
-    #[serde(rename = "$value")]
-    pub tokens: Vec<TokenCombination>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[serde(deny_unknown_fields)]
-pub enum UnifyTokenCombination {
-    Token(Token),
-    Or(TokenVector),
-    And(TokenVector),
-    Feature(Feature),
-    #[serde(rename = "unify-ignore")]
-    Ignore(Ignore),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Unify {
-    #[serde(rename = "$value")]
-    pub tokens: Vec<UnifyTokenCombination>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub enum TokenCombination {
     Token(Token),
     Or(TokenVector),
     And(TokenVector),
-    Unify(Unify),
+    Feature(Feature),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -422,7 +437,7 @@ pub enum PatternPart {
     Marker(PatternMarker),
     Or(TokenVector),
     And(TokenVector),
-    Unify(Unify),
+    Feature(Feature),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -498,7 +513,7 @@ pub struct DisambiguationExample {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WordData {
-    pub pos: String,
+    pub pos: Option<String>,
     pub text: Option<String>,
     pub lemma: Option<String>,
 }

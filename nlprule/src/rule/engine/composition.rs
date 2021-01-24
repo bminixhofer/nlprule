@@ -92,7 +92,7 @@ impl TextMatcher {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PosMatcher {
     pub mask: Vec<bool>,
 }
@@ -442,6 +442,7 @@ pub struct Part {
     pub quantifier: Quantifier,
     pub greedy: bool,
     pub visible: bool,
+    pub unify: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]

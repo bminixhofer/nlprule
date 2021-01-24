@@ -206,7 +206,15 @@ impl Tagger {
     }
 
     pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
-        PosId(tag, *self.tag_store.get_by_left(tag).unwrap())
+        PosId(
+            tag,
+            *self.tag_store.get_by_left(tag).unwrap_or_else(|| {
+                panic!(
+                    "'{}' not found in tag store, please add it to the `extra_tags`.",
+                    tag
+                )
+            }),
+        )
     }
 
     pub fn id_word<'t>(&'t self, text: Cow<'t, str>) -> WordId<'t> {
