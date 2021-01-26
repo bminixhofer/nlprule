@@ -34,7 +34,7 @@ impl Unification {
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
 
-        for (group, use_mask_val) in graph.groups().iter().zip(self.mask.iter()) {
+        for (group, use_mask_val) in graph.groups()[1..].iter().zip(self.mask.iter()) {
             for token in group.tokens(tokens) {
                 if *use_mask_val {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {

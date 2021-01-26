@@ -6,16 +6,16 @@
 
 use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
     fs::File,
     io::{BufReader, Read},
+    ops::Deref,
     path::Path,
     sync::Arc,
 };
-use unicode_segmentation::UnicodeSegmentation;
 
 pub mod chunk;
 pub mod tag;
@@ -46,7 +46,11 @@ where
     result
 }
 
-fn get_token_strs(text: &str) -> Vec<&str> {
+fn get_token_strs<'t>(
+    text: &'t str,
+    extra_split_chars: &[char],
+    extra_join_regexes: &[String],
+) -> Vec<&'t str> {
     let mut tokens = Vec::new();
 
     lazy_static! {
@@ -54,13 +58,45 @@ fn get_token_strs(text: &str) -> Vec<&str> {
         static ref URL_REGEX: Regex = Regex::new(r"(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})").unwrap();
     }
 
-    let mut prev = 0;
-    let split_func = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
+    lazy_static! {
+        static ref EXTRA_REGEXES: OnceCell<Vec<Regex>> = OnceCell::default();
+    }
 
-    for (start, end) in URL_REGEX.find_iter(text) {
-        tokens.extend(split(&text[prev..start], split_func));
-        tokens.push(&text[start..end]);
-        prev = end;
+    let extra_regexes = EXTRA_REGEXES.get_or_init(|| {
+        extra_join_regexes
+            .iter()
+            .map(|string| Regex::new(string).unwrap())
+            .collect()
+    });
+
+    let split_func = |c: char| {
+        c.is_whitespace()
+            || crate::utils::splitting_chars().contains(c)
+            || extra_split_chars.contains(&c)
+    };
+
+    let mut joined_mask = vec![false; text.len()];
+    let mut joins = Vec::new();
+
+    for regex in Some(URL_REGEX.deref())
+        .into_iter()
+        .chain(extra_regexes.iter())
+    {
+        for (start, end) in regex.find_iter(text) {
+            if !joined_mask[start..end].iter().any(|x| *x) {
+                joins.push(start..end);
+                joined_mask[start..end].iter_mut().for_each(|x| *x = true);
+            }
+        }
+    }
+
+    joins.sort_by(|a, b| a.start.cmp(&b.start));
+
+    let mut prev = 0;
+    for range in joins {
+        tokens.extend(split(&text[prev..range.start], split_func));
+        prev = range.end;
+        tokens.push(&text[range]);
     }
 
     tokens.extend(split(&text[prev..text.len()], split_func));
@@ -105,6 +141,12 @@ pub struct TokenizerOptions {
     /// Used part-of-speech tags which are not in the tagger dictionary.
     #[serde(default)]
     pub extra_tags: Vec<String>,
+    /// Extra language-specific characters to split text on.
+    #[serde(default)]
+    pub extra_split_chars: Vec<char>,
+    /// Extra language-specific Regexes of which the matches will *not* be split into multiple tokens.
+    #[serde(default)]
+    pub extra_join_regexes: Vec<String>,
 }
 
 impl Default for TokenizerOptions {
@@ -118,6 +160,8 @@ impl Default for TokenizerOptions {
             ignore_ids: Vec::new(),
             known_failures: Vec::new(),
             extra_tags: Vec::new(),
+            extra_split_chars: Vec::new(),
+            extra_join_regexes: Vec::new(),
         }
     }
 }
@@ -206,23 +250,16 @@ impl Tokenizer {
 
     /// Tokenize the given text. This applies chunking and tagging, but does not do disambiguation.
     pub fn tokenize<'t>(&'t self, text: &'t str) -> Vec<IncompleteToken<'t>> {
-        let sentence_indices = text
-            .unicode_sentences()
-            .map(|sentence| {
-                let ptr = sentence.as_ptr() as usize;
-                (ptr, ptr + sentence.len())
-            })
-            .fold((HashSet::new(), HashSet::new()), |mut a, x| {
-                a.0.insert(x.0);
-                a.1.insert(x.1);
-                a
-            });
-
         let mut current_char = 0;
-        let token_strs = get_token_strs(text);
+        let token_strs = get_token_strs(
+            text,
+            &self.options.extra_split_chars,
+            &self.options.extra_join_regexes,
+        );
         let mut tokens: Vec<_> = token_strs
-            .into_iter()
-            .map(|x| {
+            .iter()
+            .enumerate()
+            .map(|(i, x)| {
                 let char_start = current_char;
                 let ptr = x.as_ptr() as usize;
                 current_char += x.chars().count();
@@ -230,8 +267,8 @@ impl Tokenizer {
                 let byte_start = ptr - text.as_ptr() as usize;
                 let trimmed = x.trim();
 
-                let is_sentence_start = sentence_indices.0.contains(&ptr);
-                let is_sentence_end = sentence_indices.1.contains(&(ptr + x.len()));
+                let is_sentence_start = i == 0;
+                let is_sentence_end = i == token_strs.len() - 1;
 
                 IncompleteToken {
                     word: Word::new_with_tags(
