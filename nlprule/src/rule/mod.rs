@@ -24,7 +24,7 @@ use self::disambiguation::POSFilter;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Unification {
-    pub(crate) mask: Vec<bool>,
+    pub(crate) mask: Vec<Option<bool>>,
     pub(crate) filters: Vec<Vec<POSFilter>>,
 }
 
@@ -33,10 +33,11 @@ impl Unification {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
+        let negate = self.mask.iter().all(|x| x.map_or(true, |x| !x));
 
-        for (group, use_mask_val) in graph.groups()[1..].iter().zip(self.mask.iter()) {
-            for token in group.tokens(tokens) {
-                if *use_mask_val {
+        for (group, maybe_mask_val) in graph.groups()[1..].iter().zip(self.mask.iter()) {
+            if maybe_mask_val.is_some() {
+                for token in group.tokens(tokens) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
                         *mask_val = *mask_val && POSFilter::and(filter, &token.word);
                     }
@@ -44,7 +45,12 @@ impl Unification {
             }
         }
 
-        filter_mask.iter().any(|x| *x)
+        let result = filter_mask.iter().any(|x| *x);
+        if negate {
+            !result
+        } else {
+            result
+        }
     }
 }
 
@@ -281,6 +287,7 @@ pub struct Rule {
     pub(crate) category_id: String,
     pub(crate) category_name: String,
     pub(crate) category_type: Option<String>,
+    pub(crate) unification: Option<Unification>,
 }
 
 impl Rule {
@@ -339,6 +346,12 @@ impl Rule {
         let mut suggestions = Vec::new();
 
         for graph in self.engine.get_matches(&refs, self.start, self.end) {
+            if let Some(unification) = &self.unification {
+                if !unification.keep(&graph, &refs) {
+                    continue;
+                }
+            }
+
             let start_group = graph
                 .by_id(self.start)
                 .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));

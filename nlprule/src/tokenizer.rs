@@ -18,9 +18,11 @@ use std::{
 };
 
 pub mod chunk;
+pub mod multiword;
 pub mod tag;
 
 use chunk::Chunker;
+use multiword::MultiwordTagger;
 use tag::Tagger;
 
 use crate::rule::DisambiguationRule;
@@ -50,6 +52,7 @@ fn get_token_strs<'t>(
     text: &'t str,
     extra_split_chars: &[char],
     extra_join_regexes: &[String],
+    tagger: &Tagger,
 ) -> Vec<&'t str> {
     let mut tokens = Vec::new();
 
@@ -69,10 +72,21 @@ fn get_token_strs<'t>(
             .collect()
     });
 
-    let split_func = |c: char| {
-        c.is_whitespace()
-            || crate::utils::splitting_chars().contains(c)
-            || extra_split_chars.contains(&c)
+    let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
+    let split_text = |text: &'t str| {
+        let mut tokens = Vec::new();
+        for pretoken in split(text, split_char) {
+            // if the token is in the dictionary, we add it right away
+            if tagger.id_word(pretoken.into()).1.is_some() {
+                tokens.push(pretoken);
+            } else {
+                // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
+                tokens.extend(split(pretoken, |c| {
+                    split_char(c) || extra_split_chars.contains(&c)
+                }));
+            }
+        }
+        tokens
     };
 
     let mut joined_mask = vec![false; text.len()];
@@ -94,13 +108,12 @@ fn get_token_strs<'t>(
 
     let mut prev = 0;
     for range in joins {
-        tokens.extend(split(&text[prev..range.start], split_func));
+        tokens.extend(split_text(&text[prev..range.start]));
         prev = range.end;
         tokens.push(&text[range]);
     }
 
-    tokens.extend(split(&text[prev..text.len()], split_func));
-
+    tokens.extend(split_text(&text[prev..text.len()]));
     tokens
 }
 
@@ -171,6 +184,7 @@ impl Default for TokenizerOptions {
 pub struct Tokenizer {
     pub(crate) rules: Vec<DisambiguationRule>,
     pub(crate) chunker: Option<Chunker>,
+    pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
     pub(crate) options: TokenizerOptions,
 }
@@ -255,6 +269,7 @@ impl Tokenizer {
             text,
             &self.options.extra_split_chars,
             &self.options.extra_join_regexes,
+            &self.tagger,
         );
         let mut tokens: Vec<_> = token_strs
             .iter()
@@ -284,6 +299,7 @@ impl Tokenizer {
                     is_sentence_end,
                     has_space_before: text[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
+                    multiword_data: None,
                     text,
                     tagger: self.tagger.as_ref(),
                 }
@@ -297,6 +313,10 @@ impl Tokenizer {
 
             if let Some(chunker) = &self.chunker {
                 chunker.apply(&mut tokens);
+            }
+
+            if let Some(multiword_tagger) = &self.multiword_tagger {
+                multiword_tagger.apply(&mut tokens, &self.tagger);
             }
         }
 

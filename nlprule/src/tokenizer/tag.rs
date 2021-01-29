@@ -4,6 +4,7 @@
 use crate::types::*;
 use bimap::BiMap;
 use indexmap::IndexMap;
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::BufRead;
@@ -209,10 +210,11 @@ impl Tagger {
         PosId(
             tag,
             *self.tag_store.get_by_left(tag).unwrap_or_else(|| {
-                panic!(
-                    "'{}' not found in tag store, please add it to the `extra_tags`.",
+                error!(
+                    "'{}' not found in tag store, please add it to the `extra_tags`. Using UNKNOWN instead.",
                     tag
-                )
+                );
+                self.tag_store.get_by_left("UNKNOWN").unwrap()
             }),
         )
     }

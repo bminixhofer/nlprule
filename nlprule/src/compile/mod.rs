@@ -10,7 +10,9 @@ use clap::Clap;
 
 use crate::{
     rules::{Rules, RulesOptions},
-    tokenizer::{chunk::Chunker, tag::Tagger, Tokenizer, TokenizerOptions},
+    tokenizer::{
+        chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer, TokenizerOptions,
+    },
     types::DefaultHasher,
 };
 
@@ -40,6 +42,8 @@ pub struct BuildOptions {
     pub rules_config_path: String,
     #[clap(long)]
     pub chunker_path: Option<String>,
+    #[clap(long)]
+    pub multiword_tag_path: Option<String>,
     #[clap(long)]
     pub common_words_path: Option<String>,
     #[clap(long)]
@@ -93,17 +97,24 @@ pub fn compile(opts: &BuildOptions) {
     };
 
     let mut build_info = BuildInfo::new(Arc::new(tagger), regex_cache);
+    let chunker = if let Some(path) = &opts.chunker_path {
+        let reader = BufReader::new(File::open(path).unwrap());
+        let chunker = Chunker::from_json(reader);
+        Some(chunker)
+    } else {
+        None
+    };
+    let multiword_tagger = if let Some(path) = &opts.multiword_tag_path {
+        Some(MultiwordTagger::from_dump(path, &build_info))
+    } else {
+        None
+    };
 
     let tokenizer = Tokenizer::from_xml(
         &opts.disambiguation_path,
         &mut build_info,
-        if let Some(path) = &opts.chunker_path {
-            let reader = BufReader::new(File::open(path).unwrap());
-            let chunker = Chunker::from_json(reader);
-            Some(chunker)
-        } else {
-            None
-        },
+        chunker,
+        multiword_tagger,
         tokenizer_options,
     )
     .unwrap();

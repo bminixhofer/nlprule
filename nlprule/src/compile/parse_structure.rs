@@ -694,7 +694,7 @@ impl Rule {
             ));
         }
 
-        let (engine, start, end) = match (data.pattern, data.regex) {
+        let (engine, start, end) = match (&data.pattern, data.regex) {
             (Some(_), Some(_)) => Err(Error::Unexpected(
                 "must not contain both `pattern` and `regexp`.".into(),
             )),
@@ -702,19 +702,29 @@ impl Rule {
                 "either `pattern` or `regexp` must be supplied.".into(),
             )),
             (Some(pattern), None) => {
-                let (composition, start, end) = parse_pattern(pattern, info)?;
+                let (composition, start, end) = parse_pattern(pattern.clone(), info)?;
+                let antipatterns = if let Some(antipatterns) = data.antipatterns {
+                    antipatterns
+                        .into_iter()
+                        .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
+                        .collect::<Result<Vec<_>, Error>>()?
+                } else {
+                    Vec::new()
+                };
+
+                if antipatterns
+                    .iter()
+                    .any(|pattern| pattern.parts.iter().any(|x| x.unify.is_some()))
+                {
+                    return Err(Error::Unimplemented(
+                        "`unify` in antipattern is not supported.".into(),
+                    ));
+                }
 
                 Ok((
                     Engine::Token(TokenEngine {
                         composition,
-                        antipatterns: if let Some(antipatterns) = data.antipatterns {
-                            antipatterns
-                                .into_iter()
-                                .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
-                                .collect::<Result<Vec<_>, Error>>()?
-                        } else {
-                            Vec::new()
-                        },
+                        antipatterns,
                     }),
                     start,
                     end,
@@ -736,6 +746,19 @@ impl Rule {
 
         let maybe_composition = if let Engine::Token(engine) = &engine {
             Some(&engine.composition)
+        } else {
+            None
+        };
+
+        let unify_data = if let Some(pattern) = &data.pattern {
+            let unify_filters = parse_features(&pattern, &data.unifications, info);
+            let unify_mask: Vec<_> = maybe_composition
+                .unwrap()
+                .parts
+                .iter()
+                .map(|part| part.unify)
+                .collect();
+            Some((unify_filters, unify_mask))
         } else {
             None
         };
@@ -843,8 +866,22 @@ impl Rule {
             });
         }
 
+        let unification = if let Some((unify_filters, unify_mask)) = unify_data {
+            if unify_filters.is_empty() {
+                None
+            } else {
+                Some(Unification {
+                    filters: unify_filters,
+                    mask: unify_mask,
+                })
+            }
+        } else {
+            None
+        };
+
         Ok(Rule {
             engine,
+            unification,
             examples,
             start,
             end,
@@ -940,11 +977,7 @@ impl DisambiguationRule {
         let (composition, start, end) = parse_pattern(data.pattern.clone(), info)?;
 
         let unify_filters = parse_features(&data.pattern, &data.unifications, info);
-        let unify_mask: Vec<_> = composition
-            .parts
-            .iter()
-            .map(|x| x.unify.is_some())
-            .collect();
+        let unify_mask: Vec<_> = composition.parts.iter().map(|part| part.unify).collect();
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
@@ -954,6 +987,15 @@ impl DisambiguationRule {
         } else {
             Vec::new()
         };
+
+        if antipatterns
+            .iter()
+            .any(|pattern| pattern.parts.iter().any(|x| x.unify.is_some()))
+        {
+            return Err(Error::Unimplemented(
+                "`unify` in antipattern is not supported.".into(),
+            ));
+        }
 
         let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()

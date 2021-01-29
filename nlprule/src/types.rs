@@ -166,6 +166,7 @@ pub struct IncompleteToken<'t> {
     pub is_sentence_end: bool,
     pub has_space_before: bool,
     pub chunks: Vec<String>,
+    pub multiword_data: Option<WordData<'t>>,
     pub text: &'t str,
     #[derivative(PartialEq = "ignore", Debug = "ignore")]
     pub tagger: &'t Tagger,
@@ -226,6 +227,9 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             data.word.text.clone(),
             data.tagger.id_tag(""),
         ));
+
+        // multiword tags are added last because they can not be touched by disambiguation
+        word.tags.extend(data.multiword_data.into_iter());
 
         if word.tags.iter().all(|x| x.pos.0.is_empty()) {
             word.tags.push(WordData::new(
