@@ -3,15 +3,135 @@
 
 use crate::types::*;
 use bimap::BiMap;
+use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::BufRead;
-use std::{borrow::Cow, fs::File};
+use std::{borrow::Cow, fs::File, iter::once};
+
+#[derive(Serialize, Deserialize)]
+struct TaggerFields {
+    tag_fst: Vec<u8>,
+    word_store_fst: Vec<u8>,
+    tag_store: BiMap<String, u16>,
+}
+
+impl From<Tagger> for TaggerFields {
+    fn from(tagger: Tagger) -> Self {
+        let mut tag_fst_items = Vec::new();
+
+        for (word_id, map) in tagger.tags.iter() {
+            let mut i = 0u8;
+            let word = tagger.word_store.get_by_right(word_id).unwrap();
+
+            for (inflect_id, pos_ids) in map.iter() {
+                for pos_id in pos_ids {
+                    assert!(i < 255);
+                    i += 1;
+
+                    let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
+                    let pos_bytes = pos_id.to_be_bytes();
+                    let inflect_bytes = inflect_id.to_be_bytes();
+
+                    let value = u64::from_be_bytes([
+                        inflect_bytes[0],
+                        inflect_bytes[1],
+                        inflect_bytes[2],
+                        inflect_bytes[3],
+                        0,
+                        0,
+                        pos_bytes[0],
+                        pos_bytes[1],
+                    ]);
+                    tag_fst_items.push((key, value));
+                }
+            }
+        }
+
+        tag_fst_items.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let mut word_store_items: Vec<_> = tagger
+            .word_store
+            .iter()
+            .map(|(key, value)| (key.clone(), *value as u64))
+            .collect();
+        word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let tag_fst = Map::from_iter(tag_fst_items)
+            .unwrap()
+            .into_fst()
+            .as_bytes()
+            .to_vec();
+        let word_store_fst = Map::from_iter(word_store_items)
+            .unwrap()
+            .into_fst()
+            .as_bytes()
+            .to_vec();
+
+        TaggerFields {
+            tag_fst,
+            word_store_fst,
+            tag_store: tagger.tag_store,
+        }
+    }
+}
+
+impl From<TaggerFields> for Tagger {
+    fn from(data: TaggerFields) -> Self {
+        let word_store_fst = Map::new(data.word_store_fst).unwrap();
+        let word_store: BiMap<String, u32> = word_store_fst
+            .into_stream()
+            .into_str_vec()
+            .unwrap()
+            .into_iter()
+            .map(|(key, value)| (key, value as u32))
+            .collect();
+
+        let mut tags = DefaultHashMap::new();
+        let mut groups = DefaultHashMap::new();
+
+        let tag_fst = Map::new(data.tag_fst).unwrap();
+        let mut stream = tag_fst.into_stream();
+
+        while let Some((key, value)) = stream.next() {
+            let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
+            let word_id = *word_store.get_by_left(word).unwrap();
+
+            let value_bytes = value.to_be_bytes();
+            let inflection_id = u32::from_be_bytes([
+                value_bytes[0],
+                value_bytes[1],
+                value_bytes[2],
+                value_bytes[3],
+            ]);
+            let pos_id = u16::from_be_bytes([value_bytes[6], value_bytes[7]]);
+
+            let group = groups.entry(inflection_id).or_insert_with(Vec::new);
+            if !group.contains(&word_id) {
+                group.push(word_id);
+            }
+
+            tags.entry(word_id)
+                .or_insert_with(IndexMap::new)
+                .entry(inflection_id)
+                .or_insert_with(Vec::new)
+                .push(pos_id);
+        }
+
+        Tagger {
+            tags,
+            tag_store: data.tag_store,
+            word_store,
+            groups,
+        }
+    }
+}
 
 /// The lexical tagger.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
+#[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
     tags: DefaultHashMap<u32, IndexMap<u32, Vec<u16>>>,
     tag_store: BiMap<String, u16>,
@@ -51,11 +171,11 @@ impl Tagger {
                     continue;
                 }
 
-                let parts: Vec<_> = line.split('\t').collect();
-
                 if disallowed.contains(&line) {
                     continue;
                 }
+
+                let parts: Vec<_> = line.split('\t').collect();
 
                 let word = parts[0].to_string();
                 let inflection = parts[1].to_string();
@@ -133,7 +253,7 @@ impl Tagger {
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
             let inflection_id = word_store.get_by_left(inflection).unwrap();
-            let tag_id = tag_store.get_by_left(tag).unwrap();
+            let pos_id = tag_store.get_by_left(tag).unwrap();
 
             let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
             if !group.contains(word_id) {
@@ -144,7 +264,7 @@ impl Tagger {
                 .or_insert_with(IndexMap::new)
                 .entry(*inflection_id)
                 .or_insert_with(Vec::new)
-                .push(*tag_id);
+                .push(*pos_id);
         }
 
         Ok(Tagger {
@@ -155,8 +275,7 @@ impl Tagger {
         })
     }
 
-    #[allow(clippy::clippy::ptr_arg)]
-    fn get_raw(&self, word: &String) -> Vec<WordData> {
+    fn get_raw(&self, word: &str) -> Vec<WordData> {
         if let Some(map) = self
             .word_store
             .get_by_left(word)
@@ -165,10 +284,10 @@ impl Tagger {
             let mut output = Vec::new();
 
             for (key, value) in map.iter() {
-                for tag_id in value {
+                for pos_id in value {
                     output.push(WordData::new(
                         self.id_word(self.word_store.get_by_right(key).unwrap().as_str().into()),
-                        self.id_tag(self.tag_store.get_by_right(tag_id).unwrap().as_str()),
+                        self.id_tag(self.tag_store.get_by_right(pos_id).unwrap().as_str()),
                     ))
                 }
             }
@@ -185,7 +304,7 @@ impl Tagger {
         add_lower: bool,
         add_lower_if_empty: bool,
     ) -> Vec<WordData> {
-        let mut tags = self.get_raw(&word.to_string());
+        let mut tags = self.get_raw(&word);
         let lower = word.to_lowercase();
 
         if (add_lower || (add_lower_if_empty && tags.is_empty()))

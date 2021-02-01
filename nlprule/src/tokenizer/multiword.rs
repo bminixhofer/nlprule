@@ -22,6 +22,7 @@ impl MultiwordTagger {
             && self.is_match(&tokens[1..], &multiword[1..])
     }
 
+    // TODO: speed up with aho corasick
     pub fn apply<'t>(&'t self, tokens: &mut Vec<IncompleteToken<'t>>, tagger: &'t Tagger) {
         for i in 0..tokens.len() {
             for (multiword, pos) in &self.multiwords {

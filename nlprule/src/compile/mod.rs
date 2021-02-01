@@ -122,10 +122,10 @@ pub fn compile(opts: &BuildOptions) {
     let f = BufWriter::new(File::create(&opts.out_tokenizer_path).unwrap());
     bincode::serialize_into(f, &tokenizer).unwrap();
 
-    let rules = Rules::from_xml(&opts.grammar_path, &mut build_info, rules_options);
-
     let f = BufWriter::new(File::create(&opts.regex_cache_path).unwrap());
     bincode::serialize_into(f, build_info.mut_regex_cache()).unwrap();
+
+    let rules = Rules::from_xml(&opts.grammar_path, &mut build_info, rules_options);
 
     let f = BufWriter::new(File::create(&opts.out_rules_path).unwrap());
     bincode::serialize_into(f, &rules).unwrap();

@@ -158,7 +158,8 @@ impl<'t> Word<'t> {
 
 /// A token where varying levels of information are set.
 #[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq)]
+#[derivative(Debug, PartialEq)]
+#[derive(Clone)]
 pub struct IncompleteToken<'t> {
     pub word: Word<'t>,
     pub byte_span: (usize, usize),

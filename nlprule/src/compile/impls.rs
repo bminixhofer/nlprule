@@ -262,7 +262,22 @@ impl Tokenizer {
 #[derive(Serialize, Deserialize)]
 struct ModelData {
     outcome_labels: Vec<String>,
-    pmap: DefaultHashMap<String, chunk::Context>,
+    pmap: DefaultHashMap<String, ContextData>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ContextData {
+    parameters: Vec<f32>,
+    outcomes: Vec<usize>,
+}
+
+impl From<ContextData> for chunk::Context {
+    fn from(data: ContextData) -> Self {
+        chunk::Context {
+            parameters: data.parameters,
+            outcomes: data.outcomes,
+        }
+    }
 }
 
 impl From<ModelData> for chunk::Model {
@@ -272,7 +287,7 @@ impl From<ModelData> for chunk::Model {
             pmap: data
                 .pmap
                 .into_iter()
-                .map(|(key, value)| (chunk::hash::hash_str(&key), value))
+                .map(|(key, value)| (chunk::hash::hash_str(&key), value.into()))
                 .collect::<DefaultHashMap<_, _>>(),
         }
     }
