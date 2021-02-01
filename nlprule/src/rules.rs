@@ -53,7 +53,7 @@ impl Rules {
     }
 
     /// All rules ordered by priority.
-    pub fn rules(&self) -> &Vec<Rule> {
+    pub fn rules(&self) -> &[Rule] {
         &self.rules
     }
 
@@ -115,6 +115,11 @@ impl Rules {
         let suggestions = self.suggest(text, tokenizer);
         apply_suggestions(text, &suggestions)
     }
+
+    /// A referential iterator.
+    pub fn iter(&self) -> RulesIter {
+        RulesIter::new(self)
+    }
 }
 
 /// Correct a text by applying suggestions to it.
@@ -134,4 +139,56 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     }
 
     chars.into_iter().collect()
+}
+
+use std::iter::{IntoIterator, FromIterator, Iterator};
+
+/// A wrapping helper iterator.
+pub struct RulesIter<'a> {
+    inner: std::slice::Iter<'a, Rule>,
+}
+
+impl<'a> RulesIter<'a> {
+    fn new(owner: &'a Rules) -> Self {
+        Self {
+            inner: owner.rules.iter(),
+        }
+    }
+}
+
+impl<'a> Iterator for RulesIter<'a> {
+    type Item = &'a Rule;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+pub struct RulesIntoIter {
+    inner: std::vec::IntoIter<Rule>,
+}
+
+impl<'a> Iterator for RulesIntoIter {
+    type Item = Rule;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+impl IntoIterator for Rules {
+    type Item = Rule;
+    type IntoIter = RulesIntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        RulesIntoIter {
+            inner: self.rules.into_iter(),
+        }
+    }
+}
+
+impl<R> FromIterator<R> for Rules where R: Into<Rule> {
+    fn from_iter<I: IntoIterator<Item=R>>(iter: I) -> Self {
+        let rules = iter.into_iter().map(|x| x.into()).collect::<Vec<Rule>>();
+        Self {
+            rules
+        }
+    }
 }
