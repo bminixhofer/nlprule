@@ -39,6 +39,8 @@ jobs:
           unzip en.zip
           wget https://f000.backblazeb2.com/file/nlprule/de.zip
           unzip de.zip
+          wget https://f000.backblazeb2.com/file/nlprule/es.zip
+          unzip es.zip
       - uses: actions-rs/cargo@v1
         with:
           command: run
@@ -48,7 +50,12 @@ jobs:
         with:
           command: run
           # build german, see BUILD.md
-          args: --all-features --release --bin compile -- --tag-paths data/de/tags/output.dump data/de/tags/added.txt --tag-remove-paths data/de/tags/removed.txt --disambiguation-path data/de/disambiguation.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/de/grammar.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de/common.txt --out-tokenizer-path storage/de_tokenizer.bin --out-rules-path storage/de_rules.bin --regex-cache-path data/de/regex_cache.bin
+          args: --all-features --release --bin compile -- --tag-paths data/de/tags/output.dump data/de/tags/added.txt --tag-remove-paths data/de/tags/removed.txt --disambiguation-path data/de/disambiguation.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/de/grammar.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de/common.txt --out-tokenizer-path storage/de_tokenizer.bin --out-rules-path storage/de_rules.bin --regex-cache-path data/de/regex_cache.bin --multiword-tag-path data/en/tags/multiwords.txt
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          # build spanish, see BUILD.md
+          args: --all-features --release --bin compile -- --tag-paths data/es/tags/output.dump data/es/tags/added.txt --tag-remove-paths data/es/tags/removed.txt --disambiguation-path data/es/disambiguation.canonic.xml --tokenizer-config-path configs/es/tokenizer.json --grammar-path data/es/grammar.canonic.xml --rules-config-path configs/es/rules.json --common-words-path data/es/common.txt --out-tokenizer-path storage/es_tokenizer.bin --out-rules-path storage/es_rules.bin --regex-cache-path data/es/regex_cache.bin --multiword-tag-path data/es/tags/multiwords.txt
       - uses: actions-rs/cargo@v1
         with:
           command: test
@@ -69,6 +76,14 @@ jobs:
         with:
           command: run
           args: --all-features --release --bin test -- --tokenizer storage/de_tokenizer.bin --rules storage/de_rules.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/es_tokenizer.bin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --all-features --release --bin test -- --tokenizer storage/es_tokenizer.bin --rules storage/es_rules.bin
       - name: Upload binaries as artifact
         uses: actions/upload-artifact@v2
         with:
