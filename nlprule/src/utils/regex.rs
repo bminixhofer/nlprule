@@ -1,6 +1,6 @@
 use crate::Error;
 use onig::{Regex, RegexOptions};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
@@ -20,7 +20,18 @@ struct RegexFields {
     case_sensitive: bool,
 }
 
-#[derive(Serialize, Debug)]
+impl From<RegexFields> for SerializeRegex {
+    fn from(data: RegexFields) -> Self {
+        SerializeRegex {
+            regex: SerializeRegex::compile(&data.regex_str, data.case_sensitive).unwrap(),
+            regex_str: data.regex_str,
+            case_sensitive: data.case_sensitive,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(from = "RegexFields")]
 pub struct SerializeRegex {
     regex_str: String,
     case_sensitive: bool,
@@ -32,20 +43,6 @@ impl Hash for SerializeRegex {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.regex_str.hash(state);
         self.case_sensitive.hash(state);
-    }
-}
-
-impl<'de> Deserialize<'de> for SerializeRegex {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let fields: RegexFields = Deserialize::deserialize(deserializer)?;
-        Ok(SerializeRegex {
-            regex: SerializeRegex::compile(&fields.regex_str, fields.case_sensitive).unwrap(),
-            regex_str: fields.regex_str,
-            case_sensitive: fields.case_sensitive,
-        })
     }
 }
 

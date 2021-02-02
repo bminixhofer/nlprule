@@ -14,7 +14,7 @@ use crate::rule::engine::composition::concrete::*;
 use crate::rule::engine::composition::*;
 use crate::rule::engine::*;
 use crate::rule::grammar::*;
-use crate::rule::{DisambiguationRule, Rule};
+use crate::rule::{DisambiguationRule, Rule, Unification};
 
 // TODO: should be an option in config OR restricted to one sentence
 fn max_matches() -> usize {
@@ -348,6 +348,7 @@ fn parse_token(
         quantifier,
         visible: true,
         greedy: true,
+        unify: token.unify.as_ref().map(|x| x == "yes"),
     });
 
     if let Some(to_skip) = token.skip.clone() {
@@ -362,6 +363,7 @@ fn parse_token(
             quantifier: Quantifier::new(0, to_skip),
             visible: false,
             greedy: false,
+            unify: None,
         });
     }
 
@@ -542,47 +544,6 @@ fn parse_parallel_tokens(
         .collect()
 }
 
-fn parse_unify_tokens(
-    tokens: &[structure::UnifyTokenCombination],
-    case_sensitive: bool,
-    info: &mut BuildInfo,
-) -> Result<Vec<Part>, Error> {
-    let mut out = Vec::new();
-
-    for token_combination in tokens {
-        out.extend(match token_combination {
-            structure::UnifyTokenCombination::Token(token) => {
-                parse_token(token, case_sensitive, info)?
-            }
-            structure::UnifyTokenCombination::And(tokens) => {
-                let atom =
-                    AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part {
-                    atom,
-                    quantifier: Quantifier::new(1, 1),
-                    greedy: true,
-                    visible: true,
-                }]
-            }
-            structure::UnifyTokenCombination::Or(tokens) => {
-                let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
-                vec![Part {
-                    atom,
-                    quantifier: Quantifier::new(1, 1),
-                    greedy: true,
-                    visible: true,
-                }]
-            }
-            structure::UnifyTokenCombination::Feature(_) => vec![],
-            structure::UnifyTokenCombination::Ignore(ignore) => {
-                parse_tokens(&ignore.tokens, case_sensitive, info)?
-            }
-        });
-    }
-
-    Ok(out)
-}
-
 fn parse_tokens(
     tokens: &[structure::TokenCombination],
     case_sensitive: bool,
@@ -601,6 +562,7 @@ fn parse_tokens(
                     quantifier: Quantifier::new(1, 1),
                     greedy: true,
                     visible: true,
+                    unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 }]
             }
             structure::TokenCombination::Or(tokens) => {
@@ -610,11 +572,10 @@ fn parse_tokens(
                     quantifier: Quantifier::new(1, 1),
                     greedy: true,
                     visible: true,
+                    unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 }]
             }
-            structure::TokenCombination::Unify(unify) => {
-                parse_unify_tokens(&unify.tokens, case_sensitive, info)?
-            }
+            structure::TokenCombination::Feature(_) => Vec::new(),
         });
     }
 
@@ -655,6 +616,7 @@ fn parse_pattern(
                     quantifier: Quantifier::new(1, 1),
                     greedy: true,
                     visible: true,
+                    unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 });
             }
             structure::PatternPart::Or(tokens) => {
@@ -665,11 +627,10 @@ fn parse_pattern(
                     quantifier: Quantifier::new(1, 1),
                     greedy: true,
                     visible: true,
+                    unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 });
             }
-            structure::PatternPart::Unify(unify) => {
-                composition_parts.extend(parse_unify_tokens(&unify.tokens, case_sensitive, info)?)
-            }
+            structure::PatternPart::Feature(_) => {}
         }
     }
 
@@ -681,6 +642,50 @@ fn parse_pattern(
     Ok((composition, start, end))
 }
 
+fn parse_features(
+    pattern: &structure::Pattern,
+    unifications: &Option<Vec<structure::Unification>>,
+    info: &mut BuildInfo,
+) -> Vec<Vec<POSFilter>> {
+    let mut filters = Vec::new();
+    let mut parse_feature = |id: &str| -> Vec<POSFilter> {
+        let unification = unifications
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|x| x.feature == id)
+            .unwrap();
+
+        unification
+            .equivalences
+            .iter()
+            .map(|equiv| {
+                parse_pos_filter(
+                    &equiv.token.postag,
+                    equiv.token.postag_regexp.as_deref(),
+                    info,
+                )
+            })
+            .collect()
+    };
+
+    for part in &pattern.parts {
+        match part {
+            structure::PatternPart::Feature(feature) => filters.push(parse_feature(&feature.id)),
+            structure::PatternPart::Marker(marker) => {
+                for token_combination in &marker.tokens {
+                    if let structure::TokenCombination::Feature(feature) = token_combination {
+                        filters.push(parse_feature(&feature.id));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    filters
+}
+
 impl Rule {
     pub fn from_rule_structure(data: structure::Rule, info: &mut BuildInfo) -> Result<Rule, Error> {
         if data.filter.is_some() {
@@ -689,7 +694,7 @@ impl Rule {
             ));
         }
 
-        let (engine, start, end) = match (data.pattern, data.regex) {
+        let (engine, start, end) = match (&data.pattern, data.regex) {
             (Some(_), Some(_)) => Err(Error::Unexpected(
                 "must not contain both `pattern` and `regexp`.".into(),
             )),
@@ -697,19 +702,29 @@ impl Rule {
                 "either `pattern` or `regexp` must be supplied.".into(),
             )),
             (Some(pattern), None) => {
-                let (composition, start, end) = parse_pattern(pattern, info)?;
+                let (composition, start, end) = parse_pattern(pattern.clone(), info)?;
+                let antipatterns = if let Some(antipatterns) = data.antipatterns {
+                    antipatterns
+                        .into_iter()
+                        .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
+                        .collect::<Result<Vec<_>, Error>>()?
+                } else {
+                    Vec::new()
+                };
+
+                if antipatterns
+                    .iter()
+                    .any(|pattern| pattern.parts.iter().any(|x| x.unify.is_some()))
+                {
+                    return Err(Error::Unimplemented(
+                        "`unify` in antipattern is not supported.".into(),
+                    ));
+                }
 
                 Ok((
                     Engine::Token(TokenEngine {
                         composition,
-                        antipatterns: if let Some(antipatterns) = data.antipatterns {
-                            antipatterns
-                                .into_iter()
-                                .map(|pattern| parse_pattern(pattern, info).map(|x| x.0))
-                                .collect::<Result<Vec<_>, Error>>()?
-                        } else {
-                            Vec::new()
-                        },
+                        antipatterns,
                     }),
                     start,
                     end,
@@ -731,6 +746,19 @@ impl Rule {
 
         let maybe_composition = if let Engine::Token(engine) = &engine {
             Some(&engine.composition)
+        } else {
+            None
+        };
+
+        let unify_data = if let Some(pattern) = &data.pattern {
+            let unify_filters = parse_features(&pattern, &data.unifications, info);
+            let unify_mask: Vec<_> = maybe_composition
+                .unwrap()
+                .parts
+                .iter()
+                .map(|part| part.unify)
+                .collect();
+            Some((unify_filters, unify_mask))
         } else {
             None
         };
@@ -838,8 +866,22 @@ impl Rule {
             });
         }
 
+        let unification = if let Some((unify_filters, unify_mask)) = unify_data {
+            if unify_filters.is_empty() {
+                None
+            } else {
+                Some(Unification {
+                    filters: unify_filters,
+                    mask: unify_mask,
+                })
+            }
+        } else {
+            None
+        };
+
         Ok(Rule {
             engine,
+            unification,
             examples,
             start,
             end,
@@ -902,7 +944,9 @@ impl owned::WordData {
             info.tagger
                 .id_word(data.lemma.unwrap_or_else(String::new).into())
                 .to_owned_id(),
-            info.tagger.id_tag(data.pos.as_str().trim()).to_owned_id(),
+            info.tagger
+                .id_tag(data.pos.as_ref().map_or("", |x| x.as_str().trim()))
+                .to_owned_id(),
         )
     }
 }
@@ -924,88 +968,6 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
     }
 }
 
-fn parse_unify(
-    unify: &structure::Unify,
-    unifications: &Option<Vec<structure::Unification>>,
-    info: &mut BuildInfo,
-) -> (Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>) {
-    let mut filters = Vec::new();
-    let mut disambig = Vec::new();
-    let mut mask = Vec::new();
-
-    for token_combination in &unify.tokens {
-        match token_combination {
-            structure::UnifyTokenCombination::Feature(feature) => {
-                // TODO: no unwrap
-                let unification = unifications
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .find(|x| x.feature == feature.id)
-                    .unwrap();
-
-                filters.push(
-                    unification
-                        .equivalences
-                        .iter()
-                        .map(|equiv| {
-                            parse_pos_filter(
-                                &equiv.token.postag,
-                                equiv.token.postag_regexp.as_deref(),
-                                info,
-                            )
-                        })
-                        .collect(),
-                );
-            }
-            structure::UnifyTokenCombination::And(tokens)
-            | structure::UnifyTokenCombination::Or(tokens) => {
-                mask.push(true);
-                disambig.push(
-                    tokens.tokens[0].postag.as_ref().map(|x| {
-                        parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
-                    }),
-                )
-            }
-            structure::UnifyTokenCombination::Token(token) => {
-                mask.push(true);
-                disambig.push(
-                    token
-                        .postag
-                        .as_ref()
-                        .map(|x| parse_pos_filter(x, token.postag_regexp.as_deref(), info)),
-                )
-            }
-            structure::UnifyTokenCombination::Ignore(tokens) => {
-                for token_combination in &tokens.tokens {
-                    match token_combination {
-                        structure::TokenCombination::And(tokens)
-                        | structure::TokenCombination::Or(tokens) => {
-                            mask.push(false);
-                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
-                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
-                            }))
-                        }
-                        structure::TokenCombination::Token(token) => {
-                            mask.push(false);
-                            disambig.push(
-                                token.postag.as_ref().map(|x| {
-                                    parse_pos_filter(x, token.postag_regexp.as_deref(), info)
-                                }),
-                            )
-                        }
-                        structure::TokenCombination::Unify(_) => {
-                            panic!("nested unify not supported")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    (filters, disambig, mask)
-}
-
 impl DisambiguationRule {
     pub fn from_rule_structure(
         data: structure::DisambiguationRule,
@@ -1013,6 +975,9 @@ impl DisambiguationRule {
     ) -> Result<DisambiguationRule, Error> {
         // might need the pattern later so clone it here
         let (composition, start, end) = parse_pattern(data.pattern.clone(), info)?;
+
+        let unify_filters = parse_features(&data.pattern, &data.unifications, info);
+        let unify_mask: Vec<_> = composition.parts.iter().map(|part| part.unify).collect();
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
             antipatterns
@@ -1022,6 +987,15 @@ impl DisambiguationRule {
         } else {
             Vec::new()
         };
+
+        if antipatterns
+            .iter()
+            .any(|pattern| pattern.parts.iter().any(|x| x.unify.is_some()))
+        {
+            return Err(Error::Unimplemented(
+                "`unify` in antipattern is not supported.".into(),
+            ));
+        }
 
         let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()
@@ -1052,7 +1026,9 @@ impl DisambiguationRule {
             }
             Some("add") => {
                 if data.disambig.postag.is_some() {
-                    panic!("postag not supported for `add`.")
+                    return Err(Error::Unimplemented(
+                        "postag not supported for `add`.".into(),
+                    ));
                 }
 
                 Ok(Disambiguation::Add(
@@ -1062,21 +1038,15 @@ impl DisambiguationRule {
                         .collect(),
                 ))
             }
-            Some("replace") => {
-                if data.disambig.postag.is_some() {
-                    panic!("postag not supported for `replace`.")
-                }
-
-                Ok(Disambiguation::Replace(
-                    word_datas
-                        .into_iter()
-                        .map(|x| {
-                            x.left()
-                                .expect("match not supported for `replace` disambiguation")
-                        })
-                        .collect(),
-                ))
-            }
+            Some("replace") => Ok(Disambiguation::Replace(
+                word_datas
+                    .into_iter()
+                    .map(|x| {
+                        x.left()
+                            .expect("match not supported for `replace` disambiguation")
+                    })
+                    .collect(),
+            )),
             Some("ignore_spelling") => Ok(Disambiguation::Nop), // ignore_spelling can be ignored since we dont check spelling
             Some("immunize") => Ok(Disambiguation::Nop), // immunize can probably not be ignored
             Some("filterall") => {
@@ -1093,9 +1063,7 @@ impl DisambiguationRule {
                                     structure::TokenCombination::Token(token) => token,
                                     structure::TokenCombination::And(tokens)
                                     | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
-                                    structure::TokenCombination::Unify(_) => {
-                                        panic!("`unify` not supported in `filterall`")
-                                    }
+                                    structure::TokenCombination::Feature(_) => continue,
                                 };
 
                                 marker_disambig.push(token.postag.as_ref().map(|x| {
@@ -1126,9 +1094,7 @@ impl DisambiguationRule {
                                 ))
                             }))
                         }
-                        structure::PatternPart::Unify(_) => {
-                            panic!("`unify` not supported in `filterall`")
-                        }
+                        structure::PatternPart::Feature(_) => {}
                     }
                 }
 
@@ -1154,30 +1120,55 @@ impl DisambiguationRule {
                 }
             }
             Some("unify") => {
-                let mut filters = Vec::new();
-                let mut disambig = Vec::new();
                 let mut mask = Vec::new();
+                let mut marker_mask = Vec::new();
 
-                match &data.pattern.parts[..] {
-                    [.., structure::PatternPart::Marker(marker)] => match &marker.tokens[..] {
-                        [structure::TokenCombination::Unify(unify)] => {
-                            let (f, d, m) = parse_unify(&unify, &data.unifications, info);
-                            filters.extend(f);
-                            disambig.extend(d);
-                            mask.extend(m);
+                let mut disambig = Vec::new();
+                let mut marker_disambig = Vec::new();
+                let mut has_marker = false;
+
+                for part in &data.pattern.parts {
+                    match part {
+                        structure::PatternPart::Marker(marker) => {
+                            has_marker = true;
+                            for token in &marker.tokens {
+                                let token = match token {
+                                    structure::TokenCombination::Token(token) => token,
+                                    structure::TokenCombination::And(tokens)
+                                    | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                    structure::TokenCombination::Feature(_) => continue,
+                                };
+
+                                marker_disambig.push(token.postag.as_ref().map(|x| {
+                                    parse_pos_filter(x, token.postag_regexp.as_deref(), info)
+                                }));
+                                marker_mask.push(token.unify.is_some())
+                            }
                         }
-                        _ => panic!("only `unify` as only element in `marker` is implemented"),
-                    },
-                    [structure::PatternPart::Unify(unify)] => {
-                        let (f, d, m) = parse_unify(&unify, &data.unifications, info);
-                        filters.extend(f);
-                        disambig.extend(d);
-                        mask.extend(m);
+                        structure::PatternPart::Token(token) => {
+                            disambig.push(token.postag.as_ref().map(|x| {
+                                parse_pos_filter(x, token.postag_regexp.as_deref(), info)
+                            }));
+                            mask.push(token.unify.is_some());
+                        }
+                        structure::PatternPart::And(tokens)
+                        | structure::PatternPart::Or(tokens) => {
+                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
+                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
+                            }));
+                            mask.push(tokens.tokens[0].unify.is_some());
+                        }
+                        structure::PatternPart::Feature(_) => {}
                     }
-                    _ => panic!("only `unify` as only element in `pattern` is implemented"),
                 }
 
-                Ok(Disambiguation::Unify(filters, disambig, mask))
+                let (disambig, mask) = if has_marker {
+                    (marker_disambig, marker_mask)
+                } else {
+                    (disambig, mask)
+                };
+
+                Ok(Disambiguation::Unify(unify_filters.clone(), disambig, mask))
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
@@ -1282,6 +1273,14 @@ impl DisambiguationRule {
                 composition,
                 antipatterns,
             }),
+            unification: if unify_filters.is_empty() {
+                None
+            } else {
+                Some(Unification {
+                    filters: unify_filters,
+                    mask: unify_mask,
+                })
+            },
             filter,
             disambiguations,
             start,

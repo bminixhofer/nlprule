@@ -1,0 +1,12 @@
+{
+    "allow_errors": false,
+    "ignore_ids": [
+        "ESPACIO_DESPUES_DE_PUNTO.0",
+        "ESPACIO_DESPUES_DE_PUNTO.1",
+        "DIACRITICS_OTHERS.26",
+        "EL_TILDE",
+        "R_RR.0",
+        "NO_SEPARADO.4",
+        "NO_SEPARADO.56"
+    ]
+}

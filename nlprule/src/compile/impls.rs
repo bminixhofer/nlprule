@@ -1,5 +1,13 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fs::File,
+    hash::{Hash, Hasher},
+    io::{BufRead, BufReader},
+    path::Path,
+};
 
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -9,12 +17,39 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesOptions},
-    tokenizer::{chunk, Tokenizer, TokenizerOptions},
+    tokenizer::{chunk, multiword::MultiwordTagger, Tokenizer, TokenizerOptions},
     types::*,
     utils::parallelism::MaybeParallelIterator,
 };
 
 use super::parse_structure::BuildInfo;
+
+impl MultiwordTagger {
+    pub fn from_dump<P: AsRef<Path>>(dump: P, info: &BuildInfo) -> Self {
+        let reader = BufReader::new(File::open(dump).unwrap());
+        let mut multiwords = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+
+            // strip comments
+            let line = &line[..line.find('#').unwrap_or_else(|| line.len())].trim();
+            if line.is_empty() {
+                continue;
+            }
+            let tab_split: Vec<_> = line.split('\t').collect();
+
+            let word: Vec<_> = tab_split[0]
+                .split_whitespace()
+                .map(|x| info.tagger().id_word(String::from(x).into()).to_owned_id())
+                .collect();
+            let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
+            multiwords.push((word, pos));
+        }
+
+        MultiwordTagger { multiwords }
+    }
+}
 
 impl TextMatcher {
     pub fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
@@ -74,14 +109,11 @@ impl PosMatcher {
 }
 
 impl Rules {
-    pub fn from_xml<P: AsRef<std::path::Path>>(
+    pub fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
         options: RulesOptions,
     ) -> Self {
-        use log::warn;
-        use std::collections::HashMap;
-
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
 
@@ -149,7 +181,13 @@ impl Rules {
             let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
             errors.sort_by_key(|x| -(x.1 as i32));
 
-            warn!("Errors constructing Rules: {:#?}", &errors);
+            warn!(
+                "Errors constructing Rules: {:#?}",
+                &errors
+                    .iter()
+                    .map(|(message, number)| format!("{} (n={})", message, number))
+                    .collect::<Vec<_>>()
+            );
         }
 
         Rules { rules }
@@ -157,14 +195,13 @@ impl Rules {
 }
 
 impl Tokenizer {
-    pub fn from_xml<P: AsRef<std::path::Path>>(
+    pub fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
         chunker: Option<chunk::Chunker>,
+        multiword_tagger: Option<MultiwordTagger>,
         options: TokenizerOptions,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        use log::warn;
-
+    ) -> Result<Self, Box<dyn Error>> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
 
@@ -194,13 +231,17 @@ impl Tokenizer {
                             }
                         }
                         Err(x) => {
-                            error = Some(format!("[Rule] {}", x));
+                            if error.is_none() {
+                                error = Some(format!("[Rule] {}", x));
+                            }
                             None
                         }
                     }
                 }
                 Err(x) => {
-                    error = Some(format!("[Structure] {}", x));
+                    if error.is_none() {
+                        error = Some(format!("[Structure] {}", x));
+                    }
                     None
                 }
             })
@@ -217,6 +258,7 @@ impl Tokenizer {
         Ok(Tokenizer {
             tagger: build_info.tagger().clone(),
             chunker,
+            multiword_tagger,
             rules,
             options,
         })
@@ -226,7 +268,22 @@ impl Tokenizer {
 #[derive(Serialize, Deserialize)]
 struct ModelData {
     outcome_labels: Vec<String>,
-    pmap: DefaultHashMap<String, chunk::Context>,
+    pmap: DefaultHashMap<String, ContextData>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ContextData {
+    parameters: Vec<f32>,
+    outcomes: Vec<usize>,
+}
+
+impl From<ContextData> for chunk::Context {
+    fn from(data: ContextData) -> Self {
+        chunk::Context {
+            parameters: data.parameters,
+            outcomes: data.outcomes,
+        }
+    }
 }
 
 impl From<ModelData> for chunk::Model {
@@ -236,7 +293,7 @@ impl From<ModelData> for chunk::Model {
             pmap: data
                 .pmap
                 .into_iter()
-                .map(|(key, value)| (chunk::hash::hash_str(&key), value))
+                .map(|(key, value)| (chunk::hash::hash_str(&key), value.into()))
                 .collect::<DefaultHashMap<_, _>>(),
         }
     }

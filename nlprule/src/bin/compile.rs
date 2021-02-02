@@ -1,9 +1,9 @@
 use clap::Clap;
-use nlprule::compile::{compile, BuildOptions};
+use nlprule::compile::{compile, BuildOptions, CompileError};
 
-fn main() {
+fn main() -> Result<(), CompileError> {
     env_logger::init();
     let opts = BuildOptions::parse();
 
-    compile(&opts);
+    compile(&opts)
 }

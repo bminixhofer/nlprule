@@ -45,7 +45,7 @@ pub fn normalize_whitespace(string: &str) -> String {
 
 #[inline]
 pub fn splitting_chars() -> &'static str {
-    r##"«»'’`´‘],.:;!?/\()<=>„“”"+#…*"##
+    r##"¡¿«»'’`´‘],.:;!?/\()<=>„“”"+#…*"##
 }
 
 #[inline]

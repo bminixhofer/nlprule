@@ -6,6 +6,7 @@ use crate::{
     tokenizer::{finalize, Tokenizer},
     utils,
 };
+use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,6 +20,40 @@ use engine::Engine;
 
 pub(crate) use engine::composition::MatchGraph;
 pub use grammar::Example;
+
+use self::disambiguation::POSFilter;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct Unification {
+    pub(crate) mask: Vec<Option<bool>>,
+    pub(crate) filters: Vec<Vec<POSFilter>>,
+}
+
+impl Unification {
+    pub fn keep(&self, graph: &MatchGraph, tokens: &[&Token]) -> bool {
+        let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
+
+        let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
+        let negate = self.mask.iter().all(|x| x.map_or(true, |x| !x));
+
+        for (group, maybe_mask_val) in graph.groups()[1..].iter().zip(self.mask.iter()) {
+            if maybe_mask_val.is_some() {
+                for token in group.tokens(tokens) {
+                    for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
+                        *mask_val = *mask_val && POSFilter::and(filter, &token.word);
+                    }
+                }
+            }
+        }
+
+        let result = filter_mask.iter().any(|x| *x);
+        if negate {
+            !result
+        } else {
+            result
+        }
+    }
+}
 
 /// A disambiguation rule.
 /// Changes the information associcated with one or more tokens if it matches.
@@ -47,6 +82,7 @@ pub struct DisambiguationRule {
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
+    pub(crate) unification: Option<Unification>,
 }
 
 #[derive(Default)]
@@ -74,6 +110,12 @@ impl DisambiguationRule {
         let mut all_byte_spans = Vec::new();
 
         for graph in self.engine.get_matches(&refs, self.start, self.end) {
+            if let Some(unification) = &self.unification {
+                if !unification.keep(&graph, &refs) {
+                    continue;
+                }
+            }
+
             if let Some(filter) = &self.filter {
                 if !filter.keep(&graph, tokenizer) {
                     continue;
@@ -246,6 +288,7 @@ pub struct Rule {
     pub(crate) category_id: String,
     pub(crate) category_name: String,
     pub(crate) category_type: Option<String>,
+    pub(crate) unification: Option<Unification>,
 }
 
 impl fmt::Display for Rule {
@@ -310,6 +353,12 @@ impl Rule {
         let mut suggestions = Vec::new();
 
         for graph in self.engine.get_matches(&refs, self.start, self.end) {
+            if let Some(unification) = &self.unification {
+                if !unification.keep(&graph, &refs) {
+                    continue;
+                }
+            }
+
             let start_group = graph
                 .by_id(self.start)
                 .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));

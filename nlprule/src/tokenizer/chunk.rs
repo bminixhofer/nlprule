@@ -1,5 +1,6 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
+use half::bf16;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::{cmp::Ordering, collections::BinaryHeap};
@@ -19,10 +20,43 @@ fn softmax(vec: &mut Vec<f32>) {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+pub struct ContextFields {
+    parameters: Vec<bf16>,
+    outcomes: Vec<u16>,
+}
+
+impl From<Context> for ContextFields {
+    fn from(context: Context) -> Self {
+        ContextFields {
+            parameters: context.parameters.into_iter().map(bf16::from_f32).collect(),
+            outcomes: context
+                .outcomes
+                .into_iter()
+                .map(|x| {
+                    assert!(x <= std::u16::MAX as usize);
+
+                    x as u16
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<ContextFields> for Context {
+    fn from(data: ContextFields) -> Self {
+        Context {
+            parameters: data.parameters.into_iter().map(|x| x.to_f32()).collect(),
+            outcomes: data.outcomes.into_iter().map(|x| x as usize).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(from = "ContextFields", into = "ContextFields")]
 pub(crate) struct Context {
-    parameters: Vec<f32>,
-    outcomes: Vec<usize>,
+    pub(crate) parameters: Vec<f32>,
+    pub(crate) outcomes: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]

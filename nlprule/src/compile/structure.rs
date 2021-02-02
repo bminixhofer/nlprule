@@ -4,8 +4,11 @@ use std::io::BufReader;
 use xml::reader::EventReader;
 
 mod preprocess {
-    use xml::reader::EventReader;
-    use xml::writer::EmitterConfig;
+    use std::{borrow::Cow, str::FromStr};
+
+    use lazy_static::lazy_static;
+    use xml::{attribute::OwnedAttribute, reader::EventReader};
+    use xml::{name::OwnedName, writer::EmitterConfig};
 
     use super::Category;
 
@@ -28,15 +31,72 @@ mod preprocess {
             .collect::<Vec<_>>();
 
         let mut out_events: Vec<xml::writer::XmlEvent> = Vec::new();
-        let mut parents = Vec::new();
+        let mut parents: Vec<(&OwnedName, &Vec<OwnedAttribute>)> = Vec::new();
 
         for event in &events {
             match event {
-                xml::reader::XmlEvent::StartElement { name, .. } => {
-                    parents.push(name.local_name.as_str());
+                xml::reader::XmlEvent::StartElement {
+                    name,
+                    attributes,
+                    namespace,
+                } => {
+                    let unify_index = parents
+                        .iter()
+                        .position(|(name, _)| name.local_name.as_str() == "unify");
+                    let ignore_index = parents
+                        .iter()
+                        .position(|(name, _)| name.local_name.as_str() == "unify-ignore");
+
+                    parents.push((name, attributes));
+
+                    let unify = unify_index.map_or(false, |i| {
+                        ignore_index.map_or(true, |ignore_i| i > ignore_i)
+                    });
+
+                    if unify && name.local_name == "token" {
+                        lazy_static! {
+                            static ref UNIFY_ATTRIBUTE: OwnedAttribute =
+                                OwnedAttribute::new(OwnedName::from_str("unify").unwrap(), "yes",);
+                        }
+                        lazy_static! {
+                            static ref UNIFY_NEGATE_ATTRIBUTE: OwnedAttribute = OwnedAttribute::new(
+                                OwnedName::from_str("unify").unwrap(),
+                                "negate",
+                            );
+                        }
+
+                        // we push to parents after index is computed but it doesn't matter because the index stays the same
+                        let negate = parents[unify_index.unwrap()]
+                            .1
+                            .iter()
+                            .any(|x| x.name.local_name == "negate" && x.value == "yes");
+
+                        out_events.push(xml::writer::XmlEvent::StartElement {
+                            name: name.borrow(),
+                            attributes: attributes
+                                .iter()
+                                .chain(if negate {
+                                    vec![&*UNIFY_NEGATE_ATTRIBUTE]
+                                } else {
+                                    vec![&*UNIFY_ATTRIBUTE]
+                                })
+                                .map(|a| a.borrow())
+                                .collect(),
+                            namespace: Cow::Borrowed(namespace),
+                        });
+                        continue;
+                    }
+
+                    if ["unify", "unify-ignore"].contains(&name.local_name.as_str()) {
+                        continue;
+                    }
                 }
-                xml::reader::XmlEvent::EndElement { .. } => {
+                xml::reader::XmlEvent::EndElement { name, .. } => {
                     parents.pop();
+
+                    if ["unify", "unify-ignore"].contains(&name.local_name.as_str()) {
+                        continue;
+                    }
                 }
                 xml::reader::XmlEvent::Characters(chars) => {
                     out_events.push(
@@ -48,10 +108,10 @@ mod preprocess {
                     continue;
                 }
                 xml::reader::XmlEvent::Whitespace(whitespace) => {
-                    if parents
-                        .iter()
-                        .any(|x| whitespace_sensitive_tags.contains(x))
-                    {
+                    let whitespace_sensitive = parents.iter().any(|(name, _)| {
+                        whitespace_sensitive_tags.contains(&name.local_name.as_str())
+                    });
+                    if whitespace_sensitive {
                         out_events.push(
                             xml::writer::XmlEvent::start_element("text")
                                 .attr("text", whitespace)
@@ -199,6 +259,7 @@ pub enum SuggestionPart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Suggestion {
+    pub suppress_misspelled: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Vec<SuggestionPart>,
 }
@@ -216,6 +277,7 @@ pub enum MessagePart {
 pub struct Message {
     #[serde(rename = "$value")]
     pub parts: Vec<MessagePart>,
+    pub suppress_misspelled: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -234,6 +296,7 @@ pub enum ExamplePart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Example {
+    pub reason: Option<String>,
     pub correction: Option<String>,
     #[serde(rename = "$value")]
     pub parts: Vec<ExamplePart>,
@@ -281,6 +344,7 @@ pub struct Token {
     pub min: Option<String>,
     pub max: Option<String>,
     pub skip: Option<String>,
+    pub unify: Option<String>,
     pub case_sensitive: Option<String>,
     pub inflected: Option<String>,
     pub postag: Option<String>,
@@ -372,39 +436,13 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Ignore {
-    #[serde(rename = "$value")]
-    pub tokens: Vec<TokenCombination>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[serde(deny_unknown_fields)]
-pub enum UnifyTokenCombination {
-    Token(Token),
-    Or(TokenVector),
-    And(TokenVector),
-    Feature(Feature),
-    #[serde(rename = "unify-ignore")]
-    Ignore(Ignore),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Unify {
-    #[serde(rename = "$value")]
-    pub tokens: Vec<UnifyTokenCombination>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub enum TokenCombination {
     Token(Token),
     Or(TokenVector),
     And(TokenVector),
-    Unify(Unify),
+    Feature(Feature),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -422,7 +460,7 @@ pub enum PatternPart {
     Marker(PatternMarker),
     Or(TokenVector),
     And(TokenVector),
-    Unify(Unify),
+    Feature(Feature),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -460,6 +498,8 @@ pub struct Rule {
     pub url: Option<XMLText>,
     pub default: Option<String>,
     pub filter: Option<Filter>,
+    #[serde(rename = "__unused_unifications")]
+    pub unifications: Option<Vec<Unification>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -482,6 +522,7 @@ pub struct RuleGroup {
 pub enum RuleContainer {
     Rule(Rule),
     RuleGroup(RuleGroup),
+    Unification(Unification),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -498,7 +539,7 @@ pub struct DisambiguationExample {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WordData {
-    pub pos: String,
+    pub pos: Option<String>,
     pub text: Option<String>,
     pub lemma: Option<String>,
 }
@@ -645,7 +686,9 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
     let sanitized = preprocess::sanitize(file, &["suggestion"]);
     let rules = preprocess::extract_rules(sanitized.as_bytes());
 
-    rules
+    let mut unifications = Vec::new();
+
+    let rules: Vec<_> = rules
         .into_iter()
         .map(|(xml, category)| {
             let mut out = Vec::new();
@@ -663,12 +706,29 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
                         .into_iter()
                         .map(Ok)
                         .collect(),
+                    RuleContainer::Unification(unification) => {
+                        unifications.push(unification);
+
+                        vec![]
+                    }
                 },
                 Err(err) => vec![Err(err)],
             });
             out
         })
         .flatten()
+        .collect();
+
+    rules
+        .into_iter()
+        .map(|result| match result {
+            Ok(mut x) => {
+                x.0.unifications = Some(unifications.clone());
+
+                Ok(x)
+            }
+            Err(x) => Err(x),
+        })
         .collect()
 }
 

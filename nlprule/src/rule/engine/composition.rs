@@ -92,7 +92,7 @@ impl TextMatcher {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PosMatcher {
     pub mask: Vec<bool>,
 }
@@ -442,6 +442,7 @@ pub struct Part {
     pub quantifier: Quantifier,
     pub greedy: bool,
     pub visible: bool,
+    pub unify: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -480,7 +481,6 @@ impl Composition {
         mut graph: MatchGraph<'t>,
     ) -> Option<MatchGraph<'t>> {
         let mut cur_count = 0;
-
         let is_match = loop {
             if cur_atom_idx >= self.parts.len() {
                 break true;
@@ -531,6 +531,12 @@ impl Composition {
                 break false;
             }
         };
+
+        // edge case if the last atom is quantified and the minimum has been exceeded
+        // TODO to avoid further such undetected edge cases: revisit the entire composition logic
+        if cur_atom_idx < self.parts.len() && cur_count >= self.parts[cur_atom_idx].quantifier.min {
+            cur_atom_idx += 1;
+        }
 
         if is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx] {
             graph.fill_empty();
