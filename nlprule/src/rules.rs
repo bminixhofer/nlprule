@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Read},
+    iter::{IntoIterator, FromIterator, Iterator},
     path::Path,
 };
 
@@ -140,8 +141,6 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
 
     chars.into_iter().collect()
 }
-
-use std::iter::{IntoIterator, FromIterator, Iterator};
 
 /// A wrapping helper iterator.
 pub struct RulesIter<'a> {
