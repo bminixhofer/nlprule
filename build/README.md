@@ -5,7 +5,7 @@ Building the NLPRule binaries requires the *build directory* for the correspondi
 See [Making the build directory](#making-the-build-directory) for information on how to create a 
 build directory yourself.
 
-Besides the build directory, a rule config file and tokenizer config file are required. These are stored in-tree at [configs/](configs/). The binaries can then be built with the `compile` target e. g.:
+Besides the build directory, a rule config file and tokenizer config file are required. These are stored in-tree at [configs/](/configs/). The binaries can then be built with the `compile` target e. g.:
 
 ```
 RUST_LOG=INFO cargo run --all-features --release --bin compile -- \
