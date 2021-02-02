@@ -197,7 +197,7 @@ impl Tokenizer {
     }
 
     /// Creates a new tokenizer from a reader.
-    pub fn new_from<R: Read>(reader: R) -> bincode::Result<Self> {
+    pub fn from_reader<R: Read>(reader: R) -> bincode::Result<Self> {
         bincode::deserialize_from(reader)
     }
 

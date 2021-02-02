@@ -436,7 +436,7 @@ impl<'t> MatchGraph<'t> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Part {
     pub atom: Atom,
     pub quantifier: Quantifier,
@@ -445,7 +445,7 @@ pub struct Part {
     pub unify: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Composition {
     pub(crate) parts: Vec<Part>,
     pub(crate) group_ids_to_idx: DefaultHashMap<usize, usize>,

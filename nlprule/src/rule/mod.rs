@@ -10,6 +10,7 @@ use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fmt;
 
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
@@ -271,7 +272,7 @@ impl DisambiguationRule {
 ///     <example correction="doesn't">He <marker>dosn't</marker> know about it.</example>
 /// </rule>
 /// ```
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Rule {
     pub(crate) id: String,
     pub(crate) engine: Engine,
@@ -288,6 +289,12 @@ pub struct Rule {
     pub(crate) category_name: String,
     pub(crate) category_type: Option<String>,
     pub(crate) unification: Option<Unification>,
+}
+
+impl fmt::Display for Rule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.id.as_str(), self.name.as_str())
+    }
 }
 
 impl Rule {

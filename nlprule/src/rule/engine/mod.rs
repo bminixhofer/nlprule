@@ -4,7 +4,7 @@ pub mod composition;
 
 use composition::{Composition, Group, MatchGraph};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TokenEngine {
     pub(crate) composition: Composition,
     pub(crate) antipatterns: Vec<Composition>,
@@ -48,7 +48,7 @@ impl TokenEngine {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Engine {
     Token(TokenEngine),
     Text(SerializeRegex, DefaultHashMap<usize, usize>),

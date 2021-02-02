@@ -14,7 +14,7 @@ fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
         .replace(placeholder, r"\\")
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct RegexFields {
     regex_str: String,
     case_sensitive: bool,
