@@ -1,4 +1,4 @@
-# Building the NLPRule binaries
+# Building and testing the NLPRule binaries
 
 Building the NLPRule binaries requires the *build directory* for the corresponding language. The latest build directories are stored on Backblaze B2. Download them from https://f000.backblazeb2.com/file/nlprule/en.zip (adjusting the two-letter language code accordingly for other languages).
 
@@ -17,6 +17,18 @@ RUST_LOG=INFO cargo run --all-features --release --bin compile -- \
 ```
 
 This is expected to warn about errors in the `Rules` since not all grammar rules are supported but should *not* report any errors in the `Tokenizer`.
+
+Tests are contained in the binaries. To test the tokenizer binary, run e. g.:
+
+```
+RUST_LOG=WARN cargo run --all-features --release --bin test_disambiguation -- --tokenizer storage/en_tokenizer.bin
+```
+
+To test the grammar rule binary, run e. g.:
+
+```
+RUST_LOG=WARN cargo run --all-features --release --bin test -- --tokenizer storage/en_tokenizer.bin --rules storage/en_rules.bin
+```
 
 # Making the build directory
 
@@ -66,6 +78,6 @@ python build/make_build_dir.py \
     --out_dir=data/es
 ```
 
-Note for Spanish: `disambiguation.xml` is currently manually postprocessed by removing an invalid `<marker>` in `POS_N`, `grammar.xml` is manually postprocessed by fixing the match reference for `EN_TORNO`. Both issues will be fixed in the next LanguageTool release.
+Note for Spanish: `disambiguation.xml` is currently manually postprocessed by removing an invalid `<marker>` in `POS_N` and changing one rule ([commit](https://github.com/languagetool-org/languagetool/commit/9a304428341f34e347fc4bef2a4c7c6f03bf1403)). `grammar.xml` is manually postprocessed by fixing the match reference for `EN_TORNO`. These issues will be fixed in the next LanguageTool release.
 
 The POS dict can be downloaded from https://mvnrepository.com/artifact/org.softcatala/spanish-pos-dict (download the latest version and unzip the `.jar`).

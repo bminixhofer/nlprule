@@ -52,10 +52,14 @@ jobs:
           command: test
           args: --verbose --all-features --release -p nlprule
       - uses: actions-rs/cargo@v1
+        env:
+            RUST_LOG: WARN
         with:
           command: run
           args: --all-features --release --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - uses: actions-rs/cargo@v1
+        env:
+            RUST_LOG: WARN
         with:
           command: run
           args: --all-features --release --bin test -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin --rules storage/${{ matrix.lang }}_rules.bin

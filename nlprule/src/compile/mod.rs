@@ -83,15 +83,22 @@ pub enum CompileError {
 pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
     let paths = BuildFilePaths::new(&opts.build_dir);
 
+    info!(
+        "Reading common words from {}.",
+        paths.common_words_path.display()
+    );
     let common_words = read_to_string(paths.common_words_path)?
         .lines()
         .map(|x| x.to_string())
         .collect();
 
+    info!("Reading tokenizer config from {}.", opts.tokenizer_config);
     let tokenizer_options: TokenizerOptions =
         serde_json::from_str(&read_to_string(&opts.tokenizer_config)?)?;
+    info!("Reading rule config from {}.", opts.rules_config);
     let rules_options: RulesOptions = serde_json::from_str(&read_to_string(&opts.rules_config)?)?;
 
+    info!("Creating tagger.");
     let tagger = Tagger::from_dumps(
         &paths.tag_paths,
         &paths.tag_remove_paths,
@@ -108,7 +115,10 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
     let regex_cache = if let Ok(file) = File::open(&paths.regex_cache_path) {
         let cache: RegexCache = bincode::deserialize_from(BufReader::new(file))?;
         if *cache.word_hash() == word_store_hash {
-            info!("Regex cache is valid.");
+            info!(
+                "Regex cache at {} is valid.",
+                paths.regex_cache_path.display()
+            );
             cache
         } else {
             info!("Regex cache was provided but is not valid. Rebuilding.");
@@ -124,7 +134,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
 
     let mut build_info = BuildInfo::new(Arc::new(tagger), regex_cache);
     let chunker = if paths.chunker_path.exists() {
-        info!("Chunker path exists. Building chunker.");
+        info!("{} exists. Building chunker.", paths.chunker_path.display());
         let reader = BufReader::new(File::open(paths.chunker_path)?);
         let chunker = Chunker::from_json(reader);
         Some(chunker)
@@ -132,7 +142,10 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         None
     };
     let multiword_tagger = if paths.multiword_tag_path.exists() {
-        info!("Multiword tagger path exists. Building multiword tagger.");
+        info!(
+            "{} exists. Building multiword tagger.",
+            paths.multiword_tag_path.display()
+        );
         Some(MultiwordTagger::from_dump(
             paths.multiword_tag_path,
             &build_info,
@@ -141,6 +154,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         None
     };
 
+    info!("Creating tokenizer.");
     let tokenizer = Tokenizer::from_xml(
         &paths.disambiguation_path,
         &mut build_info,
@@ -152,6 +166,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
     let f = BufWriter::new(File::create(&opts.tokenizer_out)?);
     bincode::serialize_into(f, &tokenizer)?;
 
+    info!("Creating grammar rules.");
     let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_options);
 
     let f = BufWriter::new(File::create(&opts.rules_out)?);
