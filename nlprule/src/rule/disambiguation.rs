@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::engine::composition::PosMatcher;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct POSFilter {
     pub matcher: PosMatcher,
 }

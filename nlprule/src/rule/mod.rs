@@ -23,7 +23,7 @@ pub use grammar::Example;
 
 use self::disambiguation::POSFilter;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Unification {
     pub(crate) mask: Vec<Option<bool>>,
     pub(crate) filters: Vec<Vec<POSFilter>>,

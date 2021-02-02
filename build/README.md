@@ -1,6 +1,22 @@
 # Building the NLPRule binaries
 
+Building the NLPRule binaries requires the *build directory* for the corresponding language. The latest build directories are stored on Backblaze B2. Download them from https://f000.backblazeb2.com/file/nlprule/en.zip (adjusting the two-letter language code accordingly for other languages).
 
+See [Making the build directory](#making-the-build-directory) for information on how to create a 
+build directory yourself.
+
+Besides the build directory, a rule config file and tokenizer config file are required. These are stored in-tree at [configs/](configs/). The binaries can then be built with the `compile` target e. g.:
+
+```
+RUST_LOG=INFO cargo run --all-features --release --bin compile -- \
+    --build-dir data/en \
+    --tokenizer-config configs/en/tokenizer.json \
+    --rules-config configs/en/rules.json \
+    --tokenizer-out storage/en_tokenizer.bin \
+    --rules-out storage/en_rules.bin
+```
+
+This is expected to warn about errors in the `Rules` since not all grammar rules are supported but should *not* report any errors in the `Tokenizer`.
 
 # Making the build directory
 
