@@ -7,9 +7,9 @@ use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::io::BufRead;
 use std::{borrow::Cow, fs::File, iter::once};
+use std::{collections::HashSet, path::Path};
 
 #[derive(Serialize, Deserialize)]
 struct TaggerFields {
@@ -140,7 +140,7 @@ pub struct Tagger {
 }
 
 impl Tagger {
-    fn get_lines<S1: AsRef<str>, S2: AsRef<str>>(
+    fn get_lines<S1: AsRef<Path>, S2: AsRef<Path>>(
         paths: &[S1],
         remove_paths: &[S2],
     ) -> std::io::Result<Vec<(String, String, String)>> {
@@ -195,7 +195,7 @@ impl Tagger {
     /// separated by tabs, to be added to the tagger.
     /// * `remove_paths`: Paths to files where each line contains the word, lemma and tag, respectively,
     /// separated by tabs, to be removed from the tagger if present in the files from `paths`.
-    pub fn from_dumps<S1: AsRef<str>, S2: AsRef<str>, S3: AsRef<str>>(
+    pub fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>, S3: AsRef<str>>(
         paths: &[S1],
         remove_paths: &[S2],
         extra_tags: &[S3],

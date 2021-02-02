@@ -1,12 +1,10 @@
 use std::{
-    collections::HashSet,
     fs::{read_to_string, File},
     hash::{Hash, Hasher},
     io::{BufReader, BufWriter},
+    path::{Path, PathBuf},
     sync::Arc,
 };
-
-use clap::Clap;
 
 use crate::{
     rules::{Rules, RulesOptions},
@@ -15,8 +13,11 @@ use crate::{
     },
     types::DefaultHasher,
 };
+use clap::Clap;
+use log::info;
 
 use self::parse_structure::{BuildInfo, RegexCache};
+use thiserror::Error;
 
 mod impls;
 mod parse_structure;
@@ -29,55 +30,74 @@ mod structure;
 )]
 pub struct BuildOptions {
     #[clap(long)]
-    pub tag_paths: Vec<String>,
+    pub build_dir: String,
     #[clap(long)]
-    pub tag_remove_paths: Vec<String>,
+    pub tokenizer_config: String,
     #[clap(long)]
-    pub disambiguation_path: String,
+    pub rules_config: String,
     #[clap(long)]
-    pub grammar_path: String,
+    pub tokenizer_out: String,
     #[clap(long)]
-    pub tokenizer_config_path: String,
-    #[clap(long)]
-    pub rules_config_path: String,
-    #[clap(long)]
-    pub chunker_path: Option<String>,
-    #[clap(long)]
-    pub multiword_tag_path: Option<String>,
-    #[clap(long)]
-    pub common_words_path: Option<String>,
-    #[clap(long)]
-    pub regex_cache_path: String,
-    #[clap(long)]
-    pub out_tokenizer_path: String,
-    #[clap(long)]
-    pub out_rules_path: String,
+    pub rules_out: String,
 }
 
-pub fn compile(opts: &BuildOptions) {
-    let common_words = opts
-        .common_words_path
-        .as_ref()
-        .map_or_else(HashSet::new, |path| {
-            read_to_string(path)
-                .unwrap()
-                .lines()
-                .map(|x| x.to_string())
-                .collect()
-        });
+struct BuildFilePaths {
+    tag_paths: Vec<PathBuf>,
+    tag_remove_paths: Vec<PathBuf>,
+    chunker_path: PathBuf,
+    disambiguation_path: PathBuf,
+    grammar_path: PathBuf,
+    multiword_tag_path: PathBuf,
+    common_words_path: PathBuf,
+    regex_cache_path: PathBuf,
+}
+
+impl BuildFilePaths {
+    fn new<P: AsRef<Path>>(build_dir: P) -> Self {
+        let p = build_dir.as_ref();
+        BuildFilePaths {
+            tag_paths: vec![p.join("tags/output.dump"), p.join("tags/added.txt")],
+            tag_remove_paths: vec![p.join("tags/removed.txt")],
+            chunker_path: p.join("chunker.json"),
+            disambiguation_path: p.join("disambiguation.xml"),
+            grammar_path: p.join("grammar.xml"),
+            multiword_tag_path: p.join("tags/multiwords.txt"),
+            common_words_path: p.join("common.txt"),
+            regex_cache_path: p.join("regex_cache.bin"),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CompileError {
+    #[error("input/output error")]
+    Io(#[from] std::io::Error),
+    #[error("serialization error")]
+    Serialization(#[from] bincode::Error),
+    #[error("JSON deserialization error")]
+    JSON(#[from] serde_json::Error),
+    #[error("unknown error")]
+    Other(#[from] Box<dyn std::error::Error>),
+}
+
+pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
+    let paths = BuildFilePaths::new(&opts.build_dir);
+
+    let common_words = read_to_string(paths.common_words_path)?
+        .lines()
+        .map(|x| x.to_string())
+        .collect();
 
     let tokenizer_options: TokenizerOptions =
-        serde_json::from_str(&read_to_string(&opts.tokenizer_config_path).unwrap()).unwrap();
-    let rules_options: RulesOptions =
-        serde_json::from_str(&read_to_string(&opts.rules_config_path).unwrap()).unwrap();
+        serde_json::from_str(&read_to_string(&opts.tokenizer_config)?)?;
+    let rules_options: RulesOptions = serde_json::from_str(&read_to_string(&opts.rules_config)?)?;
 
     let tagger = Tagger::from_dumps(
-        &opts.tag_paths,
-        &opts.tag_remove_paths,
+        &paths.tag_paths,
+        &paths.tag_remove_paths,
         &tokenizer_options.extra_tags,
         &common_words,
-    )
-    .unwrap();
+    )?;
 
     let mut hasher = DefaultHasher::default();
     let mut word_store = tagger.word_store().iter().collect::<Vec<_>>();
@@ -85,48 +105,61 @@ pub fn compile(opts: &BuildOptions) {
     word_store.hash(&mut hasher);
     let word_store_hash = hasher.finish();
 
-    let regex_cache = if let Ok(file) = File::open(&opts.regex_cache_path) {
-        let cache: RegexCache = bincode::deserialize_from(BufReader::new(file)).unwrap();
+    let regex_cache = if let Ok(file) = File::open(&paths.regex_cache_path) {
+        let cache: RegexCache = bincode::deserialize_from(BufReader::new(file))?;
         if *cache.word_hash() == word_store_hash {
+            info!("Regex cache is valid.");
             cache
         } else {
+            info!("Regex cache was provided but is not valid. Rebuilding.");
             RegexCache::new(word_store_hash)
         }
     } else {
+        info!(
+            "No regex cache provided. Building and writing to {}.",
+            paths.regex_cache_path.display()
+        );
         RegexCache::new(word_store_hash)
     };
 
     let mut build_info = BuildInfo::new(Arc::new(tagger), regex_cache);
-    let chunker = if let Some(path) = &opts.chunker_path {
-        let reader = BufReader::new(File::open(path).unwrap());
+    let chunker = if paths.chunker_path.exists() {
+        info!("Chunker path exists. Building chunker.");
+        let reader = BufReader::new(File::open(paths.chunker_path)?);
         let chunker = Chunker::from_json(reader);
         Some(chunker)
     } else {
         None
     };
-    let multiword_tagger = if let Some(path) = &opts.multiword_tag_path {
-        Some(MultiwordTagger::from_dump(path, &build_info))
+    let multiword_tagger = if paths.multiword_tag_path.exists() {
+        info!("Multiword tagger path exists. Building multiword tagger.");
+        Some(MultiwordTagger::from_dump(
+            paths.multiword_tag_path,
+            &build_info,
+        ))
     } else {
         None
     };
 
     let tokenizer = Tokenizer::from_xml(
-        &opts.disambiguation_path,
+        &paths.disambiguation_path,
         &mut build_info,
         chunker,
         multiword_tagger,
         tokenizer_options,
-    )
-    .unwrap();
+    )?;
 
-    let f = BufWriter::new(File::create(&opts.out_tokenizer_path).unwrap());
-    bincode::serialize_into(f, &tokenizer).unwrap();
+    let f = BufWriter::new(File::create(&opts.tokenizer_out)?);
+    bincode::serialize_into(f, &tokenizer)?;
 
-    let f = BufWriter::new(File::create(&opts.regex_cache_path).unwrap());
-    bincode::serialize_into(f, build_info.mut_regex_cache()).unwrap();
+    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_options);
 
-    let rules = Rules::from_xml(&opts.grammar_path, &mut build_info, rules_options);
+    let f = BufWriter::new(File::create(&opts.rules_out)?);
+    bincode::serialize_into(f, &rules)?;
 
-    let f = BufWriter::new(File::create(&opts.out_rules_path).unwrap());
-    bincode::serialize_into(f, &rules).unwrap();
+    // we need to write the regex cache after building the rules, otherwise it isn't fully populated
+    let f = BufWriter::new(File::create(&paths.regex_cache_path)?);
+    bincode::serialize_into(f, build_info.mut_regex_cache())?;
+
+    Ok(())
 }

@@ -1,4 +1,10 @@
-import argparse
+"""
+Converts chunker from binary format to something we can work with.
+
+A port of the relevant *Reader.java files from OpenNLP.
+E. g. https://github.com/apache/opennlp/blob/master/opennlp-tools/src/main/java/opennlp/tools/ml/maxent/io/GISModelReader.java
+"""
+
 import json
 import struct
 import zipfile
@@ -78,26 +84,18 @@ def read_model(stream):
     pmap = {label: param for label, param in zip(pred_labels, params)}
 
     return {
-        # "params": params,
+        # "params": params, # we don't need these for inference
         # "pred_labels": pred_labels,
         "outcome_labels": outcome_labels,
         "pmap": pmap,
     }
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--token-model", "-t", type=str)
-    parser.add_argument("--pos-model", "-p", type=str)
-    parser.add_argument("--chunk-model", "-c", type=str)
-    parser.add_argument("--out", "-o", type=str)
-
-    args = parser.parse_args()
-
-    with zipfile.ZipFile(args.token_model, "r") as f:
+def write_chunker(outfile, token_model_path, pos_model_path, chunk_model_path):
+    with zipfile.ZipFile(token_model_path, "r") as f:
         token_model = read_model(BytesIO(f.read("token.model")))
 
-    with zipfile.ZipFile(args.pos_model, "r") as f:
+    with zipfile.ZipFile(pos_model_path, "r") as f:
         pos_model = read_model(BytesIO(f.read("pos.model")))
 
         tagdict = {}
@@ -109,7 +107,7 @@ if __name__ == "__main__":
 
             tagdict[children[0].text] = e.attrib["tags"].split()
 
-    with zipfile.ZipFile(args.chunk_model, "r") as f:
+    with zipfile.ZipFile(chunk_model_path, "r") as f:
         chunk_model = read_model(BytesIO(f.read("chunker.model")))
 
     json.dump(
@@ -119,6 +117,6 @@ if __name__ == "__main__":
             "pos_tagdict": tagdict,
             "chunk_model": chunk_model,
         },
-        open(args.out, "w"),
+        open(outfile, "w"),
         indent=4,
     )

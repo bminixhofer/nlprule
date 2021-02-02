@@ -9,6 +9,9 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        lang: ["en", "de", "es"]
     steps:
       - uses: actions/checkout@v2
       - name: Cache cargo registry
@@ -35,55 +38,27 @@ jobs:
           mkdir storage
 
           cd data
-          wget https://f000.backblazeb2.com/file/nlprule/en.zip
-          unzip en.zip
-          wget https://f000.backblazeb2.com/file/nlprule/de.zip
-          unzip de.zip
-          wget https://f000.backblazeb2.com/file/nlprule/es.zip
-          unzip es.zip
+          wget https://f000.backblazeb2.com/file/nlprule/${{ matrix.lang }}.zip
+          unzip ${{ matrix.lang }}.zip
       - uses: actions-rs/cargo@v1
+        env:
+          RUST_LOG: INFO
         with:
           command: run
-          # build english, see BUILD.md
-          args: --all-features --release --bin compile -- --tag-paths data/en/tags/output.dump data/en/tags/added.txt --tag-remove-paths data/en/tags/removed.txt --disambiguation-path data/en/disambiguation.canonic.xml --tokenizer-config-path configs/en/tokenizer.json --grammar-path data/en/grammar.canonic.xml --rules-config-path configs/en/rules.json --common-words-path data/en/common.txt --chunker-path data/en/chunker.json --out-tokenizer-path storage/en_tokenizer.bin --out-rules-path storage/en_rules.bin --regex-cache-path data/en/regex_cache.bin
+          args: --all-features --release --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-config configs/${{ matrix.lang }}/tokenizer.json --rules-config configs/${{ matrix.lang }}/rules.json --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
       - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          # build german, see BUILD.md
-          args: --all-features --release --bin compile -- --tag-paths data/de/tags/output.dump data/de/tags/added.txt --tag-remove-paths data/de/tags/removed.txt --disambiguation-path data/de/disambiguation.canonic.xml --tokenizer-config-path configs/de/tokenizer.json --grammar-path data/de/grammar.canonic.xml --rules-config-path configs/de/rules.json --common-words-path data/de/common.txt --out-tokenizer-path storage/de_tokenizer.bin --out-rules-path storage/de_rules.bin --regex-cache-path data/de/regex_cache.bin --multiword-tag-path data/en/tags/multiwords.txt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          # build spanish, see BUILD.md
-          args: --all-features --release --bin compile -- --tag-paths data/es/tags/output.dump data/es/tags/added.txt --tag-remove-paths data/es/tags/removed.txt --disambiguation-path data/es/disambiguation.canonic.xml --tokenizer-config-path configs/es/tokenizer.json --grammar-path data/es/grammar.canonic.xml --rules-config-path configs/es/rules.json --common-words-path data/es/common.txt --out-tokenizer-path storage/es_tokenizer.bin --out-rules-path storage/es_rules.bin --regex-cache-path data/es/regex_cache.bin --multiword-tag-path data/es/tags/multiwords.txt
-      - uses: actions-rs/cargo@v1
+        if: matrix.lang == 'en'
         with:
           command: test
           args: --verbose --all-features --release -p nlprule
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/en_tokenizer.bin
+          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --all-features --release --bin test -- --tokenizer storage/en_tokenizer.bin --rules storage/en_rules.bin
-      - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/de_tokenizer.bin
-      - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --all-features --release --bin test -- --tokenizer storage/de_tokenizer.bin --rules storage/de_rules.bin
-      - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/es_tokenizer.bin
-      - uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --all-features --release --bin test -- --tokenizer storage/es_tokenizer.bin --rules storage/es_rules.bin
+          args: --all-features --release --bin test -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin --rules storage/${{ matrix.lang }}_rules.bin
       - name: Upload binaries as artifact
         uses: actions/upload-artifact@v2
         with:

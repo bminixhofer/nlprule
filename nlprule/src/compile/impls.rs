@@ -181,7 +181,13 @@ impl Rules {
             let mut errors: Vec<(String, usize)> = errors.into_iter().collect();
             errors.sort_by_key(|x| -(x.1 as i32));
 
-            warn!("Errors constructing Rules: {:#?}", &errors);
+            warn!(
+                "Errors constructing Rules: {:#?}",
+                &errors
+                    .iter()
+                    .map(|(message, number)| format!("{} (n={})", message, number))
+                    .collect::<Vec<_>>()
+            );
         }
 
         Rules { rules }
