@@ -28,6 +28,7 @@ unicase = "2.6"
 derivative = "2.2"
 once_cell = "1.5"
 fst = "0.4"
+aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
 
 rayon-cond = "0.1"

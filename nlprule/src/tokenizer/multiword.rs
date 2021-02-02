@@ -1,43 +1,68 @@
 use crate::types::*;
+use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
 
 use super::tag::Tagger;
 
 #[derive(Serialize, Deserialize)]
+pub(crate) struct MultiwordTaggerFields {
+    pub(crate) multiwords: Vec<(String, owned::PosId)>,
+}
+
+impl From<MultiwordTaggerFields> for MultiwordTagger {
+    fn from(data: MultiwordTaggerFields) -> Self {
+        MultiwordTagger {
+            matcher: AhoCorasick::new_auto_configured(
+                &data
+                    .multiwords
+                    .iter()
+                    .map(|(word, _)| word)
+                    .collect::<Vec<_>>(),
+            ),
+            multiwords: data.multiwords,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(from = "MultiwordTaggerFields")]
 pub struct MultiwordTagger {
-    pub(crate) multiwords: Vec<(Vec<owned::WordId>, owned::PosId)>,
+    #[serde(skip)]
+    matcher: AhoCorasick,
+    multiwords: Vec<(String, owned::PosId)>,
 }
 
 impl MultiwordTagger {
-    fn is_match(&self, tokens: &[IncompleteToken], multiword: &[owned::WordId]) -> bool {
-        if multiword.is_empty() {
-            return true;
-        }
-
-        if tokens.is_empty() {
-            return false;
-        }
-
-        tokens[0].word.text == multiword[0].as_ref_id()
-            && self.is_match(&tokens[1..], &multiword[1..])
-    }
-
-    // TODO: speed up with aho corasick
     pub fn apply<'t>(&'t self, tokens: &mut Vec<IncompleteToken<'t>>, tagger: &'t Tagger) {
-        for i in 0..tokens.len() {
-            for (multiword, pos) in &self.multiwords {
-                if self.is_match(&tokens[i..], &multiword) {
-                    for token in &mut tokens[i..i + multiword.len()] {
-                        let joined_word: String = multiword
-                            .iter()
-                            .map(|x| x.0.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        token.multiword_data = Some(WordData::new(
-                            tagger.id_word(joined_word.into()),
-                            pos.as_ref_id(),
-                        ));
-                    }
+        let mut start_indices = DefaultHashMap::new();
+        let mut end_indices = DefaultHashMap::new();
+        let mut byte_index = 0;
+
+        let joined = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, x)| {
+                start_indices.insert(byte_index, i);
+                byte_index += x.word.text.0.len();
+                end_indices.insert(byte_index, i);
+                byte_index += " ".len();
+
+                x.word.text.0.as_ref()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        for m in self.matcher.find_iter(&joined) {
+            if let (Some(start), Some(end)) =
+                (start_indices.get(&m.start()), end_indices.get(&m.end()))
+            {
+                let (word, pos) = &self.multiwords[m.pattern()];
+                // end index is inclusive
+                for token in tokens[*start..(*end + 1)].iter_mut() {
+                    token.multiword_data = Some(WordData::new(
+                        tagger.id_word(word.as_str().into()),
+                        pos.as_ref_id(),
+                    ));
                 }
             }
         }

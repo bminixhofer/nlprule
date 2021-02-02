@@ -17,7 +17,11 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesOptions},
-    tokenizer::{chunk, multiword::MultiwordTagger, Tokenizer, TokenizerOptions},
+    tokenizer::{
+        chunk,
+        multiword::{MultiwordTagger, MultiwordTaggerFields},
+        Tokenizer, TokenizerOptions,
+    },
     types::*,
     utils::parallelism::MaybeParallelIterator,
 };
@@ -39,15 +43,15 @@ impl MultiwordTagger {
             }
             let tab_split: Vec<_> = line.split('\t').collect();
 
-            let word: Vec<_> = tab_split[0]
+            let word: String = tab_split[0]
                 .split_whitespace()
-                .map(|x| info.tagger().id_word(String::from(x).into()).to_owned_id())
-                .collect();
+                .collect::<Vec<_>>()
+                .join(" ");
             let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
             multiwords.push((word, pos));
         }
 
-        MultiwordTagger { multiwords }
+        (MultiwordTaggerFields { multiwords }).into()
     }
 }
 
