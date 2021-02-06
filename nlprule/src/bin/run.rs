@@ -1,8 +1,5 @@
 use clap::Clap;
-use nlprule::{
-    rules::Rules,
-    tokenizer::{finalize, Tokenizer},
-};
+use nlprule::{rules::Rules, tokenizer::Tokenizer};
 
 #[derive(Clap)]
 #[clap(
@@ -24,11 +21,8 @@ fn main() {
     let tokenizer = Tokenizer::new(opts.tokenizer).unwrap();
     let rules = Rules::new(opts.rules).unwrap();
 
-    let incomplete_tokens = tokenizer.disambiguate(tokenizer.tokenize(&opts.text));
+    let tokens = tokenizer.pipe(&opts.text);
 
-    println!("Tokens: {:#?}", incomplete_tokens);
-    println!(
-        "Suggestions: {:#?}",
-        rules.apply(&finalize(incomplete_tokens), &tokenizer)
-    );
+    println!("Tokens: {:#?}", tokens);
+    println!("Suggestions: {:#?}", rules.suggest(&opts.text, &tokenizer));
 }

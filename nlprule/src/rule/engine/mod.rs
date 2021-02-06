@@ -86,7 +86,7 @@ impl Engine {
                     .collect();
 
                 graph_info.sort_by(|(_, start, _), (_, end, _)| start.cmp(end));
-                let mut mask = vec![false; tokens[0].text.chars().count()];
+                let mut mask = vec![false; tokens[0].sentence.chars().count()];
 
                 for (graph, start, end) in graph_info {
                     if mask[start..end].iter().all(|x| !x) {
@@ -97,7 +97,7 @@ impl Engine {
             }
             Engine::Text(regex, id_to_idx) => {
                 // this is the entire text, NOT the text of one token
-                let text = tokens[0].text;
+                let text = tokens[0].sentence;
 
                 let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
                     .char_indices()

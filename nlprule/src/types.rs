@@ -168,10 +168,16 @@ pub struct IncompleteToken<'t> {
     pub has_space_before: bool,
     pub chunks: Vec<String>,
     pub multiword_data: Option<WordData<'t>>,
-    pub text: &'t str,
+    pub sentence: &'t str,
     #[derivative(PartialEq = "ignore", Debug = "ignore")]
     pub tagger: &'t Tagger,
 }
+
+/// A token to which disambiguation rules have been applied to.
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
+#[derive(Clone)]
+pub struct DisambiguatedToken<'t>(pub IncompleteToken<'t>);
 
 /// A finished token with all information set.
 #[derive(Derivative)]
@@ -182,14 +188,14 @@ pub struct Token<'t> {
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
     pub chunks: Vec<String>,
-    pub text: &'t str,
+    pub sentence: &'t str,
     #[derivative(Debug = "ignore")]
     pub tagger: &'t Tagger,
 }
 
 impl<'t> Token<'t> {
     /// Get the special sentence start token.
-    pub fn sent_start(text: &'t str, tagger: &'t Tagger) -> Self {
+    pub fn sent_start(sentence: &'t str, tagger: &'t Tagger) -> Self {
         Token {
             word: Word::new_with_tags(
                 tagger.id_word("".into()),
@@ -204,7 +210,7 @@ impl<'t> Token<'t> {
             byte_span: (0, 0),
             has_space_before: false,
             chunks: Vec::new(),
-            text,
+            sentence,
             tagger,
         }
     }
@@ -252,7 +258,7 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             char_span: data.char_span,
             has_space_before: data.has_space_before,
             chunks: data.chunks,
-            text: data.text,
+            sentence: data.sentence,
             tagger: data.tagger,
         }
     }
@@ -271,4 +277,12 @@ pub struct Suggestion {
     pub end: usize,
     /// The suggested replacement options for the text.
     pub replacements: Vec<String>,
+}
+
+impl Suggestion {
+    /// Shift `start` and `end` to the right by the specified amount.
+    pub fn rshift(&mut self, offset: usize) {
+        self.start += offset;
+        self.end += offset;
+    }
 }

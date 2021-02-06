@@ -667,7 +667,7 @@ impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
     pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
         // replacements must not change char indices
-        let text = tokens[0].text.replace('’', "\'");
+        let text = tokens[0].sentence.replace('’', "\'");
 
         let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
             .char_indices()

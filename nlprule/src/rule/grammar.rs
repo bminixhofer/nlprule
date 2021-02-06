@@ -120,7 +120,7 @@ impl Match {
         let text = graph
             .by_id(self.id)
             .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
-            .text(graph.tokens()[0].text);
+            .text(graph.tokens()[0].sentence);
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
             replacer.apply(text, tokenizer)?

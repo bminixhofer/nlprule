@@ -204,6 +204,7 @@ impl Tokenizer {
         build_info: &mut BuildInfo,
         chunker: Option<chunk::Chunker>,
         multiword_tagger: Option<MultiwordTagger>,
+        sentencizer: srx::Rules,
         options: TokenizerOptions,
     ) -> Result<Self, Box<dyn Error>> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
@@ -261,6 +262,7 @@ impl Tokenizer {
 
         Ok(Tokenizer {
             tagger: build_info.tagger().clone(),
+            sentencizer,
             chunker,
             multiword_tagger,
             rules,

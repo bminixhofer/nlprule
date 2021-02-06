@@ -119,13 +119,13 @@ fn get_token_strs<'t>(
 
 /// *Finalizes* the tokens by e. g. adding a specific UNKNOWN part-of-speech tag.
 /// After finalization grammatical error correction rules can be used on the tokens.
-pub fn finalize(tokens: Vec<IncompleteToken>) -> Vec<Token> {
+pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
     if tokens.is_empty() {
         return Vec::new();
     }
 
-    let mut finalized = vec![Token::sent_start(tokens[0].text, tokens[0].tagger)];
-    finalized.extend(tokens.into_iter().map(|x| x.into()));
+    let mut finalized = vec![Token::sent_start(tokens[0].0.sentence, tokens[0].0.tagger)];
+    finalized.extend(tokens.into_iter().map(|x| x.0.into()));
 
     finalized
 }
@@ -184,6 +184,7 @@ impl Default for TokenizerOptions {
 pub struct Tokenizer {
     pub(crate) rules: Vec<DisambiguationRule>,
     pub(crate) chunker: Option<Chunker>,
+    pub(crate) sentencizer: srx::Rules,
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
     pub(crate) options: TokenizerOptions,
@@ -221,14 +222,14 @@ impl Tokenizer {
         &'t self,
         mut tokens: Vec<IncompleteToken<'t>>,
         id: Option<&str>,
-    ) -> Vec<IncompleteToken<'t>> {
+    ) -> Vec<DisambiguatedToken<'t>> {
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == id).unwrap()
         });
         let mut i = 0;
 
         while i < n {
-            let finalized = finalize(tokens.clone());
+            let finalized = finalize(tokens.iter().cloned().map(DisambiguatedToken).collect());
             let result = self.rules[i..n]
                 .maybe_par_iter()
                 .enumerate()
@@ -250,7 +251,7 @@ impl Tokenizer {
             }
         }
 
-        tokens
+        tokens.into_iter().map(DisambiguatedToken).collect()
     }
 
     /// Apply rule-based disambiguation to the tokens.
@@ -258,15 +259,16 @@ impl Tokenizer {
     pub fn disambiguate<'t>(
         &'t self,
         tokens: Vec<IncompleteToken<'t>>,
-    ) -> Vec<IncompleteToken<'t>> {
+    ) -> Vec<DisambiguatedToken<'t>> {
         self.disambiguate_up_to_id(tokens, None)
     }
 
-    /// Tokenize the given text. This applies chunking and tagging, but does not do disambiguation.
-    pub fn tokenize<'t>(&'t self, text: &'t str) -> Vec<IncompleteToken<'t>> {
+    /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
+    // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
+    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Vec<IncompleteToken<'t>> {
         let mut current_char = 0;
         let token_strs = get_token_strs(
-            text,
+            sentence,
             &self.options.extra_split_chars,
             &self.options.extra_join_regexes,
             &self.tagger,
@@ -279,7 +281,7 @@ impl Tokenizer {
                 let ptr = x.as_ptr() as usize;
                 current_char += x.chars().count();
 
-                let byte_start = ptr - text.as_ptr() as usize;
+                let byte_start = ptr - sentence.as_ptr() as usize;
                 let trimmed = x.trim();
 
                 let is_sentence_start = i == 0;
@@ -297,10 +299,10 @@ impl Tokenizer {
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     is_sentence_end,
-                    has_space_before: text[..byte_start].ends_with(char::is_whitespace),
+                    has_space_before: sentence[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
                     multiword_data: None,
-                    text,
+                    sentence,
                     tagger: self.tagger.as_ref(),
                 }
             })
@@ -321,6 +323,23 @@ impl Tokenizer {
         }
 
         tokens
+    }
+
+    /// Splits the text into sentences and tokenizes each sentence.
+    pub fn sentencize<'t>(&'t self, text: &'t str) -> Vec<Vec<IncompleteToken<'t>>> {
+        self.sentencizer
+            .split(text)
+            .into_iter()
+            .map(|sentence| self.tokenize(sentence))
+            .collect()
+    }
+
+    /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.
+    pub fn pipe<'t>(&'t self, text: &'t str) -> Vec<Vec<Token<'t>>> {
+        self.sentencize(text)
+            .into_iter()
+            .map(|tokens| finalize(self.disambiguate(tokens)))
+            .collect()
     }
 }
 
