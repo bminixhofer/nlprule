@@ -1,14 +1,14 @@
 //! Sets of grammatical error correction rules.
 
+use crate::rule::Rule;
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{rule::Rule, tokenizer::finalize};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Read},
-    iter::{IntoIterator, FromIterator, Iterator},
+    iter::{FromIterator, IntoIterator, Iterator},
     path::Path,
 };
 
@@ -88,7 +88,7 @@ impl Rules {
 
         output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 
-        let mut mask = vec![false; tokens[0].text.chars().count()];
+        let mut mask = vec![false; tokens[0].sentence.chars().count()];
 
         output
             .into_iter()
@@ -107,8 +107,28 @@ impl Rules {
 
     /// Compute the suggestions for a text by checking all rules.
     pub fn suggest(&self, text: &str, tokenizer: &Tokenizer) -> Vec<Suggestion> {
-        let tokens = tokenizer.disambiguate(tokenizer.tokenize(text));
-        self.apply(&finalize(tokens), tokenizer)
+        if text.is_empty() {
+            return Vec::new();
+        }
+
+        let mut suggestions = Vec::new();
+        let mut char_offset = 0;
+
+        // get suggestions sentence by sentence
+        for tokens in tokenizer.pipe(text) {
+            suggestions.extend(
+                self.apply(&tokens, tokenizer)
+                    .into_iter()
+                    .map(|mut suggestion| {
+                        suggestion.rshift(char_offset);
+                        suggestion
+                    }),
+            );
+
+            char_offset += tokens[0].sentence.chars().count();
+        }
+
+        suggestions
     }
 
     /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
@@ -183,11 +203,12 @@ impl IntoIterator for Rules {
     }
 }
 
-impl<R> FromIterator<R> for Rules where R: Into<Rule> {
-    fn from_iter<I: IntoIterator<Item=R>>(iter: I) -> Self {
+impl<R> FromIterator<R> for Rules
+where
+    R: Into<Rule>,
+{
+    fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
         let rules = iter.into_iter().map(|x| x.into()).collect::<Vec<Rule>>();
-        Self {
-            rules
-        }
+        Self { rules }
     }
 }

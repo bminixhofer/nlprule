@@ -189,7 +189,10 @@ impl DisambiguationRule {
                 tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
             let finalized = finalize(tokens_before.clone());
             let changes = self.apply(&finalized, tokenizer);
-            let mut tokens_after = tokens_before.clone();
+
+            let tokens_before: Vec<_> = tokens_before.into_iter().map(|x| x.0).collect();
+            let mut tokens_after: Vec<_> = tokens_before.clone();
+
             if !changes.is_empty() {
                 self.change(&mut tokens_after, tokenizer, changes);
             }

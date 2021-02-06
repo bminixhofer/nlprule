@@ -1,8 +1,9 @@
 use std::{
-    fs::{read_to_string, File},
+    fs::{self, File},
     hash::{Hash, Hasher},
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -42,6 +43,7 @@ pub struct BuildOptions {
 }
 
 struct BuildFilePaths {
+    lang_code_path: PathBuf,
     tag_paths: Vec<PathBuf>,
     tag_remove_paths: Vec<PathBuf>,
     chunker_path: PathBuf,
@@ -50,12 +52,14 @@ struct BuildFilePaths {
     multiword_tag_path: PathBuf,
     common_words_path: PathBuf,
     regex_cache_path: PathBuf,
+    srx_path: PathBuf,
 }
 
 impl BuildFilePaths {
     fn new<P: AsRef<Path>>(build_dir: P) -> Self {
         let p = build_dir.as_ref();
         BuildFilePaths {
+            lang_code_path: p.join("lang_code.txt"),
             tag_paths: vec![p.join("tags/output.dump"), p.join("tags/added.txt")],
             tag_remove_paths: vec![p.join("tags/removed.txt")],
             chunker_path: p.join("chunker.json"),
@@ -64,6 +68,7 @@ impl BuildFilePaths {
             multiword_tag_path: p.join("tags/multiwords.txt"),
             common_words_path: p.join("common.txt"),
             regex_cache_path: p.join("regex_cache.bin"),
+            srx_path: p.join("segment.srx"),
         }
     }
 }
@@ -76,6 +81,8 @@ pub enum CompileError {
     Serialization(#[from] bincode::Error),
     #[error("JSON deserialization error")]
     JSON(#[from] serde_json::Error),
+    #[error("error loading SRX")]
+    SRX(#[from] srx::Error),
     #[error("unknown error")]
     Other(#[from] Box<dyn std::error::Error>),
 }
@@ -83,20 +90,23 @@ pub enum CompileError {
 pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
     let paths = BuildFilePaths::new(&opts.build_dir);
 
+    let lang_code = fs::read_to_string(paths.lang_code_path)?;
+
     info!(
         "Reading common words from {}.",
         paths.common_words_path.display()
     );
-    let common_words = read_to_string(paths.common_words_path)?
+    let common_words = fs::read_to_string(paths.common_words_path)?
         .lines()
         .map(|x| x.to_string())
         .collect();
 
     info!("Reading tokenizer config from {}.", opts.tokenizer_config);
     let tokenizer_options: TokenizerOptions =
-        serde_json::from_str(&read_to_string(&opts.tokenizer_config)?)?;
+        serde_json::from_str(&fs::read_to_string(&opts.tokenizer_config)?)?;
     info!("Reading rule config from {}.", opts.rules_config);
-    let rules_options: RulesOptions = serde_json::from_str(&read_to_string(&opts.rules_config)?)?;
+    let rules_options: RulesOptions =
+        serde_json::from_str(&fs::read_to_string(&opts.rules_config)?)?;
 
     info!("Creating tagger.");
     let tagger = Tagger::from_dumps(
@@ -160,6 +170,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         &mut build_info,
         chunker,
         multiword_tagger,
+        srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
         tokenizer_options,
     )?;
 

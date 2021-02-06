@@ -1,17 +1,17 @@
 import pytest
 import pickle
-from nlprule import Tokenizer, Rules, SplitOn
+from nlprule import Tokenizer, Rules
 
 
 @pytest.fixture()
 def tokenizer_and_rules():
     tokenizer = Tokenizer("storage/en_tokenizer.bin")
-    rules = Rules("storage/en_rules.bin", tokenizer, SplitOn([".", "?", "!"]))
+    rules = Rules("storage/en_rules.bin", tokenizer)
     return tokenizer, rules
 
 
 def test_correct(tokenizer_and_rules):
-    (tokenizer, rules) = tokenizer_and_rules
+    (_, rules) = tokenizer_and_rules
 
     # just some sample corrections, tests covering all rules are done in rust
 
@@ -31,8 +31,18 @@ def test_correct(tokenizer_and_rules):
     assert rules.correct("I can due his homework.") == "I can do his homework."
 
 
+def test_sentencization_sane(tokenizer_and_rules):
+    (tokenizer, _) = tokenizer_and_rules
+
+    sentences = tokenizer.pipe(
+        "e.g. U.K. and Mr. do not split. SRX is a rule-based format."
+    )
+    assert (sentences[0][-2].text, sentences[0][-1].text) == ("split", ".")
+    assert (sentences[1][1].text, sentences[1][2].text) == ("SRX", "is")
+
+
 def test_suggest(tokenizer_and_rules):
-    (tokenizer, rules) = tokenizer_and_rules
+    (_, rules) = tokenizer_and_rules
 
     text = "She was not been here since Monday instead off working."
 
@@ -52,7 +62,7 @@ def test_suggest(tokenizer_and_rules):
 
 
 def test_rules_inspectable(tokenizer_and_rules):
-    (tokenizer, rules) = tokenizer_and_rules
+    (_, rules) = tokenizer_and_rules
 
     suggestion = rules.suggest("He was taken back by my response.")[0]
 

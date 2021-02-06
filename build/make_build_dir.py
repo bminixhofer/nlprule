@@ -2,6 +2,8 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from pathlib import Path
 from shutil import copyfile
 import os
+import logging
+from zipfile import ZipFile
 import lxml.etree as ET
 import wordfreq
 from chardet.universaldetector import UniversalDetector
@@ -37,6 +39,20 @@ def copy_lt_files(out_dir, lt_dir, lang_code):
     ]:
         if source.exists():
             copyfile(source, dest)
+        else:
+            logging.warning(f"{source} does not exist.")
+
+    # copy from zipfiles
+    for zipfile, source, dest in [
+        (
+            lt_dir / "libs" / "languagetool-core.jar",
+            Path("org") / "languagetool" / "resource" / "segment.srx",
+            out_dir / "segment.srx",
+        )
+    ]:
+        file = ZipFile(zipfile)
+        with open(dest, "wb") as f:
+            f.write(file.read(str(source)))
 
     # canonicalize XML
     for xmlfile in ["grammar.xml", "disambiguation.xml"]:
@@ -150,5 +166,7 @@ Only needed if the language requires a chunker (e. g. English).
             args.chunker_pos_model,
             args.chunker_chunk_model,
         )
+
+    open(args.out_dir / "lang_code.txt", "w").write(args.lang_code)
 
     print("Success!")
