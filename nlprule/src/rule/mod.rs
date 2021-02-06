@@ -23,6 +23,9 @@ pub use grammar::Example;
 
 use self::disambiguation::POSFilter;
 
+/// A *Unification* makes an otherwise matching pattern invalid if no combination of its filters
+/// matches all tokens marked with "unify".
+/// Can also be negated.
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Unification {
     pub(crate) mask: Vec<Option<bool>>,
@@ -185,6 +188,7 @@ impl DisambiguationRule {
                 disambiguation::DisambiguationExample::Changed(x) => x.text.as_str(),
             };
 
+            // by convention examples are always considered as one sentence even if the sentencizer would split
             let tokens_before =
                 tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
             let finalized = finalize(tokens_before.clone());
@@ -429,6 +433,7 @@ impl Rule {
         let mut passes = Vec::new();
 
         for test in self.examples.iter() {
+            // by convention examples are always considered as one sentence even if the sentencizer would split
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
             info!("Tokens: {:#?}", tokens);
             let suggestions = self.apply(&tokens, tokenizer);
