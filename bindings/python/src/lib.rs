@@ -1,5 +1,5 @@
 use flate2::read::GzDecoder;
-use nlprule::{
+use nlprule_core::{
     rule::{Example, Rule},
     rules::{apply_suggestions, Rules},
     tokenizer::tag::Tagger,
@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
 };
 
-fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
+fn get_resource(lang_code: &str, name: &str) -> PyResult<impl Read> {
     let version = env!("CARGO_PKG_VERSION");
     let mut cache_path: Option<PathBuf> = None;
 
@@ -25,7 +25,7 @@ fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
         let cache_dir = project_dirs.cache_dir();
 
         cache_path = Some(
-            cache_dir.join(version).join(code).join(
+            cache_dir.join(version).join(lang_code).join(
                 name.strip_suffix(".gz")
                     .expect("resource name must have .gz ending."),
             ),
@@ -43,7 +43,7 @@ fn get_resource(code: &str, name: &str) -> PyResult<impl Read> {
     let bytes = reqwest::blocking::get(&format!(
         "https://github.com/bminixhofer/nlprule/releases/download/{}/{}_{}",
         env!("CARGO_PKG_VERSION"),
-        code,
+        lang_code,
         name
     ))
     .and_then(|x| x.bytes())
@@ -316,8 +316,8 @@ impl PyTokenizer {
 impl PyTokenizer {
     #[text_signature = "(code, sentence_splitter=None)"]
     #[staticmethod]
-    fn load(code: &str) -> PyResult<Self> {
-        let bytes = get_resource(code, "tokenizer.bin.gz")?;
+    fn load(lang_code: &str) -> PyResult<Self> {
+        let bytes = get_resource(lang_code, "tokenizer.bin.gz")?;
 
         let tokenizer: Tokenizer = bincode::deserialize_from(bytes)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
@@ -546,8 +546,8 @@ struct PyRules {
 impl PyRules {
     #[text_signature = "(code, tokenizer, sentence_splitter=None)"]
     #[staticmethod]
-    fn load(code: &str, tokenizer: Py<PyTokenizer>) -> PyResult<Self> {
-        let bytes = get_resource(code, "rules.bin.gz")?;
+    fn load(lang_code: &str, tokenizer: Py<PyTokenizer>) -> PyResult<Self> {
+        let bytes = get_resource(lang_code, "rules.bin.gz")?;
 
         let rules: Rules = bincode::deserialize_from(bytes)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;

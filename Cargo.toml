@@ -1,8 +1,9 @@
 [workspace]
 
 members = [
+    "core",
     "nlprule",
-    "bindings/python"
+    "request"
 ]
 
 # [profile.release] # BUILD_BINDINGS_UNCOMMENT

@@ -1,5 +1,5 @@
 [package]
-name = "nlprule"
+name = "nlprule-request"
 version = "0.3.0"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
@@ -7,8 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nlprule-core = { path = "../core" }
+reqwest = { version = "0.11", default_features = false, features = ["blocking", "rustls-tls"]}
+flate2 = "1"
+thiserror = "1"
+zip = "0.5"
 
-[build-dependencies]
-nlprule-request = {path = "../request" }
-directories = "3.0"
+[dev-dependencies]
+tempdir = "0.3"
