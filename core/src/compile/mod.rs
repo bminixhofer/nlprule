@@ -30,16 +30,16 @@ mod structure;
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
 )]
 pub struct BuildOptions {
-    #[clap(long)]
-    pub build_dir: String,
-    #[clap(long)]
-    pub tokenizer_config: String,
-    #[clap(long)]
-    pub rules_config: String,
-    #[clap(long)]
-    pub tokenizer_out: String,
-    #[clap(long)]
-    pub rules_out: String,
+    #[clap(long, parse(from_os_str))]
+    pub build_dir: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub tokenizer_config: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub rules_config: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub tokenizer_out: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub rules_out: PathBuf,
 }
 
 struct BuildFilePaths {
@@ -101,10 +101,13 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         .map(|x| x.to_string())
         .collect();
 
-    info!("Reading tokenizer config from {}.", opts.tokenizer_config);
+    info!(
+        "Reading tokenizer config from {}.",
+        opts.tokenizer_config.display()
+    );
     let tokenizer_options: TokenizerOptions =
         serde_json::from_str(&fs::read_to_string(&opts.tokenizer_config)?)?;
-    info!("Reading rule config from {}.", opts.rules_config);
+    info!("Reading rule config from {}.", opts.rules_config.display());
     let rules_options: RulesOptions =
         serde_json::from_str(&fs::read_to_string(&opts.rules_config)?)?;
 

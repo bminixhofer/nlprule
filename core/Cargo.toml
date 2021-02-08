@@ -1,6 +1,6 @@
 [package]
 name = "nlprule-core"
-version = "0.3.0"
+version = "0.4.0-dev"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"

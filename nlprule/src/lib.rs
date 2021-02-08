@@ -43,7 +43,7 @@ macro_rules! rules {
             "_rules.bin"
         ));
 
-        $crate::Tokenizer::from_reader(std::io::Cursor::new(bytes))
+        $crate::Rules::from_reader(std::io::Cursor::new(bytes))
     }};
 }
 

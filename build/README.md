@@ -8,7 +8,7 @@ build directory yourself.
 Besides the build directory, a rule config file and tokenizer config file are required. These are stored in-tree at [configs/](/configs/). The binaries can then be built with the `compile` target e. g.:
 
 ```
-RUST_LOG=INFO cargo run --all-features --release --bin compile -- \
+RUST_LOG=INFO cargo run --all-features --bin compile -- \
     --build-dir data/en \
     --tokenizer-config configs/en/tokenizer.json \
     --rules-config configs/en/rules.json \
@@ -21,13 +21,13 @@ This is expected to warn about errors in the `Rules` since not all grammar rules
 Tests are contained in the binaries. To test the tokenizer binary, run e. g.:
 
 ```
-RUST_LOG=WARN cargo run --all-features --release --bin test_disambiguation -- --tokenizer storage/en_tokenizer.bin
+RUST_LOG=WARN cargo run --all-features --bin test_disambiguation -- --tokenizer storage/en_tokenizer.bin
 ```
 
 To test the grammar rule binary, run e. g.:
 
 ```
-RUST_LOG=WARN cargo run --all-features --release --bin test -- --tokenizer storage/en_tokenizer.bin --rules storage/en_rules.bin
+RUST_LOG=WARN cargo run --all-features --bin test -- --tokenizer storage/en_tokenizer.bin --rules storage/en_rules.bin
 ```
 
 # Making the build directory

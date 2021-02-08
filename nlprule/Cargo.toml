@@ -1,6 +1,6 @@
 [package]
 name = "nlprule"
-version = "0.3.0"
+version = "0.4.0-dev"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 
@@ -10,5 +10,6 @@ edition = "2018"
 nlprule-core = { path = "../core" }
 
 [build-dependencies]
+nlprule-core = {path = "../core", features = ["compile", "bin"] }
 nlprule-request = {path = "../request" }
 directories = "3.0"
