@@ -6,6 +6,8 @@
 //!     - This might fail if an old dev build which is incompatible with the latest build dir is used. In that case, a readable error message is shown.
 //! The following environment vars can be set:
 //!     - NLPRULE_BINARY_LANGUAGES: a comma separated list of language codes for which to acquire binaries. If not set, all supported languages are used.
+//!     - NLPRULE_BUILD_DIRS: a path from which the build directories are to be loaded.
+//!         Build directories will be downloaded to this path if they do not exist. ~/.cache/nlprule/build_dirs (or equivalent) by default.
 
 use nlprule_core::compile::{self, utils::supported_language_codes};
 use std::{fs, io::Read, path::Path};
@@ -71,7 +73,14 @@ fn acquire_binary<P1: AsRef<Path>, P2: AsRef<Path>>(
             );
         }
 
-        let build_dir_path = cache_dir.as_ref().join("build_dirs").join(lang_code);
+        // it is possible that the build dirs are cached too long i. e. not downloaded again although a new version is available
+        // this could lead to problems but is not easy to fix so it will stay this way unless problems are reported
+        let build_dir_path = std::env::var("NLPRULE_BUILD_DIRS")
+            .map_or_else(
+                |_| cache_dir.as_ref().join("build_dirs"),
+                |var| Path::new(&var).to_owned(),
+            )
+            .join(lang_code);
         if !build_dir_path.exists() {
             nlprule_request::get_build_dir(lang_code, &build_dir_path)
                 .expect("error loading build directory");

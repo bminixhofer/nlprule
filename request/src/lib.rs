@@ -1,3 +1,5 @@
+//! A helper crate for downloading NLPRule resources from their distribution source.
+
 use flate2::read::GzDecoder;
 use std::{
     fs,

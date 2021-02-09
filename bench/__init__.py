@@ -29,7 +29,7 @@ def strip_index(identifier):
 
 class LanguageTool:
     def __init__(self, lang_code: str, ids: Set[str]):
-        lt_code = {"en": "en_US", "de": "de_DE"}[lang_code]
+        lt_code = {"en": "en_US", "de": "de_DE", "es": "es_ES"}[lang_code]
         self.tool = language_tool_python.LanguageTool(
             lt_code, remote_server="http://localhost:8081/"
         )
@@ -127,13 +127,13 @@ class NLPRule:
                 replacements=tuple(s.replacements),
                 # message=s.message,
             )
-            for s in self.rules.suggest_sentence(sentence)
+            for s in self.rules.suggest(sentence)
         }
         return suggestions
 
 
 def load_texts(lang_code: str) -> List[str]:
-    tatoeba_code = {"en": "eng", "de": "deu"}[lang_code]
+    tatoeba_code = {"en": "eng", "de": "deu", "es": "spa"}[lang_code]
 
     base = "https://downloads.tatoeba.org/exports/per_language"
     url = f"{base}/{tatoeba_code}/{tatoeba_code}_sentences.tsv.bz2"
@@ -154,7 +154,7 @@ def load_texts(lang_code: str) -> List[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lang", choices={"de", "en"})
+    parser.add_argument("--lang", choices={"de", "en", "es"})
     parser.add_argument("--n_texts", default=10_000, type=int)
 
     args = parser.parse_args()
