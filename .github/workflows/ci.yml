@@ -47,7 +47,7 @@ jobs:
           RUST_LOG: INFO
         with:
           command: run
-          args: --all-features --release --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-config configs/${{ matrix.lang }}/tokenizer.json --rules-config configs/${{ matrix.lang }}/rules.json --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
+          args: --all-features --release --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
       - uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         with:
