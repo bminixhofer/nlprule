@@ -101,7 +101,7 @@ jobs:
         with:
           name: binaries
           path: storage
-      - name: Install GSED (if needed) # needed by set_version.sh and maturin.sh
+      - name: Install GSED (if needed) # needed by set_version.sh
         if: matrix.os == 'macos-latest'
         run: |
           brew install gnu-sed
@@ -111,14 +111,15 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build
         run: |
+          cd bindings/python
+
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
          
-          bash scripts/maturin.sh build --interpreter python --release --manylinux 1
-          wheel=
+          maturin build --interpreter python --release --manylinux 1
           pip install $(ls target/wheels/* | head -n1)
 
-          pytest bindings/python/test.py -s
+          pytest test.py -s
         shell: bash
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2

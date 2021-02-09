@@ -1,5 +1,4 @@
 [workspace]
-
 members = [
     "core",
     "nlprule",
@@ -10,7 +9,3 @@ members = [
 [profile.dev]
 opt-level = 2
 build-override = { opt-level = 2 }
-
-# [profile.release] # BUILD_BINDINGS_UNCOMMENT
-# lto = "fat" # BUILD_BINDINGS_UNCOMMENT
-# codegen-units = 1 # BUILD_BINDINGS_UNCOMMENT

@@ -50,8 +50,8 @@ quickcheck_macros = "1.0"
 serde_json = "1"
 
 [features]
-compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml"]
 bin = ["clap", "env_logger"]
+compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "bin"]
 
 [[bin]]
 name = "compile"
