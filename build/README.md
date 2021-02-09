@@ -10,8 +10,6 @@ Besides the build directory, a rule config file and tokenizer config file are re
 ```
 RUST_LOG=INFO cargo run --all-features --bin compile -- \
     --build-dir data/en \
-    --tokenizer-config configs/en/tokenizer.json \
-    --rules-config configs/en/rules.json \
     --tokenizer-out storage/en_tokenizer.bin \
     --rules-out storage/en_rules.bin
 ```

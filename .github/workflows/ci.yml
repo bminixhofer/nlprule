@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
-        lang: ["en", "de", "es"]
+        lang: ["en", "de", "es"] # TODO: load this from core/languages.txt
     steps:
       - uses: actions/checkout@v2
       - name: Cache cargo registry
