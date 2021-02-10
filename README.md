@@ -35,7 +35,7 @@ rules.correct("I can due his homework.")
 # returns: 'I can do his homework.'
 
 for s in rules.suggest("She was not been here since Monday."):
-  print(s.start, s.end, s.replacements, s.source, s.message)
+    print(s.start, s.end, s.replacements, s.source, s.message)
 # prints:
 # 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
 
@@ -44,9 +44,9 @@ for sentence in tokenizer.pipe("A brief example is shown."):
         print(
             repr(token.text).ljust(10),
             repr(token.span).ljust(10),
-            repr(token.tags).ljust(25),
-            repr(token.lemmas).ljust(25),
-            repr(token.chunks).ljust(25),
+            repr(token.tags).ljust(24),
+            repr(token.lemmas).ljust(24),
+            repr(token.chunks).ljust(24),
         )
 # prints:
 # ''         (0, 0)     ['SENT_START']           []                       []                      
