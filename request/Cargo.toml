@@ -3,6 +3,11 @@ name = "nlprule-request"
 version = "0.4.0-dev"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "A fast, low-resource Natural Language Processing and Error Correction library."
+repository = "https://github.com/bminixhofer/nlprule"
+keywords = ["text", "spelling", "language-processing", "nlp", "grammar"]
+categories = ["science", "text-processing"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

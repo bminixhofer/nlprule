@@ -4,7 +4,7 @@ version = "0.4.0-dev"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
-description = "Fast rule-based grammatical error correction through parsing LanguageTool rules."
+description = "A fast, low-resource Natural Language Processing and Error Correction library."
 repository = "https://github.com/bminixhofer/nlprule"
 keywords = ["text", "spelling", "language-processing", "nlp", "grammar"]
 categories = ["science", "text-processing"]
@@ -29,7 +29,7 @@ once_cell = "1.5"
 fst = "0.4"
 aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
-srx = {version = "0.1", features = ["serde"] }
+srx = { version = "0.1", features = ["serde"] }
 
 rayon-cond = "0.1"
 rayon = "1.5"
