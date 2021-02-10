@@ -57,6 +57,7 @@ pub use nlprule_core::*;
 
 // making this a trait `FromLangCode` would be nice but is blocked by https://github.com/rust-lang/rust/issues/53749
 #[macro_export]
+#[cfg(feature = "binaries")]
 macro_rules! tokenizer {
     ($lang_code:literal) => {{
         let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $lang_code, "_tokenizer.bin"));
@@ -66,6 +67,7 @@ macro_rules! tokenizer {
 }
 
 #[macro_export]
+#[cfg(feature = "binaries")]
 macro_rules! rules {
     ($lang_code:literal) => {{
         let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $lang_code, "_rules.bin"));

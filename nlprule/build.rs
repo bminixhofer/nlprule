@@ -98,6 +98,11 @@ fn acquire_binary<P1: AsRef<Path>, P2: AsRef<Path>>(
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
+    // this env var is set by cargo if the `binaries` is enabled
+    if std::env::var_os("CARGO_FEATURE_BINARIES").is_none() {
+        return;
+    }
+
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set when build.rs is run");
     let out_dir = Path::new(&out_dir);
 

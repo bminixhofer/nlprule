@@ -15,6 +15,9 @@
     <a href="https://pepy.tech/project/nlprule">
         <img src="https://pepy.tech/badge/nlprule/month" alt="PyPI Downloads">
     </a>
+    <a href="">
+        <img src="https://img.shields.io/crates/l/nlprule" alt="License">
+    </a>
 </p>
 
 A fast, low-resource Natural Language Processing and Error Correction library written in Rust. nlprule implements a rule- and lookup-based approach to NLP using resources from [LanguageTool](github.com/languagetool-org/languagetool).

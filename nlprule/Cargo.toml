@@ -8,8 +8,13 @@ edition = "2018"
 
 [dependencies]
 nlprule-core = { path = "../core" }
+bincode = "1"
 
 [build-dependencies]
 nlprule-core = {path = "../core", features = ["compile", "bin"] }
 nlprule-request = {path = "../request" }
 directories = "3.0"
+
+[features]
+# feature to enable binaries being inlined
+binaries = []

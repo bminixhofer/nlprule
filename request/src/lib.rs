@@ -130,9 +130,8 @@ mod tests {
 
     #[test]
     fn getting_binary_works() -> Result<(), Error> {
-        // `nlprule-request` and `nlprule` versions are kept in sync so we can get the version via `env!`
-        // however it is better not to rely on this fact so the version is an argument
-        get_binary::<String>(env!("CARGO_PKG_VERSION"), "en", Binary::Rules, None)?;
+        // this is nice to keep roughly in sync with the latest released version but it is not necessary
+        get_binary::<String>("0.3.0", "en", Binary::Rules, None)?;
 
         Ok(())
     }
