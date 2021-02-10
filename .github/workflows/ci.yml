@@ -19,16 +19,11 @@ jobs:
       NLPRULE_BINARY_LANGUAGES: ${{ matrix.lang }}
     steps:
       - uses: actions/checkout@v2
-      - name: Cache cargo registry
-        uses: actions/cache@v1
+      - uses: actions-rs/toolchain@v1
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v1
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
       - run: |
           mkdir data
           mkdir storage
@@ -112,7 +107,7 @@ jobs:
         if: github.event_name == 'release'
         run: |
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
-      - name: Build
+      - name: Build and Test
         run: |
           cd bindings/python
 
