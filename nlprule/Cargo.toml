@@ -18,3 +18,9 @@ directories = "3.0"
 [features]
 # feature to enable binaries being inlined
 binaries = []
+
+# docs.rs-specific configuration
+[package.metadata.docs.rs]
+all-features = true
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]

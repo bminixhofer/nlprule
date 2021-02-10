@@ -1,3 +1,5 @@
+//! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
+
 use std::{
     fs::{self, File},
     hash::{Hash, Hasher},
