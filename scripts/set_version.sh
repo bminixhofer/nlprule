@@ -12,5 +12,7 @@ function set_cargo_toml_version {
     $SED -i "0,/^version/s/^version *= *\".*\"/version = \"$VERSION\"/" $FILE
 }
 
+set_cargo_toml_version $1 core/Cargo.toml
 set_cargo_toml_version $1 nlprule/Cargo.toml
+set_cargo_toml_version $1 request/Cargo.toml
 set_cargo_toml_version $1 bindings/python/Cargo.toml

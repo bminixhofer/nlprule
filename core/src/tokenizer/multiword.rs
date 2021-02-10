@@ -1,3 +1,5 @@
+//! Checks if the input text contains multi-token phrases from a finite list (might contain e. g. city names) and assigns lemmas and part-of-speech tags accordingly.
+
 use crate::types::*;
 use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};

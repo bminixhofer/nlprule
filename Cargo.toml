@@ -1,10 +1,11 @@
 [workspace]
-
 members = [
+    "core",
     "nlprule",
-    "bindings/python"
+    "request"
 ]
 
-# [profile.release] # BUILD_BINDINGS_UNCOMMENT
-# lto = "fat" # BUILD_BINDINGS_UNCOMMENT
-# codegen-units = 1 # BUILD_BINDINGS_UNCOMMENT
+# nlprule is really slow without optimizations (esp. compiling binaries)
+[profile.dev]
+opt-level = 2
+build-override = { opt-level = 2 }

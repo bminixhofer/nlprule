@@ -13,28 +13,17 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
-        lang: ["en", "de", "es"]
+        lang: ["en", "de", "es"] # TODO: load this from core/languages.txt
+    env:
+      NLPRULE_BUILD_DIRS: data
+      NLPRULE_BINARY_LANGUAGES: ${{ matrix.lang }}
     steps:
       - uses: actions/checkout@v2
-      - name: Cache cargo registry
-        uses: actions/cache@v1
+      - uses: actions-rs/toolchain@v1
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v1
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --all-features --release -p nlprule
-      - run: rustup component add clippy
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
       - run: |
           mkdir data
           mkdir storage
@@ -43,28 +32,37 @@ jobs:
           wget https://f000.backblazeb2.com/file/nlprule/${{ matrix.lang }}.zip
           unzip ${{ matrix.lang }}.zip
       - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --all-features
+      - run: rustup component add clippy
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+      - uses: actions-rs/cargo@v1
         env:
           RUST_LOG: INFO
         with:
           command: run
-          args: --all-features --release --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-config configs/${{ matrix.lang }}/tokenizer.json --rules-config configs/${{ matrix.lang }}/rules.json --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
+          args: --all-features --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
       - uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         with:
           command: test
-          args: --verbose --all-features --release -p nlprule
+          args: --verbose --all-features -p nlprule
       - uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
         with:
           command: run
-          args: --all-features --release --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
+          args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
         with:
           command: run
-          args: --all-features --release --bin test -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin --rules storage/${{ matrix.lang }}_rules.bin
+          args: --all-features --bin test -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin --rules storage/${{ matrix.lang }}_rules.bin
       - name: Upload binaries as artifact
         uses: actions/upload-artifact@v2
         with:
@@ -93,6 +91,11 @@ jobs:
       working-directory: bindings/python
     steps:
       - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1 # maturin needs Rust (obviously)
+        with:
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v1
         with:
@@ -101,7 +104,7 @@ jobs:
         with:
           name: binaries
           path: storage
-      - name: Install GSED (if needed) # needed by set_version.sh and maturin.sh
+      - name: Install GSED (if needed) # needed by set_version.sh
         if: matrix.os == 'macos-latest'
         run: |
           brew install gnu-sed
@@ -109,22 +112,23 @@ jobs:
         if: github.event_name == 'release'
         run: |
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
-      - name: Build
+      - name: Build and Test
         run: |
+          cd bindings/python
+
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
          
-          bash scripts/maturin.sh build --interpreter python --release --manylinux 1
-          wheel=
+          maturin build --interpreter python --release --manylinux 1
           pip install $(ls target/wheels/* | head -n1)
 
-          pytest bindings/python/test.py -s
+          pytest test.py -s
         shell: bash
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2
         with:
           name: python-wheel
-          path: target/wheels/*
+          path: bindings/python/target/wheels/*
 
   publish:
     runs-on: ubuntu-latest

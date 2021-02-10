@@ -1,7 +1,9 @@
+# not part of the workspace because of name conflicts
+[workspace]
+
 [package]
-name = "nlprule-python" # BUILD_BINDINGS_COMMENT
-# name = "nlprule" # BUILD_BINDINGS_UNCOMMENT
-version = "0.3.0"
+name = "nlprule"
+version = "0.4.0-dev"
 authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
 edition = "2018"
 
@@ -14,9 +16,13 @@ bincode = "1.3"
 reqwest = { version = "0.11", default_features = false, features = ["blocking", "rustls-tls"]}
 flate2 = "1"
 directories = "3"
-nlprule = { path = "../../nlprule" } # BUILD_BINDINGS_COMMENT
-# nlprule = { package = "nlprule_core", path = "../../nlprule" } # BUILD_BINDINGS_UNCOMMENT
+syn = "=1.0.57" # workaround for "could not find `export` in `syn`" by enum_dispatch
+nlprule-core = { path = "../../core" }
 
 [dependencies.pyo3]
 version = "0.13"
 features = ["extension-module"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

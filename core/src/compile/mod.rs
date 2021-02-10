@@ -1,3 +1,5 @@
+//! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
+
 use std::{
     fs::{self, File},
     hash::{Hash, Hasher},
@@ -8,10 +10,8 @@ use std::{
 };
 
 use crate::{
-    rules::{Rules, RulesOptions},
-    tokenizer::{
-        chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer, TokenizerOptions,
-    },
+    rules::Rules,
+    tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
     types::DefaultHasher,
 };
 use clap::Clap;
@@ -23,6 +23,7 @@ use thiserror::Error;
 mod impls;
 mod parse_structure;
 mod structure;
+pub mod utils;
 
 #[derive(Clap)]
 #[clap(
@@ -30,16 +31,12 @@ mod structure;
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
 )]
 pub struct BuildOptions {
-    #[clap(long)]
-    pub build_dir: String,
-    #[clap(long)]
-    pub tokenizer_config: String,
-    #[clap(long)]
-    pub rules_config: String,
-    #[clap(long)]
-    pub tokenizer_out: String,
-    #[clap(long)]
-    pub rules_out: String,
+    #[clap(long, parse(from_os_str))]
+    pub build_dir: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub tokenizer_out: PathBuf,
+    #[clap(long, parse(from_os_str))]
+    pub rules_out: PathBuf,
 }
 
 struct BuildFilePaths {
@@ -85,6 +82,8 @@ pub enum CompileError {
     SRX(#[from] srx::Error),
     #[error("unknown error")]
     Other(#[from] Box<dyn std::error::Error>),
+    #[error("config does not exist for '{lang_code}'")]
+    ConfigDoesNotExist { lang_code: String },
 }
 
 pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
@@ -101,12 +100,17 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         .map(|x| x.to_string())
         .collect();
 
-    info!("Reading tokenizer config from {}.", opts.tokenizer_config);
-    let tokenizer_options: TokenizerOptions =
-        serde_json::from_str(&fs::read_to_string(&opts.tokenizer_config)?)?;
-    info!("Reading rule config from {}.", opts.rules_config);
-    let rules_options: RulesOptions =
-        serde_json::from_str(&fs::read_to_string(&opts.rules_config)?)?;
+    let tokenizer_options = utils::tokenizer_options(&lang_code)
+        .ok_or_else(|| CompileError::ConfigDoesNotExist {
+            lang_code: lang_code.clone(),
+        })?
+        .clone();
+
+    let rules_options = utils::rules_options(&lang_code)
+        .ok_or_else(|| CompileError::ConfigDoesNotExist {
+            lang_code: lang_code.clone(),
+        })?
+        .clone();
 
     info!("Creating tagger.");
     let tagger = Tagger::from_dumps(

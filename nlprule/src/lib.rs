@@ -1,4 +1,4 @@
-//! The NLPRule core.
+//! Rule-based grammatical error correction through parsing LanguageTool rules.
 //! # Overview
 //!
 //! NLPRule has the following core abstractions:
@@ -53,24 +53,60 @@
 //! # The 't lifetime
 //! By convention the lifetime `'t` in this crate is the lifetime of the input text.
 //! Almost all structures with a lifetime are bound to this lifetime.
-use thiserror::Error;
+#![cfg_attr(docsrs, feature(doc_cfg))] // see https://stackoverflow.com/a/61417700
 
-#[cfg(feature = "compile")]
-pub mod compile;
-mod filter;
-pub mod rule;
-pub mod rules;
-pub mod tokenizer;
-pub mod types;
-pub(crate) mod utils;
+pub use nlprule_core::*;
 
-pub use rules::Rules;
-pub use tokenizer::Tokenizer;
+/// Creates a tokenizer from an ISO 639-1 (two-letter) language code by inlining the binary at compile time.
+///
+/// # Example
+/// ```
+/// # use nlprule::{Tokenizer, tokenizer};
+/// let tokenizer: Tokenizer = tokenizer!("en");
+/// ```
+// NB: making this a trait `FromLangCode` would be nice but is blocked by https://github.com/rust-lang/rust/issues/53749
+#[macro_export]
+#[cfg_attr(docsrs, doc(cfg(feature = "binaries")))]
+#[cfg(feature = "binaries")]
+macro_rules! tokenizer {
+    ($lang_code:literal) => {{
+        let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $lang_code, "_tokenizer.bin"));
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("unexpected condition: {0}")]
-    Unexpected(String),
-    #[error("feature not implemented: {0}")]
-    Unimplemented(String),
+        $crate::Tokenizer::from_reader(std::io::Cursor::new(bytes))
+            .expect("tokenizer bytes must decode to valid tokenizer")
+    }};
+}
+
+/// Creates a rules set from an ISO 639-1 (two-letter) language code by inlining the binary at compile time.
+///
+/// # Example
+/// ```
+/// # use nlprule::{Rules, rules};
+/// let rules: Rules = rules!("en");
+/// ```
+#[macro_export]
+#[cfg_attr(docsrs, doc(cfg(feature = "binaries")))]
+#[cfg(feature = "binaries")]
+macro_rules! rules {
+    ($lang_code:literal) => {{
+        let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $lang_code, "_rules.bin"));
+
+        $crate::Rules::from_reader(std::io::Cursor::new(bytes))
+            .expect("rules bytes must decode to valid rules")
+    }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rules, tokenizer};
+
+    #[test]
+    fn tokenizer_from_lang_code_works() {
+        let _tokenizer = tokenizer!("en");
+    }
+
+    #[test]
+    fn rules_from_lang_code_works() {
+        let _rules = rules!("en");
+    }
 }
