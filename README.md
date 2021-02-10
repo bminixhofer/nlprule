@@ -49,13 +49,13 @@ for sentence in tokenizer.pipe("A brief example is shown."):
             repr(token.chunks).ljust(25),
         )
 # prints:
-# ''         (0, 0)     ['SENT_START']            []                        []                       
-# 'A'        (0, 1)     ['DT']                    ['A', 'a']                ['B-NP-singular']        
-# 'brief'    (2, 7)     ['JJ']                    ['brief']                 ['I-NP-singular']        
-# 'example'  (8, 15)    ['NN:UN']                 ['example']               ['E-NP-singular']        
-# 'is'       (16, 18)   ['VBZ']                   ['be', 'is']              ['B-VP']                 
-# 'shown'    (19, 24)   ['VBN']                   ['show', 'shown']         ['I-VP']                 
-# '.'        (24, 25)   ['.', 'PCT', 'SENT_END']  ['.']                     ['O']
+# ''         (0, 0)     ['SENT_START']           []                       []                      
+# 'A'        (0, 1)     ['DT']                   ['A', 'a']               ['B-NP-singular']       
+# 'brief'    (2, 7)     ['JJ']                   ['brief']                ['I-NP-singular']       
+# 'example'  (8, 15)    ['NN:UN']                ['example']              ['E-NP-singular']       
+# 'is'       (16, 18)   ['VBZ']                  ['be', 'is']             ['B-VP']                
+# 'shown'    (19, 24)   ['VBN']                  ['show', 'shown']        ['I-VP']                
+# '.'        (24, 25)   ['.', 'PCT', 'SENT_END'] ['.']                    ['O']
 
 # and every call here takes less than 1ms! (on an i5 8600k)
 ```

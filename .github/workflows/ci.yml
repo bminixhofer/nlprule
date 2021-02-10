@@ -91,6 +91,11 @@ jobs:
       working-directory: bindings/python
     steps:
       - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1 # maturin needs Rust (obviously)
+        with:
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v1
         with:
