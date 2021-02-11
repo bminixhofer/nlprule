@@ -2,13 +2,6 @@ use crate::types::*;
 use crate::{rules::RulesOptions, tokenizer::TokenizerOptions};
 use lazy_static::lazy_static;
 
-/// Gets the language codes for the currently supported languages in ISO 639-1 (two-letter) format e. g. "en".
-pub fn supported_language_codes() -> Vec<&'static str> {
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", "languages.txt"))
-        .lines()
-        .collect()
-}
-
 lazy_static! {
     static ref TOKENIZER_CONFIGS: DefaultHashMap<String, TokenizerOptions> = {
         serde_json::from_slice(include_bytes!(concat!(

@@ -1,5 +1,5 @@
 use clap::Clap;
-use nlprule_core::compile::{compile, BuildOptions, CompileError};
+use nlprule::compile::{compile, BuildOptions, CompileError};
 
 fn main() -> Result<(), CompileError> {
     env_logger::init();

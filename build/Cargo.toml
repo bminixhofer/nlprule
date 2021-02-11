@@ -1,0 +1,22 @@
+[package]
+name = "nlprule-build"
+version = "0.4.0-dev"
+authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "Build tools for a fast, low-resource Natural Language Processing and Error Correction library."
+repository = "https://github.com/bminixhofer/nlprule"
+keywords = ["text", "spelling", "language-processing", "nlp", "grammar"]
+categories = ["science", "text-processing"]
+
+[dependencies]
+flate2 = "1"
+thiserror = "1"
+zip = "0.5"
+directories = "3"
+reqwest = { version = "0.11", default_features = false, features = ["blocking", "rustls-tls"]}
+nlprule = { path = "../nlprule", features = ["compile"] } # BUILD_BINDINGS_COMMENT
+# nlprule = { package = "nlprule-core", path = "../nlprule", features = ["compile"] } # BUILD_BINDINGS_UNCOMMENT
+
+[dev-dependencies]
+tempdir = "0.3"

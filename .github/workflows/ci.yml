@@ -13,10 +13,7 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
-        lang: ["en", "de", "es"] # TODO: load this from core/languages.txt
-    env:
-      NLPRULE_BUILD_DIRS: data
-      NLPRULE_BINARY_LANGUAGES: ${{ matrix.lang }}
+        lang: ["en", "de", "es"] # TODO: load this from build/languages.txt
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -88,7 +85,7 @@ jobs:
       matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
     runs-on: ${{ matrix.os }}
     env:
-      working-directory: bindings/python
+      working-directory: python
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1 # maturin needs Rust (obviously)
@@ -114,21 +111,19 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build and Test
         run: |
-          cd bindings/python
-
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
          
-          maturin build --interpreter python --release --manylinux 1
-          pip install $(ls target/wheels/* | head -n1)
+          bash scripts/maturin.sh build --interpreter python --release --manylinux 1
 
-          pytest test.py -s
+          pip install $(ls target/wheels/* | head -n1)
+          pytest python/test.py -s
         shell: bash
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2
         with:
           name: python-wheel
-          path: bindings/python/target/wheels/*
+          path: target/wheels/*
 
   publish:
     runs-on: ubuntu-latest

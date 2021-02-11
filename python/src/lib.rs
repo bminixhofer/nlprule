@@ -1,5 +1,5 @@
 use flate2::read::GzDecoder;
-use nlprule_core::{
+use nlprule::{
     rule::{Example, Rule},
     rules::{apply_suggestions, Rules},
     tokenizer::tag::Tagger,
