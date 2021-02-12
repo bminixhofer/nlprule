@@ -167,7 +167,7 @@ jobs:
           cd ..
 
           cd build
-          cargo publish
+          cargo publish --allow-dirty
           cd ..
         env:
           CARGO_KEY: ${{ secrets.CARGO_KEY }}
