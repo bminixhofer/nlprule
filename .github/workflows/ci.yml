@@ -92,7 +92,9 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-      - uses: Swatinem/rust-cache@v1
+      # this can cause errors because it is assumed that there
+      # are only wheels for the current python version in target/wheels
+      # - uses: Swatinem/rust-cache@v1
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v1
         with:
