@@ -75,3 +75,29 @@ pub enum Error {
     #[error("feature not implemented: {0}")]
     Unimplemented(String),
 }
+
+/// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.
+pub fn tokenizer_filename(lang_code: &str) -> String {
+    format!("{}_tokenizer.bin", lang_code)
+}
+
+/// Gets the canonical filename for the rules binary for a language code in ISO 639-1 (two-letter) format.
+pub fn rules_filename(lang_code: &str) -> String {
+    format!("{}_rules.bin", lang_code)
+}
+
+/// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.
+#[macro_export]
+macro_rules! tokenizer_filename {
+    ($lang_code:literal) => {
+       concat!($lang_code, "_tokenizer.bin")
+    };
+}
+
+/// Gets the canonical filename for the rules binary for a language code in ISO 639-1 (two-letter) format.
+#[macro_export]
+macro_rules! rules_filename {
+    ($lang_code:literal) => {
+       concat!($lang_code, "_rules.bin")
+    };
+}

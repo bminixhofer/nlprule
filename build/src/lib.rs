@@ -1,7 +1,8 @@
-//! A helper crate for downloading NLPRule resources from their distribution source.
+//! This crate provides a builder to make it easier to use the correct binaries for [nlprule](https://github.com/bminixhofer/nlprule). 
+//! See `README.md` for details.
 
 use flate2::read::GzDecoder;
-use nlprule::compile;
+use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::{
     fs,
     io::{self, Cursor, Read},
@@ -29,12 +30,15 @@ pub enum Binary {
 impl Binary {
     fn filename(&self, lang_code: &str) -> String {
         match &self {
-            Binary::Tokenizer => format!("{}_tokenizer.bin", lang_code),
-            Binary::Rules => format!("{}_rules.bin", lang_code),
+            Binary::Tokenizer => tokenizer_filename(lang_code),
+            Binary::Rules => rules_filename(lang_code),
         }
     }
 }
 
+/// Stores the binaries for the given language and version in out_dir.
+/// Tries downloading the binaries from their distribution source.
+/// Optionally caches them at some directory.
 pub fn get_binary<P: AsRef<Path>>(
     version: &str,
     lang_code: &str,
@@ -125,10 +129,6 @@ pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), 
     Ok(())
 }
 
-/// Stores the binaries for the given language in out_dir.
-/// Tries downloading the binaries from their distribution source.
-/// If they are not found (i. e. a dev version of nlprule is used) downloads + caches the build directory and builds the binaries.
-
 /// Gets the language codes for the currently supported languages in ISO 639-1 (two-letter) format e. g. "en".
 pub fn supported_language_codes() -> Vec<&'static str> {
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", "languages.txt"))
@@ -136,19 +136,28 @@ pub fn supported_language_codes() -> Vec<&'static str> {
         .collect()
 }
 
+/// Places all nlprule binaries for the given languages in some directory.
 #[derive(Debug)]
 pub struct BinaryBuilder {
     language_codes: Vec<String>,
     out_dir: PathBuf,
+    version: String,
     cache_dir: Option<PathBuf>,
     fallback_to_build_dir: bool,
     build_dir: Option<PathBuf>,
+    outputs: Vec<PathBuf>
 }
 
 impl BinaryBuilder {
-    fn build_language(&self, lang_code: &str) {
-        let tokenizer_out = self.out_dir.join(format!("{}_tokenizer.bin", lang_code));
-        let rules_out = self.out_dir.join(format!("{}_rules.bin", lang_code));
+    /// Acquires the rule and tokenizer binaries for one language by:
+    /// - Trying to download them from their distribution source (or load them local cache).
+    /// - If they are not found (i. e. a dev version of nlprule is used) and `fallback_to_build_dir`is true
+    /// downloads the latest build directory  and builds the binaries from it.
+    /// This can still fail if the dev version is sufficiently outdated for the latest build dir.
+    /// In that case, the user can't be helped.
+    fn build_language(&mut self, lang_code: &str) {
+        let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
+        let rules_out = self.out_dir.join(rules_filename(lang_code));
 
         let mut did_not_find_binaries = false;
 
@@ -159,7 +168,7 @@ impl BinaryBuilder {
         .iter()
         {
             let response = get_binary(
-                env!("CARGO_PKG_VERSION"),
+                &self.version,
                 lang_code,
                 *binary,
                 self.cache_dir.as_ref(),
@@ -206,8 +215,8 @@ impl BinaryBuilder {
 
             compile::compile(&compile::BuildOptions {
                 build_dir,
-                rules_out,
-                tokenizer_out,
+                rules_out: rules_out.clone(),
+                tokenizer_out: tokenizer_out.clone(),
             })
             .expect("Compiling from build directory failed. Upgrading to a more recent development version of NLPRule might fix this problem.");
         } else if did_not_find_binaries {
@@ -215,11 +224,17 @@ impl BinaryBuilder {
                 "Did not find binaries for version {}. \
                  If this is a development version, try setting `fallback_to_build_dir` to build the binaries yourself. \
                  If this is a release, this should NOT happen.",
-                env!("CARGO_PKG_VERSION")
+                self.version
             );
         }
+
+        self.outputs.push(tokenizer_out);
+        self.outputs.push(rules_out);
     }
 
+    /// Creates a new binary builder. `language_codes` must be in ISO 639-1 (two-letter) format.
+    /// If `language_codes` is `None`, uses all supported languages.
+    /// If this is used in a `build.rs`, `out_dir` should probably be the OUT_DIR environment variable.
     pub fn new<P: AsRef<Path>>(language_codes: Option<&[&str]>, out_dir: P) -> Self {
         let language_codes: Vec<_> = language_codes.map_or_else(
             || {
@@ -236,39 +251,82 @@ impl BinaryBuilder {
         let cache_dir = project_dir.as_ref().map(|x| x.cache_dir().to_owned());
         let build_dir = cache_dir.as_ref().map(|x| x.join("build_dirs"));
 
+        let version = env!("CARGO_PKG_VERSION").to_owned();
+
         BinaryBuilder {
             language_codes,
             out_dir: out_dir.as_ref().to_owned(),
+            version,
             cache_dir,
             fallback_to_build_dir: false,
             build_dir,
+            outputs: Vec::new()
         }
     }
+    
+    /// Sets the version for which to fetch binaries.
+    /// The version of `nlprule-build` (kept in sync with `nlprule` version) by default.
+    /// Typically does not need to be modified.
+    pub fn version<S: Into<String>>(mut self, version: S) -> Self {
+        self.version = version.into();
+        self
+    }
 
+    /// Sets the out directory.
     pub fn out_dir(mut self, out_dir: PathBuf) -> Self {
         self.out_dir = out_dir;
         self
     }
 
+    /// Sets the cache directory. The user cache directory at e. g. `~/.cache/nlprule` bz default.
     pub fn cache_dir(mut self, cache_dir: Option<PathBuf>) -> Self {
         self.cache_dir = cache_dir;
         self
     }
 
+    /// Sets whether to fallback to building from the build directory if no distributed binaries are found
+    /// (i. e. a development version of nlprule is used).
     pub fn fallback_to_build_dir(mut self, fallback_to_build_dir: bool) -> Self {
         self.fallback_to_build_dir = fallback_to_build_dir;
         self
     }
 
+    /// Sets the path the build directories should be stored at. 
+    /// Only relevant if `fallback_to_build_dir` is true.
+    /// `cache_dir.join("build_dirs")` by default.
     pub fn build_dir(mut self, build_dir: Option<PathBuf>) -> Self {
         self.build_dir = build_dir;
         self
     }
 
-    pub fn build(&self) {
-        for lang_code in &self.language_codes {
-            self.build_language(lang_code);
+    /// Builds by {downloading, copying, building} the binaries to the out directory.
+    pub fn build(mut self) -> Self {
+        for lang_code in self.language_codes[..].to_vec() {
+            self.build_language(&lang_code);
         }
+        self
+    }
+
+    /// Validates the binaries by checking if they can be loaded by nlprule.
+    pub fn validate(self) -> Self {
+        for lang_code in &self.language_codes {
+            let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
+            let rules_out = self.out_dir.join(rules_filename(lang_code));
+
+            nlprule::Rules::new(rules_out).unwrap_or_else(
+                |e| panic!("failed to validate rules binary for {lang_code}: {error}", lang_code=lang_code, error=e)
+            );
+            nlprule::Tokenizer::new(tokenizer_out).unwrap_or_else(
+                |e| panic!("failed to validate tokenizer binary for {lang_code}: {error}", lang_code=lang_code, error=e)
+            );
+        }
+
+        self
+    }
+
+    /// Gets the paths to all files this builder created.
+    pub fn outputs(&self) -> &[PathBuf] {
+        &self.outputs
     }
 }
 
@@ -303,6 +361,19 @@ mod tests {
 
         BinaryBuilder::new(None, tempdir)
             .fallback_to_build_dir(true)
+            .build()
+            .validate();
+
+        Ok(())
+    }
+
+    #[test]
+    fn binary_builder_works_with_released_version() -> Result<(), Error> {
+        let tempdir = tempdir::TempDir::new("builder_test")?;
+        let tempdir = tempdir.path();
+
+        BinaryBuilder::new(Some(&["en"]), tempdir)
+            .version("0.3.0")
             .build();
 
         Ok(())

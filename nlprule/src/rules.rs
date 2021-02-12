@@ -42,9 +42,12 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// Creates a new rules set from a file.
+    /// Creates a new rules set from a path to a binary.
+    /// 
+    /// # Panics
+    /// - If the file can not be opened.
     pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
-        let reader = BufReader::new(File::open(p).unwrap());
+        let reader = BufReader::new(File::open(p).expect("could not open file"));
         bincode::deserialize_from(reader)
     }
 
