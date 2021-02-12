@@ -15,7 +15,6 @@ fn main() {
         Some(&["en"]),
         std::env::var("OUT_DIR").expect("OUT_DIR is set when build.rs is running"),
     )
-    .fallback_to_build_dir(true)
     .build()
     .validate();
 }
