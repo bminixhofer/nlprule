@@ -17,7 +17,6 @@ directories = "3"
 syn = "=1.0.57" # workaround for "could not find `export` in `syn`" by enum_dispatch
 nlprule = { path = "../nlprule" } # BUILD_BINDINGS_COMMENT
 # nlprule = { package = "nlprule-core", path = "../nlprule" } # BUILD_BINDINGS_UNCOMMENT
-nlprule-build = { path = "../build" }
 
 [dependencies.pyo3]
 version = "0.13"
