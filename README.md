@@ -67,6 +67,10 @@ for sentence in tokenizer.pipe("A brief example is shown."):
 - Support for English, German and Spanish.
 - Spellchecking. (*in progress*)
 
+## Rust usage
+
+The [nlprule-build](build/) crate makes it easy to use the correct nlprule binaries in your Rust project.
+
 ## Goals
 
 - Fast, low-resource NLP suited for running:
