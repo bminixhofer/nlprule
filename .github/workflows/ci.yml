@@ -158,9 +158,12 @@ jobs:
         run: | # --allow-dirty is only needed b/c of the README.md, we can be sure it is clean otherwise anyway because it is freshly checked out
           cargo login $CARGO_KEY
 
-          cp README.md nlprule/README.md
+          cd build
+          cargo publish
+          cd ..
 
           cd nlprule
+          cp ../README.md README.md
           cargo publish --allow-dirty
           rm README.md
         env:
