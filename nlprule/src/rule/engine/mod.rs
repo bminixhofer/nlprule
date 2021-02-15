@@ -1,4 +1,5 @@
 use crate::{types::*, utils::regex::SerializeRegex};
+use onig::FindCaptures;
 use serde::{Deserialize, Serialize};
 pub mod composition;
 
@@ -11,7 +12,7 @@ pub struct TokenEngine {
 }
 
 impl TokenEngine {
-    fn get_match<'t>(&'t self, tokens: &'t [&'t Token], i: usize) -> Option<MatchGraph<'t>> {
+    fn get_match<'t>(&'t self, tokens: &'t [Token], i: usize) -> Option<MatchGraph<'t>> {
         if let Some(graph) = self.composition.apply(tokens, i) {
             let mut blocked = false;
 
@@ -54,76 +55,112 @@ pub enum Engine {
     Text(SerializeRegex, DefaultHashMap<usize, usize>),
 }
 
-impl Engine {
-    pub fn get_matches<'t>(
-        &'t self,
-        tokens: &'t [&'t Token],
-        start: usize,
-        end: usize,
-    ) -> Vec<MatchGraph<'t>> {
-        let mut graphs = Vec::new();
+struct TokenMatches<'a> {
+    engine: &'a TokenEngine,
+    index: usize,
+    mask: Vec<bool>,
+}
 
-        match &self {
-            Engine::Token(engine) => {
-                let mut graph_info: Vec<_> = (0..tokens.len())
-                    .into_iter()
-                    .filter_map(|i| {
-                        if let Some(graph) = engine.get_match(&tokens, i) {
-                            let start_group = graph
-                                .by_id(start)
-                                .unwrap_or_else(|| panic!("group must exist in graph: {}", start));
-                            let end_group = graph.by_id(end - 1).unwrap_or_else(|| {
-                                panic!("group must exist in graph: {}", end - 1)
-                            });
+struct TextMatches<'a, 't> {
+    byte_idx_to_char_idx: DefaultHashMap<usize, usize>,
+    id_to_idx: &'a DefaultHashMap<usize, usize>,
+    captures: FindCaptures<'a, 't>,
+}
 
-                            let start = start_group.char_span.0;
-                            let end = end_group.char_span.1;
-                            Some((graph, start, end))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+enum InnerMatches<'a: 't, 't> {
+    Token(TokenMatches<'a>),
+    Text(TextMatches<'a, 't>),
+}
 
-                graph_info.sort_by(|(_, start, _), (_, end, _)| start.cmp(end));
-                let mut mask = vec![false; tokens[0].sentence.chars().count()];
+pub struct EngineMatches<'a, 't> {
+    tokens: &'t [Token<'t>],
+    start: usize,
+    end: usize,
+    inner: InnerMatches<'a, 't>,
+}
 
-                for (graph, start, end) in graph_info {
-                    if mask[start..end].iter().all(|x| !x) {
-                        graphs.push(graph);
-                        mask[start..end].iter_mut().for_each(|x| *x = true);
+impl<'a, 't> Iterator for EngineMatches<'a, 't> {
+    type Item = MatchGraph<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tokens = self.tokens;
+        let start_id = self.start;
+        let end_id = self.end;
+
+        match &mut self.inner {
+            InnerMatches::Token(inner) => (inner.index..tokens.len()).find_map(|i| {
+                inner.engine.get_match(tokens, i).and_then(|graph| {
+                    let start_group = graph.by_id(start_id).unwrap();
+                    let end_group = graph.by_id(end_id - 1).unwrap();
+
+                    let start = start_group.char_span.0;
+                    let end = end_group.char_span.1;
+
+                    if inner.mask[start..end].iter().all(|x| !x) {
+                        inner.mask[start..end].iter_mut().for_each(|x| *x = true);
+
+                        inner.index += 1;
+                        Some(graph)
+                    } else {
+                        None
+                    }
+                })
+            }),
+            InnerMatches::Text(inner) => inner.captures.next().map(|captures| {
+                let bi_to_ci = &inner.byte_idx_to_char_idx;
+                let mut groups = Vec::new();
+
+                for group in captures.iter_pos() {
+                    if let Some(group) = group {
+                        let start = *bi_to_ci.get(&group.0).unwrap();
+                        let end = *bi_to_ci.get(&group.1).unwrap();
+
+                        groups.push(Group::new((start, end)));
+                    } else {
+                        groups.push(Group::new((0, 0)));
                     }
                 }
-            }
-            Engine::Text(regex, id_to_idx) => {
-                // this is the entire text, NOT the text of one token
-                let text = tokens[0].sentence;
 
-                let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
-                    .char_indices()
-                    .enumerate()
-                    .map(|(ci, (bi, _))| (bi, ci))
-                    .collect();
-                byte_to_char_idx.insert(text.len(), byte_to_char_idx.len());
-
-                graphs.extend(regex.captures_iter(text).map(|captures| {
-                    let mut groups = Vec::new();
-                    for group in captures.iter_pos() {
-                        if let Some(group) = group {
-                            let start = *byte_to_char_idx.get(&group.0).unwrap();
-                            let end = *byte_to_char_idx.get(&group.1).unwrap();
-
-                            groups.push(Group::new((start, end)));
-                        } else {
-                            groups.push(Group::new((0, 0)));
-                        }
-                    }
-
-                    MatchGraph::new(groups, id_to_idx, tokens)
-                }));
-            }
+                MatchGraph::new(groups, inner.id_to_idx, tokens)
+            }),
         }
+    }
+}
 
-        graphs
+impl Engine {
+    pub fn get_matches<'a, 't>(
+        &'a self,
+        tokens: &'t [Token],
+        start: usize,
+        end: usize,
+    ) -> EngineMatches<'a, 't> {
+        EngineMatches {
+            tokens,
+            start,
+            end,
+            inner: match &self {
+                Engine::Token(engine) => InnerMatches::Token(TokenMatches {
+                    engine,
+                    index: 0,
+                    mask: vec![false; tokens[0].sentence.chars().count()],
+                }),
+                Engine::Text(regex, id_to_idx) => {
+                    let sentence = tokens[0].sentence;
+
+                    let mut bi_to_ci: DefaultHashMap<usize, usize> = sentence
+                        .char_indices()
+                        .enumerate()
+                        .map(|(ci, (bi, _))| (bi, ci))
+                        .collect();
+                    bi_to_ci.insert(sentence.len(), bi_to_ci.len());
+
+                    InnerMatches::Text(TextMatches {
+                        byte_idx_to_char_idx: bi_to_ci,
+                        id_to_idx,
+                        captures: regex.captures_iter(sentence),
+                    })
+                }
+            },
+        }
     }
 }

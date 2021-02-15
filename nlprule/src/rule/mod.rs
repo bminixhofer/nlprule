@@ -21,7 +21,7 @@ use engine::Engine;
 pub(crate) use engine::composition::MatchGraph;
 pub use grammar::Example;
 
-use self::disambiguation::POSFilter;
+use self::{disambiguation::POSFilter, engine::EngineMatches};
 
 /// A *Unification* makes an otherwise matching pattern invalid if no combination of its filters
 /// matches all tokens marked with "unify".
@@ -33,7 +33,7 @@ pub(crate) struct Unification {
 }
 
 impl Unification {
-    pub fn keep(&self, graph: &MatchGraph, tokens: &[&Token]) -> bool {
+    pub fn keep(&self, graph: &MatchGraph, tokens: &[Token]) -> bool {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
@@ -108,13 +108,11 @@ impl DisambiguationRule {
             return Changes::default();
         }
 
-        let refs: Vec<&Token> = tokens.iter().collect();
-
         let mut all_byte_spans = Vec::new();
 
-        for graph in self.engine.get_matches(&refs, self.start, self.end) {
+        for graph in self.engine.get_matches(tokens, self.start, self.end) {
             if let Some(unification) = &self.unification {
-                if !unification.keep(&graph, &refs) {
+                if !unification.keep(&graph, tokens) {
                     continue;
                 }
             }
@@ -132,11 +130,8 @@ impl DisambiguationRule {
                     panic!("{} group must exist in graph: {}", self.id, self.start)
                 });
 
-                let group_byte_spans: HashSet<_> = group
-                    .tokens(graph.tokens())
-                    .iter()
-                    .map(|x| x.byte_span)
-                    .collect();
+                let group_byte_spans: HashSet<_> =
+                    group.tokens(graph.tokens()).map(|x| x.byte_span).collect();
 
                 byte_spans.push(group_byte_spans);
             }
@@ -264,6 +259,90 @@ impl DisambiguationRule {
     }
 }
 
+pub struct Suggestions<'a, 't> {
+    rule: &'a Rule,
+    tokenizer: &'a Tokenizer,
+    matches: EngineMatches<'a, 't>,
+    tokens: &'t [Token<'t>],
+}
+
+impl<'a, 't> Iterator for Suggestions<'a, 't> {
+    type Item = Suggestion;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let rule = self.rule;
+        let tokenizer = self.tokenizer;
+        let tokens = self.tokens;
+        let (start, end) = (self.rule.start, self.rule.end);
+
+        self.matches.find_map(|graph| {
+            if let Some(unification) = &rule.unification {
+                if !unification.keep(&graph, tokens) {
+                    return None;
+                }
+            }
+
+            let start_group = graph
+                .by_id(start)
+                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", rule.id, start));
+            let end_group = graph
+                .by_id(end - 1)
+                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", rule.id, end - 1));
+
+            let replacements: Vec<String> = rule
+                .suggesters
+                .iter()
+                .filter_map(|x| x.apply(&graph, tokenizer, start, end))
+                .collect();
+
+            let start = if replacements
+                .iter()
+                .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
+            {
+                let first_token = graph.groups()[graph.get_index(start).unwrap()..]
+                    .iter()
+                    .find_map(|x| x.tokens(graph.tokens()).next())
+                    .unwrap();
+
+                let idx = tokens
+                    .iter()
+                    .position(|x| std::ptr::eq(x, first_token))
+                    .unwrap_or(0);
+
+                if idx > 0 {
+                    tokens[idx - 1].char_span.1
+                } else {
+                    start_group.char_span.0
+                }
+            } else {
+                start_group.char_span.0
+            };
+            let end = end_group.char_span.1;
+
+            // fix e. g. "Super , dass"
+            let replacements: Vec<String> = replacements
+                .into_iter()
+                .map(|x| utils::fix_nospace_chars(&x))
+                .collect();
+
+            if !replacements.is_empty() {
+                Some(Suggestion {
+                    message: rule
+                        .message
+                        .apply(&graph, tokenizer, rule.start, rule.end)
+                        .expect("Rules must have a message."),
+                    source: rule.id.to_string(),
+                    start,
+                    end,
+                    replacements,
+                })
+            } else {
+                None
+            }
+        })
+    }
+}
+
 /// A grammar rule.
 /// Returns a [Suggestion][crate::types::Suggestion] for change if it matches.
 /// Sourced from LanguageTool. An example of how a simple rule might look in the original XML format:
@@ -355,76 +434,17 @@ impl Rule {
         self.category_type.as_deref()
     }
 
-    pub(crate) fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
-        let refs: Vec<&Token> = tokens.iter().collect();
-        let mut suggestions = Vec::new();
-
-        for graph in self.engine.get_matches(&refs, self.start, self.end) {
-            if let Some(unification) = &self.unification {
-                if !unification.keep(&graph, &refs) {
-                    continue;
-                }
-            }
-
-            let start_group = graph
-                .by_id(self.start)
-                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", self.id, self.start));
-            let end_group = graph.by_id(self.end - 1).unwrap_or_else(|| {
-                panic!("{} group must exist in graph: {}", self.id, self.end - 1)
-            });
-
-            let replacements: Vec<String> = self
-                .suggesters
-                .iter()
-                .filter_map(|x| x.apply(&graph, tokenizer, self.start, self.end))
-                .collect();
-
-            let start = if replacements
-                .iter()
-                .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
-            {
-                let first_token = graph.groups()[graph.get_index(self.start).unwrap()..]
-                    .iter()
-                    .find(|x| !x.tokens(graph.tokens()).is_empty())
-                    .unwrap()
-                    .tokens(graph.tokens())[0];
-
-                let idx = tokens
-                    .iter()
-                    .position(|x| std::ptr::eq(x, first_token))
-                    .unwrap_or(0);
-
-                if idx > 0 {
-                    tokens[idx - 1].char_span.1
-                } else {
-                    start_group.char_span.0
-                }
-            } else {
-                start_group.char_span.0
-            };
-            let end = end_group.char_span.1;
-
-            // fix e. g. "Super , dass"
-            let replacements: Vec<String> = replacements
-                .into_iter()
-                .map(|x| utils::fix_nospace_chars(&x))
-                .collect();
-
-            if !replacements.is_empty() {
-                suggestions.push(Suggestion {
-                    message: self
-                        .message
-                        .apply(&graph, tokenizer, self.start, self.end)
-                        .expect("Rules must have a message."),
-                    source: self.id.to_string(),
-                    start,
-                    end,
-                    replacements,
-                });
-            }
+    pub(crate) fn apply<'a, 't>(
+        &'a self,
+        tokens: &'t [Token<'t>],
+        tokenizer: &'a Tokenizer,
+    ) -> Suggestions<'a, 't> {
+        Suggestions {
+            matches: self.engine.get_matches(tokens, self.start, self.end),
+            rule: &self,
+            tokenizer,
+            tokens,
         }
-
-        suggestions
     }
 
     /// Grammar rules always have at least one example associated with them.
@@ -436,7 +456,7 @@ impl Rule {
             // by convention examples are always considered as one sentence even if the sentencizer would split
             let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
             info!("Tokens: {:#?}", tokens);
-            let suggestions = self.apply(&tokens, tokenizer);
+            let suggestions: Vec<_> = self.apply(&tokens, tokenizer).collect();
 
             let pass = if suggestions.len() > 1 {
                 false
