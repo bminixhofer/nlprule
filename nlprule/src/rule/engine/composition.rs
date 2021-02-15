@@ -44,7 +44,7 @@ impl Matcher {
                     }
                 }
                 either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
-                    x.tokens(&graph.tokens).get(0).map_or(false, |token| {
+                    x.tokens(&graph.tokens).next().map_or(false, |token| {
                         if case_sensitive {
                             token.word.text.as_ref() == input
                         } else {
@@ -145,7 +145,7 @@ pub struct Quantifier {
 
 #[enum_dispatch]
 pub trait Atomable: Send + Sync {
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool;
+    fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool;
 }
 
 #[enum_dispatch(Atomable)]
@@ -173,7 +173,7 @@ pub mod concrete {
     }
 
     impl Atomable for TextAtom {
-        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
             self.matcher
                 .is_match(&input[position].word.text, graph, None)
         }
@@ -185,7 +185,7 @@ pub mod concrete {
     }
 
     impl Atomable for ChunkAtom {
-        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
             self.matcher
                 .is_slice_match(&input[position].chunks, graph, None)
         }
@@ -197,7 +197,7 @@ pub mod concrete {
     }
 
     impl Atomable for SpaceBeforeAtom {
-        fn is_match(&self, input: &[&Token], _graph: &MatchGraph, position: usize) -> bool {
+        fn is_match(&self, input: &[Token], _graph: &MatchGraph, position: usize) -> bool {
             input[position].has_space_before == self.value
         }
     }
@@ -209,7 +209,7 @@ pub mod concrete {
     }
 
     impl Atomable for WordDataAtom {
-        fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+        fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
             let tags = &input[position].word.tags;
 
             self.matcher
@@ -222,7 +222,7 @@ pub mod concrete {
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
-    fn is_match(&self, _input: &[&Token], _graph: &MatchGraph, _position: usize) -> bool {
+    fn is_match(&self, _input: &[Token], _graph: &MatchGraph, _position: usize) -> bool {
         true
     }
 }
@@ -231,7 +231,7 @@ impl Atomable for TrueAtom {
 pub struct FalseAtom {}
 
 impl Atomable for FalseAtom {
-    fn is_match(&self, _input: &[&Token], _graph: &MatchGraph, _position: usize) -> bool {
+    fn is_match(&self, _input: &[Token], _graph: &MatchGraph, _position: usize) -> bool {
         false
     }
 }
@@ -242,7 +242,7 @@ pub struct AndAtom {
 }
 
 impl Atomable for AndAtom {
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+    fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
         self.atoms
             .iter()
             .all(|x| x.is_match(input, graph, position))
@@ -255,7 +255,7 @@ pub struct OrAtom {
 }
 
 impl Atomable for OrAtom {
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+    fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
         self.atoms
             .iter()
             .any(|x| x.is_match(input, graph, position))
@@ -268,7 +268,7 @@ pub struct NotAtom {
 }
 
 impl Atomable for NotAtom {
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+    fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
         !self.atom.is_match(input, graph, position)
     }
 }
@@ -280,7 +280,7 @@ pub struct OffsetAtom {
 }
 
 impl Atomable for OffsetAtom {
-    fn is_match(&self, input: &[&Token], graph: &MatchGraph, position: usize) -> bool {
+    fn is_match(&self, input: &[Token], graph: &MatchGraph, position: usize) -> bool {
         let new_position = position as isize + self.offset;
 
         if new_position < 0 || (new_position as usize) >= input.len() {
@@ -301,20 +301,18 @@ impl Group {
         Group { char_span }
     }
 
-    pub fn tokens<'t>(&self, tokens: &[&'t Token<'t>]) -> Vec<&'t Token<'t>> {
-        tokens
-            .iter()
-            .filter_map(|x| {
-                if x.char_span.1 > x.char_span.0 // special tokens with zero range (e. g. SENT_START) can not be part of groups
-                    && x.char_span.0 >= self.char_span.0
-                    && x.char_span.1 <= self.char_span.1
-                {
-                    Some(*x)
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub fn tokens<'a, 't>(
+        &'a self,
+        tokens: &'t [Token<'t>],
+    ) -> impl DoubleEndedIterator<Item = &'t Token<'t>> {
+        let start = self.char_span.0;
+        let end = self.char_span.1;
+
+        tokens.iter().filter(move |x| {
+            x.char_span.1 > x.char_span.0 // special tokens with zero range (e. g. SENT_START) can not be part of groups
+                    && x.char_span.0 >= start
+                    && x.char_span.1 <= end
+        })
     }
 
     pub fn text<'a>(&self, text: &'a str) -> &'a str {
@@ -333,7 +331,7 @@ impl Group {
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
     id_to_idx: &'t DefaultHashMap<usize, usize>,
-    tokens: &'t [&'t Token<'t>],
+    tokens: &'t [Token<'t>],
 }
 
 lazy_static! {
@@ -354,7 +352,7 @@ impl<'t> MatchGraph<'t> {
     pub fn new(
         groups: Vec<Group>,
         id_to_idx: &'t DefaultHashMap<usize, usize>,
-        tokens: &'t [&'t Token<'t>],
+        tokens: &'t [Token<'t>],
     ) -> Self {
         MatchGraph {
             groups,
@@ -379,7 +377,7 @@ impl<'t> MatchGraph<'t> {
         &self.groups[..]
     }
 
-    pub fn tokens(&self) -> &[&'t Token<'t>] {
+    pub fn tokens(&self) -> &[Token<'t>] {
         &self.tokens[..]
     }
 
@@ -387,14 +385,7 @@ impl<'t> MatchGraph<'t> {
         let mut start = self
             .groups
             .iter()
-            .find_map(|x| {
-                let tokens = x.tokens(&self.tokens);
-                if tokens.is_empty() {
-                    None
-                } else {
-                    Some(tokens[0].char_span.0)
-                }
-            })
+            .find_map(|x| x.tokens(&self.tokens).next().map(|token| token.char_span.0))
             .expect("graph must contain at least one token");
 
         let mut end = self
@@ -402,20 +393,19 @@ impl<'t> MatchGraph<'t> {
             .iter()
             .rev()
             .find_map(|x| {
-                let tokens = x.tokens(&self.tokens);
-                if tokens.is_empty() {
-                    None
-                } else {
-                    Some(tokens[tokens.len() - 1].char_span.1)
-                }
+                x.tokens(&self.tokens)
+                    .rev()
+                    .next()
+                    .map(|token| token.char_span.1)
             })
             .expect("graph must contain at least one token");
 
         let group_tokens: Vec<_> = self
             .groups
             .iter()
-            .map(|x| x.tokens(&self.tokens))
+            .map(|x| x.tokens(&self.tokens).collect::<Vec<_>>())
             .collect::<Vec<_>>();
+
         for (group, tokens) in self.groups.iter_mut().zip(group_tokens.iter()) {
             if !tokens.is_empty() {
                 group.char_span.0 = tokens[0].char_span.0;
@@ -453,9 +443,9 @@ pub struct Composition {
 }
 
 impl Composition {
-    fn next_can_match<'t>(
+    fn next_can_match(
         &self,
-        tokens: &'t [&'t Token<'t>],
+        tokens: &[Token],
         graph: &MatchGraph,
         position: usize,
         index: usize,
@@ -475,7 +465,7 @@ impl Composition {
 
     fn apply_recursive<'t>(
         &'t self,
-        tokens: &'t [&'t Token<'t>],
+        tokens: &'t [Token<'t>],
         mut position: usize,
         mut cur_atom_idx: usize,
         mut graph: MatchGraph<'t>,
@@ -546,11 +536,7 @@ impl Composition {
         }
     }
 
-    pub fn apply<'t>(
-        &'t self,
-        tokens: &'t [&'t Token<'t>],
-        start: usize,
-    ) -> Option<MatchGraph<'t>> {
+    pub fn apply<'t>(&'t self, tokens: &'t [Token<'t>], start: usize) -> Option<MatchGraph<'t>> {
         // this path is extremely hot so more optimizations are done
 
         // the first matcher can never rely on the match graph, so we use an empty default graph for the first match

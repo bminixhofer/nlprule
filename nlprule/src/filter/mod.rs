@@ -47,9 +47,7 @@ impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
 impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
         if let Some(group) = graph.by_id(self.index) {
-            let tokens = &group.tokens(graph.tokens());
-
-            tokens.iter().all(|token| {
+            group.tokens(graph.tokens()).all(|token| {
                 if let Some(captures) = self.regexp.captures(&token.word.text.as_ref()) {
                     // get group 2 because `must_fully_match` adds one group
                     let tags = tokenizer.tagger().get_tags(

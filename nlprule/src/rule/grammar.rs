@@ -189,9 +189,8 @@ impl Synthesizer {
         let make_uppercase = !starts_with_conversion
             && graph.groups()[graph.get_index(start).unwrap()..]
                 .iter()
-                .find(|x| !x.tokens(graph.tokens()).is_empty())
-                .map(|group| {
-                    let first_token = group.tokens(graph.tokens())[0];
+                .find_map(|x| x.tokens(graph.tokens()).next())
+                .map(|first_token| {
                     (self.use_titlecase_adjust
                         && first_token
                             .word
