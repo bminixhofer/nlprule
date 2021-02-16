@@ -21,7 +21,10 @@ use engine::Engine;
 pub(crate) use engine::composition::MatchGraph;
 pub use grammar::Example;
 
-use self::{disambiguation::POSFilter, engine::EngineMatches};
+use self::{
+    disambiguation::POSFilter,
+    engine::{composition::GraphId, EngineMatches},
+};
 
 /// A *Unification* makes an otherwise matching pattern invalid if no combination of its filters
 /// matches all tokens marked with "unify".
@@ -82,8 +85,8 @@ pub struct DisambiguationRule {
     pub(crate) engine: Engine,
     pub(crate) disambiguations: disambiguation::Disambiguation,
     pub(crate) filter: Option<Filter>,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
+    pub(crate) start: GraphId,
+    pub(crate) end: GraphId,
     pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
     pub(crate) unification: Option<Unification>,
 }
@@ -125,10 +128,8 @@ impl DisambiguationRule {
 
             let mut byte_spans = Vec::new();
 
-            for group_idx in self.start..self.end {
-                let group = graph.by_id(group_idx).unwrap_or_else(|| {
-                    panic!("{} group must exist in graph: {}", self.id, self.start)
-                });
+            for group_idx in GraphId::range(&self.start, &self.end) {
+                let group = graph.by_id(group_idx);
 
                 let group_byte_spans: HashSet<_> =
                     group.tokens(graph.tokens()).map(|x| x.byte_span).collect();
@@ -282,12 +283,8 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
                 }
             }
 
-            let start_group = graph
-                .by_id(start)
-                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", rule.id, start));
-            let end_group = graph
-                .by_id(end - 1)
-                .unwrap_or_else(|| panic!("{} group must exist in graph: {}", rule.id, end - 1));
+            let start_group = graph.by_id(start);
+            let end_group = graph.by_id(end);
 
             let replacements: Vec<String> = rule
                 .suggesters
@@ -299,7 +296,7 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
                 .iter()
                 .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
             {
-                let first_token = graph.groups()[graph.get_index(start).unwrap()..]
+                let first_token = graph.groups()[graph.get_index(start)..]
                     .iter()
                     .find_map(|x| x.tokens(graph.tokens()).next())
                     .unwrap();
@@ -365,8 +362,8 @@ pub struct Rule {
     pub(crate) examples: Vec<Example>,
     pub(crate) suggesters: Vec<grammar::Synthesizer>,
     pub(crate) message: grammar::Synthesizer,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
+    pub(crate) start: GraphId,
+    pub(crate) end: GraphId,
     pub(crate) on: bool,
     pub(crate) url: Option<String>,
     pub(crate) short: Option<String>,

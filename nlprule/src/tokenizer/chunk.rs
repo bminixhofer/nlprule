@@ -524,7 +524,7 @@ impl MaxentChunker {
     #[allow(clippy::manual_strip)]
     fn valid(&self, _input: &[(&str, &str)], outcomes: &[&str], _i: usize, outcome: &str) -> bool {
         if outcome.starts_with("I-") {
-            if let Some(prev_outcome) = outcomes.iter().rev().next() {
+            if let Some(prev_outcome) = outcomes.iter().next_back() {
                 // can byte index here because "I, B, E, -" are all 1 byte
                 *prev_outcome == "O" || prev_outcome[2..] == outcome[2..]
             } else {
@@ -669,12 +669,12 @@ impl Chunker {
         // replacements must not change char indices
         let text = tokens[0].sentence.replace('’', "\'");
 
-        let mut byte_to_char_idx: DefaultHashMap<usize, usize> = text
+        let mut bi_to_ci: DefaultHashMap<usize, usize> = text
             .char_indices()
             .enumerate()
             .map(|(ci, (bi, _))| (bi, ci))
             .collect();
-        byte_to_char_idx.insert(text.len(), text.chars().count());
+        bi_to_ci.insert(text.len(), text.chars().count());
 
         // the chunker expects tokens tokenized with a maximum entropy tokenizer
         let internal_tokens = self.token_model.tokenize(&text);
@@ -695,8 +695,12 @@ impl Chunker {
             .zip(internal_tokens)
             .map(|(chunk, token)| {
                 let byte_start = token.as_ptr() as usize - text.as_ptr() as usize;
-                let char_start = *byte_to_char_idx.get(&byte_start).unwrap();
-                let char_end = *byte_to_char_idx.get(&(byte_start + token.len())).unwrap();
+                let char_start = *bi_to_ci
+                    .get(&byte_start)
+                    .expect("byte index is at char boundary");
+                let char_end = *bi_to_ci
+                    .get(&(byte_start + token.len()))
+                    .expect("byte index is at char boundary");
 
                 (*chunk, (char_start, char_end))
             })

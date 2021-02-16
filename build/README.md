@@ -36,8 +36,8 @@ fn main() {
         rules_filename!("en")
     ));
 
-    let tokenizer = Tokenizer::from_reader(&mut tokenizer_bytes).unwrap();
-    let rules = Rules::from_reader(&mut rules_bytes).unwrap();
+    let tokenizer = Tokenizer::from_reader(&mut tokenizer_bytes).expect("tokenizer binary is valid");
+    let rules = Rules::from_reader(&mut rules_bytes).expect("rules binary is valid");
 
     assert_eq!(
         rules.correct("She was not been here since Monday.", &tokenizer),

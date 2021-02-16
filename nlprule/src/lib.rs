@@ -17,7 +17,7 @@
 //!     rules.correct("She was not been here since Monday.", &tokenizer),
 //!     String::from("She was not here since Monday.")
 //! );
-//! # Ok::<(), bincode::Error>(())
+//! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
 //! # Example: get suggestions and correct a text
@@ -45,7 +45,7 @@
 //! let corrected = apply_suggestions(text, &suggestions);
 //!
 //! assert_eq!(corrected, "She was not here since Monday.");
-//! # Ok::<(), bincode::Error>(())
+//! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
 //! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
@@ -53,6 +53,8 @@
 //! # The 't lifetime
 //! By convention the lifetime `'t` in this crate is the lifetime of the input text.
 //! Almost all structures with a lifetime are bound to this lifetime.
+
+use std::io;
 
 use thiserror::Error;
 
@@ -70,10 +72,10 @@ pub use tokenizer::Tokenizer;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("unexpected condition: {0}")]
-    Unexpected(String),
-    #[error("feature not implemented: {0}")]
-    Unimplemented(String),
+    #[error("i/o error: {0}")]
+    Io(#[from] io::Error),
+    #[error("deserialization error: {0}")]
+    Deserialization(#[from] bincode::Error),
 }
 
 /// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.
@@ -90,7 +92,7 @@ pub fn rules_filename(lang_code: &str) -> String {
 #[macro_export]
 macro_rules! tokenizer_filename {
     ($lang_code:literal) => {
-       concat!($lang_code, "_tokenizer.bin")
+        concat!($lang_code, "_tokenizer.bin")
     };
 }
 
@@ -98,6 +100,6 @@ macro_rules! tokenizer_filename {
 #[macro_export]
 macro_rules! rules_filename {
     ($lang_code:literal) => {
-       concat!($lang_code, "_rules.bin")
+        concat!($lang_code, "_rules.bin")
     };
 }

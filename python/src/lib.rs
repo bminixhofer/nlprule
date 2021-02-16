@@ -10,8 +10,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyString;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{
-    fs::{self, File},
-    io::{BufReader, Cursor, Read},
+    fs,
+    io::{Cursor, Read},
     path::PathBuf,
     sync::Arc,
 };
@@ -51,11 +51,11 @@ fn get_resource(lang_code: &str, name: &str) -> PyResult<impl Read> {
 
     let mut gz = GzDecoder::new(&bytes[..]);
     let mut buffer = Vec::new();
-    gz.read_to_end(&mut buffer).expect("gunzipping failed");
+    gz.read_to_end(&mut buffer)?;
 
     // ... and then cache the data at the provided file, if one was found
     if let Some(path) = &cache_path {
-        fs::create_dir_all(path.parent().unwrap())?;
+        fs::create_dir_all(path.parent().expect("filepath must have parent"))?;
         fs::write(path, &buffer)?;
     }
 
@@ -98,11 +98,11 @@ where
 #[derive(Default)]
 pub struct PyTagger {
     tagger: Arc<Tagger>,
-    options: TokenizerOptions,
+    options: Arc<TokenizerOptions>,
 }
 
 impl PyTagger {
-    fn new(tagger: Arc<Tagger>, options: TokenizerOptions) -> Self {
+    fn new(tagger: Arc<Tagger>, options: Arc<TokenizerOptions>) -> Self {
         PyTagger { tagger, options }
     }
 }
@@ -327,8 +327,8 @@ impl PyTokenizer {
     #[new]
     fn new(path: Option<&str>) -> PyResult<Self> {
         let tokenizer = if let Some(path) = path {
-            let reader = BufReader::new(File::open(path).unwrap());
-            bincode::deserialize_from(reader).unwrap()
+            Tokenizer::new(path)
+                .map_err(|x| PyValueError::new_err(format!("error creating Tokenizer: {}", x)))?
         } else {
             Tokenizer::default()
         };
@@ -380,7 +380,9 @@ impl PyTokenizer {
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
-                self.tokenizer = bincode::deserialize(s.as_bytes()).unwrap();
+                self.tokenizer = bincode::deserialize(s.as_bytes()).map_err(|_| {
+                    PyValueError::new_err("deserializing state with `bincode` failed")
+                })?;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -388,7 +390,12 @@ impl PyTokenizer {
     }
 
     pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        Ok(PyBytes::new(py, &bincode::serialize(&self.tokenizer).unwrap()).to_object(py))
+        Ok(PyBytes::new(
+            py,
+            &bincode::serialize(&self.tokenizer)
+                .map_err(|_| PyValueError::new_err("serializing state with `bincode` failed"))?,
+        )
+        .to_object(py))
     }
 }
 
@@ -557,8 +564,8 @@ impl PyRules {
     #[new]
     fn new(py: Python, path: Option<&str>, tokenizer: Option<Py<PyTokenizer>>) -> PyResult<Self> {
         let rules = if let Some(path) = path {
-            let reader = BufReader::new(File::open(path).unwrap());
-            bincode::deserialize_from(reader).unwrap()
+            Rules::new(path)
+                .map_err(|x| PyValueError::new_err(format!("error creating Rules: {}", x)))?
         } else {
             Rules::default()
         };
@@ -662,7 +669,10 @@ impl PyRules {
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
-                let state: (Rules, Tokenizer) = bincode::deserialize(s.as_bytes()).unwrap();
+                let state: (Rules, Tokenizer) =
+                    bincode::deserialize(s.as_bytes()).map_err(|_| {
+                        PyValueError::new_err("deserializing state with `bincode` failed")
+                    })?;
                 self.rules = state.0;
                 self.tokenizer = Py::new(py, PyTokenizer::from(state.1))?;
                 Ok(())
@@ -675,7 +685,12 @@ impl PyRules {
         let tokenizer = self.tokenizer.borrow(py);
         let state = (&self.rules, tokenizer.tokenizer());
 
-        Ok(PyBytes::new(py, &bincode::serialize(&state).unwrap()).to_object(py))
+        Ok(PyBytes::new(
+            py,
+            &bincode::serialize(&state)
+                .map_err(|_| PyValueError::new_err("serializing state with `bincode` failed"))?,
+        )
+        .to_object(py))
     }
 }
 

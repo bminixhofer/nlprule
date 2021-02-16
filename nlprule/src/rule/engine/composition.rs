@@ -6,7 +6,7 @@ use unicase::UniCase;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    pub matcher: either::Either<either::Either<String, usize>, SerializeRegex>,
+    pub matcher: either::Either<either::Either<String, GraphId>, SerializeRegex>,
     pub negate: bool,
     pub case_sensitive: bool,
     pub empty_always_false: bool,
@@ -43,15 +43,19 @@ impl Matcher {
                         UniCase::new(string) == UniCase::new(input)
                     }
                 }
-                either::Right(idx) => graph.by_id(*idx).map_or(false, |x| {
-                    x.tokens(&graph.tokens).next().map_or(false, |token| {
-                        if case_sensitive {
-                            token.word.text.as_ref() == input
-                        } else {
-                            UniCase::new(token.word.text.as_ref()) == UniCase::new(input)
-                        }
-                    })
-                }),
+                either::Right(id) => {
+                    graph
+                        .by_id(*id)
+                        .tokens(&graph.tokens)
+                        .next()
+                        .map_or(false, |token| {
+                            if case_sensitive {
+                                token.word.text.as_ref() == input
+                            } else {
+                                UniCase::new(token.word.text.as_ref()) == UniCase::new(input)
+                            }
+                        })
+                }
             },
             either::Right(regex) => regex.is_match(input),
         };
@@ -65,9 +69,9 @@ impl Matcher {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TextMatcher {
-    pub matcher: Matcher,
-    pub set: Option<DefaultHashSet<u32>>,
+pub(crate) struct TextMatcher {
+    pub(crate) matcher: Matcher,
+    pub(crate) set: Option<DefaultHashSet<WordIdInt>>,
 }
 
 impl TextMatcher {
@@ -99,7 +103,7 @@ pub struct PosMatcher {
 
 impl PosMatcher {
     pub fn is_match(&self, pos: &PosId) -> bool {
-        self.mask[*pos.id() as usize]
+        self.mask[pos.id().0 as usize]
     }
 }
 
@@ -327,15 +331,28 @@ impl Group {
     }
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
+pub struct GraphId(pub usize);
+
+impl GraphId {
+    /// Returns an iterator from the lower bound (inclusive) to the upper bound (inclusive).
+    /// Important: this assumes both ids index into the same graph, otherwise the generated ids
+    /// might not be valid!
+    pub fn range(lower: &GraphId, upper: &GraphId) -> impl DoubleEndedIterator<Item = GraphId> {
+        (lower.0..upper.0 + 1).map(GraphId)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MatchGraph<'t> {
     groups: Vec<Group>,
-    id_to_idx: &'t DefaultHashMap<usize, usize>,
+    id_to_idx: &'t DefaultHashMap<GraphId, usize>,
     tokens: &'t [Token<'t>],
 }
 
 lazy_static! {
-    static ref EMPTY_MAP: DefaultHashMap<usize, usize> = DefaultHashMap::default();
+    static ref EMPTY_MAP: DefaultHashMap<GraphId, usize> = DefaultHashMap::default();
 }
 
 impl<'t> Default for MatchGraph<'t> {
@@ -351,7 +368,7 @@ impl<'t> Default for MatchGraph<'t> {
 impl<'t> MatchGraph<'t> {
     pub fn new(
         groups: Vec<Group>,
-        id_to_idx: &'t DefaultHashMap<usize, usize>,
+        id_to_idx: &'t DefaultHashMap<GraphId, usize>,
         tokens: &'t [Token<'t>],
     ) -> Self {
         MatchGraph {
@@ -365,12 +382,15 @@ impl<'t> MatchGraph<'t> {
         &self.groups[index]
     }
 
-    pub fn by_id(&self, id: usize) -> Option<&Group> {
-        Some(&self.groups[self.get_index(id)?])
+    pub fn by_id(&self, id: GraphId) -> &Group {
+        &self.groups[self.get_index(id)]
     }
 
-    pub fn get_index(&self, id: usize) -> Option<usize> {
-        Some(*self.id_to_idx.get(&id)?)
+    pub fn get_index(&self, id: GraphId) -> usize {
+        *self
+            .id_to_idx
+            .get(&id)
+            .expect("only valid graph indices exist")
     }
 
     pub fn groups(&self) -> &[Group] {
@@ -394,8 +414,7 @@ impl<'t> MatchGraph<'t> {
             .rev()
             .find_map(|x| {
                 x.tokens(&self.tokens)
-                    .rev()
-                    .next()
+                    .next_back()
                     .map(|token| token.char_span.1)
             })
             .expect("graph must contain at least one token");
@@ -438,7 +457,7 @@ pub struct Part {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Composition {
     pub(crate) parts: Vec<Part>,
-    pub(crate) group_ids_to_idx: DefaultHashMap<usize, usize>,
+    pub(crate) id_to_idx: DefaultHashMap<GraphId, usize>,
     pub(crate) can_stop_mask: Vec<bool>,
 }
 
@@ -555,7 +574,7 @@ impl Composition {
 
         let graph = MatchGraph::new(
             vec![Group::default(); self.parts.len() + 1],
-            &self.group_ids_to_idx,
+            &self.id_to_idx,
             tokens,
         );
 

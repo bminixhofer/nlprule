@@ -5,6 +5,8 @@ pub mod composition;
 
 use composition::{Composition, Group, MatchGraph};
 
+use self::composition::GraphId;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TokenEngine {
     pub(crate) composition: Composition,
@@ -52,7 +54,7 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(SerializeRegex, DefaultHashMap<usize, usize>),
+    Text(SerializeRegex, DefaultHashMap<GraphId, usize>),
 }
 
 struct TokenMatches<'a> {
@@ -63,7 +65,7 @@ struct TokenMatches<'a> {
 
 struct TextMatches<'a, 't> {
     byte_idx_to_char_idx: DefaultHashMap<usize, usize>,
-    id_to_idx: &'a DefaultHashMap<usize, usize>,
+    id_to_idx: &'a DefaultHashMap<GraphId, usize>,
     captures: FindCaptures<'a, 't>,
 }
 
@@ -74,8 +76,8 @@ enum InnerMatches<'a: 't, 't> {
 
 pub struct EngineMatches<'a, 't> {
     tokens: &'t [Token<'t>],
-    start: usize,
-    end: usize,
+    start: GraphId,
+    end: GraphId,
     inner: InnerMatches<'a, 't>,
 }
 
@@ -90,8 +92,8 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
         match &mut self.inner {
             InnerMatches::Token(inner) => (inner.index..tokens.len()).find_map(|i| {
                 inner.engine.get_match(tokens, i).and_then(|graph| {
-                    let start_group = graph.by_id(start_id).unwrap();
-                    let end_group = graph.by_id(end_id - 1).unwrap();
+                    let start_group = graph.by_id(start_id);
+                    let end_group = graph.by_id(end_id);
 
                     let start = start_group.char_span.0;
                     let end = end_group.char_span.1;
@@ -112,8 +114,12 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 
                 for group in captures.iter_pos() {
                     if let Some(group) = group {
-                        let start = *bi_to_ci.get(&group.0).unwrap();
-                        let end = *bi_to_ci.get(&group.1).unwrap();
+                        let start = *bi_to_ci
+                            .get(&group.0)
+                            .expect("byte index is at char boundary");
+                        let end = *bi_to_ci
+                            .get(&group.1)
+                            .expect("byte index is at char boundary");
 
                         groups.push(Group::new((start, end)));
                     } else {
@@ -131,8 +137,8 @@ impl Engine {
     pub fn get_matches<'a, 't>(
         &'a self,
         tokens: &'t [Token],
-        start: usize,
-        end: usize,
+        start: GraphId,
+        end: GraphId,
     ) -> EngineMatches<'a, 't> {
         EngineMatches {
             tokens,

@@ -1,9 +1,9 @@
 //! Sets of grammatical error correction rules.
 
-use crate::rule::Rule;
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
+use crate::{rule::Rule, Error};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -43,17 +43,18 @@ pub struct Rules {
 
 impl Rules {
     /// Creates a new rules set from a path to a binary.
-    /// 
-    /// # Panics
+    ///
+    /// # Errors
     /// - If the file can not be opened.
-    pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
-        let reader = BufReader::new(File::open(p).expect("could not open file"));
-        bincode::deserialize_from(reader)
+    /// - If the file content can not be deserialized to a rules set.
+    pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
+        let reader = BufReader::new(File::open(p)?);
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     /// Creates a new rules set from a reader.
-    pub fn from_reader<R: Read>(reader: R) -> bincode::Result<Self> {
-        bincode::deserialize_from(reader)
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     /// All rules ordered by priority.

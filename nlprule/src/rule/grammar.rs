@@ -1,4 +1,4 @@
-use super::engine::composition::{MatchGraph, PosMatcher};
+use super::engine::composition::{GraphId, MatchGraph, PosMatcher};
 use crate::types::*;
 use crate::{
     tokenizer::Tokenizer,
@@ -109,7 +109,7 @@ impl PosReplacer {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Match {
-    pub(crate) id: usize,
+    pub(crate) id: GraphId,
     pub(crate) conversion: Conversion,
     pub(crate) pos_replacer: Option<PosReplacer>,
     pub(crate) regex_replacer: Option<(SerializeRegex, String)>,
@@ -117,10 +117,7 @@ pub struct Match {
 
 impl Match {
     fn apply(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> Option<String> {
-        let text = graph
-            .by_id(self.id)
-            .unwrap_or_else(|| panic!("group must exist in graph: {}", self.id))
-            .text(graph.tokens()[0].sentence);
+        let text = graph.by_id(self.id).text(graph.tokens()[0].sentence);
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
             replacer.apply(text, tokenizer)?
@@ -162,8 +159,8 @@ impl Synthesizer {
         &self,
         graph: &MatchGraph,
         tokenizer: &Tokenizer,
-        start: usize,
-        _end: usize,
+        start: GraphId,
+        _end: GraphId,
     ) -> Option<String> {
         let mut output = Vec::new();
 
@@ -187,7 +184,7 @@ impl Synthesizer {
         // * at sentence start
         // * the replaced text is title case
         let make_uppercase = !starts_with_conversion
-            && graph.groups()[graph.get_index(start).unwrap()..]
+            && graph.groups()[graph.get_index(start)..]
                 .iter()
                 .find_map(|x| x.tokens(graph.tokens()).next())
                 .map(|first_token| {

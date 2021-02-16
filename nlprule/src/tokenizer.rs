@@ -4,15 +4,15 @@
 //! Tokens are *disambiguated* (i. e. information from the initial assignment is changed) in a rule-based way by
 //! [DisambiguationRule][crate::rule::DisambiguationRule]s.
 
-use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
-use lazy_static::lazy_static;
-use once_cell::sync::OnceCell;
-use onig::Regex;
+use crate::{
+    types::*,
+    utils::{parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
+    Error,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Read},
-    ops::Deref,
     path::Path,
     sync::Arc,
 };
@@ -48,75 +48,6 @@ where
     result
 }
 
-fn get_token_strs<'t>(
-    text: &'t str,
-    extra_split_chars: &[char],
-    extra_join_regexes: &[String],
-    tagger: &Tagger,
-) -> Vec<&'t str> {
-    let mut tokens = Vec::new();
-
-    lazy_static! {
-        // see https://stackoverflow.com/a/17773849
-        static ref URL_REGEX: Regex = Regex::new(r"(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})").unwrap();
-    }
-
-    lazy_static! {
-        static ref EXTRA_REGEXES: OnceCell<Vec<Regex>> = OnceCell::default();
-    }
-
-    let extra_regexes = EXTRA_REGEXES.get_or_init(|| {
-        extra_join_regexes
-            .iter()
-            .map(|string| Regex::new(string).unwrap())
-            .collect()
-    });
-
-    let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
-    let split_text = |text: &'t str| {
-        let mut tokens = Vec::new();
-        for pretoken in split(text, split_char) {
-            // if the token is in the dictionary, we add it right away
-            if tagger.id_word(pretoken.into()).1.is_some() {
-                tokens.push(pretoken);
-            } else {
-                // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
-                tokens.extend(split(pretoken, |c| {
-                    split_char(c) || extra_split_chars.contains(&c)
-                }));
-            }
-        }
-        tokens
-    };
-
-    let mut joined_mask = vec![false; text.len()];
-    let mut joins = Vec::new();
-
-    for regex in Some(URL_REGEX.deref())
-        .into_iter()
-        .chain(extra_regexes.iter())
-    {
-        for (start, end) in regex.find_iter(text) {
-            if !joined_mask[start..end].iter().any(|x| *x) {
-                joins.push(start..end);
-                joined_mask[start..end].iter_mut().for_each(|x| *x = true);
-            }
-        }
-    }
-
-    joins.sort_by(|a, b| a.start.cmp(&b.start));
-
-    let mut prev = 0;
-    for range in joins {
-        tokens.extend(split_text(&text[prev..range.start]));
-        prev = range.end;
-        tokens.push(&text[range]);
-    }
-
-    tokens.extend(split_text(&text[prev..text.len()]));
-    tokens
-}
-
 /// *Finalizes* the tokens by e. g. adding a specific UNKNOWN part-of-speech tag.
 /// After finalization grammatical error correction rules can be used on the tokens.
 pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
@@ -131,7 +62,7 @@ pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
 }
 
 /// Options for a tokenizer.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct TokenizerOptions {
     /// Whether to allow errors while constructing the tokenizer.
     pub allow_errors: bool,
@@ -159,7 +90,7 @@ pub struct TokenizerOptions {
     pub extra_split_chars: Vec<char>,
     /// Extra language-specific Regexes of which the matches will *not* be split into multiple tokens.
     #[serde(default)]
-    pub extra_join_regexes: Vec<String>,
+    pub extra_join_regexes: Vec<SerializeRegex>,
 }
 
 impl Default for TokenizerOptions {
@@ -187,22 +118,23 @@ pub struct Tokenizer {
     pub(crate) sentencizer: srx::Rules,
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
-    pub(crate) options: TokenizerOptions,
+    pub(crate) options: Arc<TokenizerOptions>,
 }
 
 impl Tokenizer {
-    /// Creates a new tokenizer set from a path to a binary.
-    /// 
-    /// # Panics
+    /// Creates a new tokenizer from a path to a binary.
+    ///
+    /// # Errors
     /// - If the file can not be opened.
-    pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
-        let reader = BufReader::new(File::open(p).expect("could not open file"));
-        bincode::deserialize_from(reader)
+    /// - If the file content can not be deserialized to a rules set.
+    pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
+        let reader = BufReader::new(File::open(p)?);
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     /// Creates a new tokenizer from a reader.
-    pub fn from_reader<R: Read>(reader: R) -> bincode::Result<Self> {
-        bincode::deserialize_from(reader)
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     pub fn rules(&self) -> &Vec<DisambiguationRule> {
@@ -217,7 +149,7 @@ impl Tokenizer {
         &self.chunker
     }
 
-    pub fn options(&self) -> &TokenizerOptions {
+    pub fn options(&self) -> &Arc<TokenizerOptions> {
         &self.options
     }
 
@@ -266,16 +198,56 @@ impl Tokenizer {
         self.disambiguate_up_to_id(tokens, None)
     }
 
+    fn get_token_strs<'t>(&self, text: &'t str) -> Vec<&'t str> {
+        let mut tokens = Vec::new();
+
+        let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
+        let split_text = |text: &'t str| {
+            let mut tokens = Vec::new();
+            for pretoken in split(text, split_char) {
+                // if the token is in the dictionary, we add it right away
+                if self.tagger.id_word(pretoken.into()).1.is_some() {
+                    tokens.push(pretoken);
+                } else {
+                    // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
+                    tokens.extend(split(pretoken, |c| {
+                        split_char(c) || self.options.extra_split_chars.contains(&c)
+                    }));
+                }
+            }
+            tokens
+        };
+
+        let mut joined_mask = vec![false; text.len()];
+        let mut joins = Vec::new();
+
+        for regex in self.options.extra_join_regexes.iter() {
+            for (start, end) in regex.find_iter(text) {
+                if !joined_mask[start..end].iter().any(|x| *x) {
+                    joins.push(start..end);
+                    joined_mask[start..end].iter_mut().for_each(|x| *x = true);
+                }
+            }
+        }
+
+        joins.sort_by(|a, b| a.start.cmp(&b.start));
+
+        let mut prev = 0;
+        for range in joins {
+            tokens.extend(split_text(&text[prev..range.start]));
+            prev = range.end;
+            tokens.push(&text[range]);
+        }
+
+        tokens.extend(split_text(&text[prev..text.len()]));
+        tokens
+    }
+
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
     // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
     pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Vec<IncompleteToken<'t>> {
         let mut current_char = 0;
-        let token_strs = get_token_strs(
-            sentence,
-            &self.options.extra_split_chars,
-            &self.options.extra_join_regexes,
-            &self.tagger,
-        );
+        let token_strs = self.get_token_strs(sentence);
         let mut tokens: Vec<_> = token_strs
             .iter()
             .enumerate()
@@ -351,16 +323,12 @@ mod tests {
     use super::Tokenizer;
     use lazy_static::lazy_static;
     use quickcheck_macros::quickcheck;
-    use std::fs::File;
-    use std::io::BufReader;
 
     #[quickcheck]
     fn can_tokenize_anything(text: String) -> bool {
         lazy_static! {
-            static ref TOKENIZER: Tokenizer = {
-                let reader = BufReader::new(File::open("../storage/en_tokenizer.bin").unwrap());
-                bincode::deserialize_from(reader).unwrap()
-            };
+            static ref TOKENIZER: Tokenizer =
+                Tokenizer::new("../storage/en_tokenizer.bin").unwrap();
         }
 
         TOKENIZER.tokenize(&text);

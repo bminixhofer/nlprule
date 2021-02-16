@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use super::structure;
-use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
+use super::{structure, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
+use crate::{utils, utils::regex::SerializeRegex};
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ fn max_matches() -> usize {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegexCache {
-    cache: DefaultHashMap<u64, Option<DefaultHashSet<u32>>>,
+    cache: DefaultHashMap<u64, Option<DefaultHashSet<WordIdInt>>>,
     // this is compared with the hash of the word store of the tagger
     word_hash: u64,
 }
@@ -44,11 +44,11 @@ impl RegexCache {
         &self.word_hash
     }
 
-    pub fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<u32>>> {
+    pub(crate) fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<WordIdInt>>> {
         self.cache.get(key)
     }
 
-    pub fn insert(&mut self, key: u64, value: Option<DefaultHashSet<u32>>) {
+    pub(crate) fn insert(&mut self, key: u64, value: Option<DefaultHashSet<WordIdInt>>) {
         self.cache.insert(key, value);
     }
 }
@@ -84,40 +84,30 @@ fn parse_match_attribs(
 ) -> Result<Atom, Error> {
     let mut atoms: Vec<Atom> = Vec::new();
 
-    let case_sensitive = if let Some(case_sensitive) = attribs.case_sensitive() {
-        match case_sensitive.as_str() {
-            "yes" => true,
-            "no" => false,
-            x => panic!("unknown case_sensitive value {}", x),
-        }
-    } else {
-        case_sensitive
+    let case_sensitive = match attribs.case_sensitive().as_deref() {
+        Some("yes") => true,
+        Some("no") => false,
+        None => case_sensitive,
+        x => panic!("unknown case_sensitive value {:?}", x),
     };
 
-    let inflected = if let Some(inflected) = attribs.inflected() {
-        match inflected.as_str() {
-            "yes" => true,
-            "no" => false,
-            x => panic!("unknown inflected value {}", x),
-        }
-    } else {
-        false
+    let inflected = match attribs.inflected().as_deref() {
+        Some("yes") => true,
+        Some("no") => false,
+        None => false,
+        x => panic!("unknown inflected value {:?}", x),
     };
 
-    let is_regex = if let Some(regexp) = attribs.regexp() {
-        match regexp.as_str() {
-            "yes" => true,
-            x => panic!("unknown regexp value {}", x),
-        }
-    } else {
-        false
+    let is_regex = match attribs.regexp().as_deref() {
+        Some("yes") => true,
+        None => false,
+        x => panic!("unknown regexp value {:?}", x),
     };
 
-    // TODO: also reformat is_regex etc., maybe macro?
     let is_postag_regexp = match attribs.postag_regexp().as_deref() {
         Some("yes") => true,
         None => false,
-        x => panic!("unknown is_postag_regexp value {:?}", x),
+        x => panic!("unknown postag_regexp value {:?}", x),
     };
 
     let negate = match attribs.negate().as_deref() {
@@ -136,14 +126,25 @@ fn parse_match_attribs(
     let mut pos_matcher = None;
 
     if text.is_some() || text_match_idx.is_some() {
-        let matcher = if is_regex && text_match_idx.is_none() {
-            let regex = SerializeRegex::new(text.unwrap().trim(), true, case_sensitive);
-            Matcher::new_regex(regex?, negate, inflected)
+        let matcher = if is_regex {
+            if let Some(text) = text {
+                let regex = SerializeRegex::new(text.trim(), true, case_sensitive);
+                Matcher::new_regex(regex?, negate, inflected)
+            } else {
+                return Err(Error::Unexpected("`text` must be set if regex".into()));
+            }
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
-                    || either::Left(text.unwrap().trim().to_string()),
-                    either::Right,
+                    || {
+                        either::Left(
+                            text.expect("either `text_match_idx` or `text` are set.")
+                                .trim()
+                                .to_string(),
+                        )
+                    },
+                    // this is validated in Composition::new, otherwise creating a graph id is not valid!
+                    |id| either::Right(GraphId(id)),
                 ),
                 negate,
                 case_sensitive,
@@ -256,7 +257,10 @@ fn get_exceptions(
                     None
                 };
                 let mut atom =
-                    parse_match_attribs(x, exception_text, case_sensitive, None, info).unwrap();
+                    match parse_match_attribs(x, exception_text, case_sensitive, None, info) {
+                        Ok(atom) => atom,
+                        Err(err) => return Some(Err(err)),
+                    };
 
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
@@ -274,12 +278,12 @@ fn get_exceptions(
                 }
 
                 if !only_shifted || (offset != 0) {
-                    Some(atom)
+                    Some(Ok(atom))
                 } else {
                     None
                 }
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(NotAtom::not(OrAtom::or(exceptions)))
     } else {
         Ok((TrueAtom {}).into())
@@ -302,10 +306,14 @@ fn parse_token(
     };
 
     let text_match_idx = if let Some(parts) = &token.parts {
-        parts.iter().find_map(|x| match x {
-            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().unwrap() + 1),
+        match parts.iter().find_map(|x| match x {
+            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().map(|x| x + 1)),
             _ => None,
-        })
+        }) {
+            None => None,
+            Some(Ok(x)) => Some(x),
+            Some(Err(err)) => return Err(err.into()),
+        }
     } else {
         None
     };
@@ -370,11 +378,7 @@ fn parse_token(
     Ok(parts)
 }
 
-fn parse_match(
-    m: structure::Match,
-    composition: &Option<&Composition>,
-    info: &mut BuildInfo,
-) -> Result<Match, Error> {
+fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Result<Match, Error> {
     if m.postag.is_some()
         || m.postag_regex.is_some()
         || m.postag_replace.is_some()
@@ -391,17 +395,9 @@ fn parse_match(
         ));
     }
 
-    let mut id =
+    let id =
         m.no.parse::<usize>()
             .expect("no must be parsable as usize.");
-
-    if let Some(composition) = composition {
-        let last_id = get_last_id(&composition.parts) as usize - 1;
-
-        if id > last_id {
-            id = last_id;
-        }
-    }
 
     let case_conversion = if let Some(conversion) = &m.case_conversion {
         Some(conversion.as_str())
@@ -440,7 +436,7 @@ fn parse_match(
     };
 
     Ok(Match {
-        id,
+        id: engine.to_graph_id(id)?,
         conversion: match case_conversion {
             Some("alllower") => Conversion::AllLower,
             Some("startlower") => Conversion::StartLower,
@@ -459,29 +455,29 @@ fn parse_match(
     })
 }
 
-fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
+fn parse_synthesizer_text(text: &str, engine: &Engine) -> Result<Vec<SynthesizerPart>, Error> {
     lazy_static! {
-        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
+        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").expect("number regex is valid");
     }
 
     let mut parts = Vec::new();
     let mut end_index = 0;
 
     for capture in MATCH_REGEX.captures_iter(&text) {
-        let (start, end) = capture.pos(0).unwrap();
+        let (start, end) = capture.pos(0).expect("0th regex group exists");
 
         if end_index != start {
             parts.push(SynthesizerPart::Text((&text[end_index..start]).to_string()))
         }
 
-        let index = capture
+        let id = capture
             .at(1)
-            .unwrap()
+            .expect("1st regex group exists")
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
         parts.push(SynthesizerPart::Match(Match {
-            id: index,
+            id: engine.to_graph_id(id)?,
             conversion: Conversion::Nop,
             pos_replacer: None,
             regex_replacer: None,
@@ -492,22 +488,22 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
     if end_index < text.len() {
         parts.push(SynthesizerPart::Text((&text[end_index..]).to_string()))
     }
-    parts
+    Ok(parts)
 }
 
 fn parse_suggestion(
     data: structure::Suggestion,
-    composition: &Option<&Composition>,
+    engine: &Engine,
     info: &mut BuildInfo,
 ) -> Result<Synthesizer, Error> {
     let mut parts = Vec::new();
     for part in data.parts {
         match part {
             structure::SuggestionPart::Text(text) => {
-                parts.extend(parse_synthesizer_text(text.as_str()));
+                parts.extend(parse_synthesizer_text(text.as_str(), engine)?);
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(SynthesizerPart::Match(parse_match(m, composition, info)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?));
             }
         }
     }
@@ -515,7 +511,7 @@ fn parse_suggestion(
     Ok(Synthesizer {
         parts,
         // use titlecase adjustment (i. e. make replacement title case if match is title case) if token rule
-        use_titlecase_adjust: composition.is_some(),
+        use_titlecase_adjust: matches!(engine, Engine::Token(_)),
     })
 }
 
@@ -635,9 +631,9 @@ fn parse_pattern(
     }
 
     let start = start.unwrap_or(1) as usize;
-    let end = end.unwrap_or_else(|| get_last_id(&composition_parts)) as usize;
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts)) as usize - 1;
 
-    let composition = Composition::new(composition_parts);
+    let composition = Composition::new(composition_parts)?;
 
     Ok((composition, start, end))
 }
@@ -736,11 +732,14 @@ impl Rule {
                     None => false,
                     x => panic!("unknown case_sensitive value {:?}", x),
                 };
-                let mark = regex.mark.map_or(0, |x| x.parse().unwrap());
+                let mark = regex.mark.map_or(Ok(0), |x| x.parse())?;
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
-                let id_to_idx: DefaultHashMap<usize, usize> =
-                    (0..regex.captures_len() + 1).enumerate().collect();
-                Ok((Engine::Text(regex, id_to_idx), mark, mark + 1))
+                let id_to_idx: DefaultHashMap<GraphId, usize> = (0..regex.captures_len() + 1)
+                    .enumerate()
+                    // the IDs in a regex rule are just the same as indices
+                    .map(|(key, value)| (GraphId(key), value))
+                    .collect();
+                Ok((Engine::Text(regex, id_to_idx), mark, mark))
             }
         }?;
 
@@ -769,28 +768,23 @@ impl Rule {
         for part in data.message.parts {
             match part {
                 structure::MessagePart::Suggestion(suggestion) => {
-                    let suggester = parse_suggestion(suggestion.clone(), &maybe_composition, info)?;
+                    let suggester = parse_suggestion(suggestion.clone(), &engine, info)?;
                     // simpler to just parse a second time than cloning the result
-                    message_parts
-                        .extend(parse_suggestion(suggestion, &maybe_composition, info)?.parts);
+                    message_parts.extend(parse_suggestion(suggestion, &engine, info)?.parts);
                     suggesters.push(suggester);
                 }
                 structure::MessagePart::Text(text) => {
-                    message_parts.extend(parse_synthesizer_text(text.as_str()));
+                    message_parts.extend(parse_synthesizer_text(text.as_str(), &engine)?);
                 }
                 structure::MessagePart::Match(m) => {
-                    message_parts.push(SynthesizerPart::Match(parse_match(
-                        m,
-                        &maybe_composition,
-                        info,
-                    )?));
+                    message_parts.push(SynthesizerPart::Match(parse_match(m, &engine, info)?));
                 }
             }
         }
 
         if let Some(suggestions) = data.suggestions {
             for suggestion in suggestions {
-                suggesters.push(parse_suggestion(suggestion, &maybe_composition, info)?);
+                suggesters.push(parse_suggestion(suggestion, &engine, info)?);
             }
         }
 
@@ -880,11 +874,11 @@ impl Rule {
         };
 
         Ok(Rule {
+            start: engine.to_graph_id(start)?,
+            end: engine.to_graph_id(end)?,
             engine,
             unification,
             examples,
-            start,
-            end,
             suggesters,
             message: Synthesizer {
                 parts: message_parts,
@@ -903,14 +897,16 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, info: &mut BuildInfo) -> owned::Word {
+fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<owned::Word, Error> {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
+        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").expect("tag form regex is valid");
     }
 
-    let captures = REGEX.captures(form).unwrap();
-    let text = captures.at(1).unwrap().to_string();
-    let tags = captures.at(2).unwrap();
+    let captures = REGEX
+        .captures(form)
+        .ok_or_else(|| Error::Unexpected(format!("tag form must match regex, found '{}'", form)))?;
+    let text = captures.at(1).expect("1st regex group exists").to_string();
+    let tags = captures.at(2).expect("2nd regex group exists");
 
     let tags = tags
         .split(',')
@@ -932,10 +928,10 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> owned::Word {
         })
         .collect();
 
-    owned::Word {
+    Ok(owned::Word {
         text: info.tagger.id_word(text.into()).to_owned_id(),
         tags,
-    }
+    })
 }
 
 impl owned::WordData {
@@ -996,6 +992,11 @@ impl DisambiguationRule {
                 "`unify` in antipattern is not supported.".into(),
             ));
         }
+
+        let engine = Engine::Token(TokenEngine {
+            composition,
+            antipatterns,
+        });
 
         let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()
@@ -1200,9 +1201,10 @@ impl DisambiguationRule {
                 })
                 .collect();
 
-            Some(get_filter(
+            Some(super::impls::filters::get_filter(
                 filter_data.class.split('.').next_back().unwrap(),
                 args,
+                &engine,
             )?)
         } else {
             None
@@ -1251,14 +1253,14 @@ impl DisambiguationRule {
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
                             info,
-                        ),
+                        )?,
                         after: parse_tag_form(
                             &example
                                 .outputform
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
                             info,
-                        ),
+                        )?,
                         char_span: char_span.expect("must have marker when ambiguous example"),
                     }),
                     x => panic!("unknown disambiguation example type {}", x),
@@ -1269,10 +1271,9 @@ impl DisambiguationRule {
         }
 
         Ok(DisambiguationRule {
-            engine: Engine::Token(TokenEngine {
-                composition,
-                antipatterns,
-            }),
+            start: engine.to_graph_id(start)?,
+            end: engine.to_graph_id(end)?,
+            engine,
             unification: if unify_filters.is_empty() {
                 None
             } else {
@@ -1283,8 +1284,6 @@ impl DisambiguationRule {
             },
             filter,
             disambiguations,
-            start,
-            end,
             examples,
             id: String::new(),
         })
