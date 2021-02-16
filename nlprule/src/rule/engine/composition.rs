@@ -65,9 +65,9 @@ impl Matcher {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TextMatcher {
-    pub matcher: Matcher,
-    pub set: Option<DefaultHashSet<u32>>,
+pub(crate) struct TextMatcher {
+    pub(crate) matcher: Matcher,
+    pub(crate) set: Option<DefaultHashSet<WordIdInt>>,
 }
 
 impl TextMatcher {
@@ -99,7 +99,7 @@ pub struct PosMatcher {
 
 impl PosMatcher {
     pub fn is_match(&self, pos: &PosId) -> bool {
-        self.mask[*pos.id() as usize]
+        self.mask[pos.id().0 as usize]
     }
 }
 

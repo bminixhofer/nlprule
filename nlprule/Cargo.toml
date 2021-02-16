@@ -55,7 +55,7 @@ compile = ["serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", 
 
 [[bin]]
 name = "compile"
-required-features = ["compile", "bin"]
+required-features = ["compile"]
 
 [[bin]]
 name = "test"

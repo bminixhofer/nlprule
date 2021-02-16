@@ -24,7 +24,7 @@ use thiserror::Error;
 mod impls;
 mod parse_structure;
 mod structure;
-pub mod utils;
+mod utils;
 
 #[derive(Clap)]
 #[clap(

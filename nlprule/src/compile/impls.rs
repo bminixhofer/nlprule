@@ -73,7 +73,7 @@ impl TextMatcher {
             } else {
                 let data: Vec<_> = info.tagger().word_store().iter().collect();
 
-                let set: DefaultHashSet<u32> = data
+                let set: DefaultHashSet<_> = data
                     .into_maybe_par_iter()
                     .filter_map(|(word, id)| {
                         if matcher.is_match(word.as_str(), &graph, None) {
@@ -105,7 +105,7 @@ impl PosMatcher {
         let graph = MatchGraph::default();
 
         for (word, id) in info.tagger().tag_store().iter() {
-            mask[*id as usize] = matcher.is_match(word.as_str(), &graph, None);
+            mask[id.0 as usize] = matcher.is_match(word.as_str(), &graph, None);
         }
 
         PosMatcher { mask }

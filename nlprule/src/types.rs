@@ -13,12 +13,20 @@ pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct WordIdInt(pub u32);
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct PosIdInt(pub u16);
+
 /// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
 pub mod owned {
+    use super::*;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
-    pub struct WordId(pub String, pub Option<u32>);
+    pub struct WordId(pub(crate) String, pub(crate) Option<WordIdInt>);
 
     impl WordId {
         pub fn as_ref_id(&self) -> super::WordId {
@@ -33,7 +41,7 @@ pub mod owned {
     }
 
     #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
-    pub struct PosId(pub String, pub u16);
+    pub struct PosId(pub(crate) String, pub(crate) PosIdInt);
 
     impl PosId {
         pub fn as_ref_id(&self) -> super::PosId {
@@ -77,14 +85,14 @@ pub mod owned {
 
 /// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
 #[derive(Debug, Clone, PartialEq)]
-pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<u32>);
+pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
 
 impl<'t> WordId<'t> {
     pub(crate) fn to_owned_id(&self) -> owned::WordId {
         owned::WordId(self.0.to_string(), self.1)
     }
 
-    pub fn id(&self) -> &Option<u32> {
+    pub(crate) fn id(&self) -> &Option<WordIdInt> {
         &self.1
     }
 }
@@ -97,14 +105,14 @@ impl<'t> AsRef<str> for WordId<'t> {
 
 /// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PosId<'t>(pub(crate) &'t str, pub(crate) u16);
+pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
 
 impl<'t> PosId<'t> {
     pub fn to_owned_id(&self) -> owned::PosId {
         owned::PosId(self.0.to_string(), self.1)
     }
 
-    pub fn id(&self) -> &u16 {
+    pub(crate) fn id(&self) -> &PosIdInt {
         &self.1
     }
 }

@@ -15,7 +15,7 @@ use std::{collections::HashSet, path::Path};
 struct TaggerFields {
     tag_fst: Vec<u8>,
     word_store_fst: Vec<u8>,
-    tag_store: BiMap<String, u16>,
+    tag_store: BiMap<String, PosIdInt>,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -24,7 +24,7 @@ impl From<Tagger> for TaggerFields {
 
         for (word_id, map) in tagger.tags.iter() {
             let mut i = 0u8;
-            let word = tagger.word_store.get_by_right(word_id).unwrap();
+            let word = tagger.str_for_word_id(word_id);
 
             for (inflect_id, pos_ids) in map.iter() {
                 for pos_id in pos_ids {
@@ -32,8 +32,8 @@ impl From<Tagger> for TaggerFields {
                     i += 1;
 
                     let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
-                    let pos_bytes = pos_id.to_be_bytes();
-                    let inflect_bytes = inflect_id.to_be_bytes();
+                    let pos_bytes = pos_id.0.to_be_bytes();
+                    let inflect_bytes = inflect_id.0.to_be_bytes();
 
                     let value = u64::from_be_bytes([
                         inflect_bytes[0],
@@ -55,7 +55,7 @@ impl From<Tagger> for TaggerFields {
         let mut word_store_items: Vec<_> = tagger
             .word_store
             .iter()
-            .map(|(key, value)| (key.clone(), *value as u64))
+            .map(|(key, value)| (key.clone(), value.0 as u64))
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -81,12 +81,12 @@ impl From<Tagger> for TaggerFields {
 impl From<TaggerFields> for Tagger {
     fn from(data: TaggerFields) -> Self {
         let word_store_fst = Map::new(data.word_store_fst).unwrap();
-        let word_store: BiMap<String, u32> = word_store_fst
+        let word_store: BiMap<String, WordIdInt> = word_store_fst
             .into_stream()
             .into_str_vec()
             .unwrap()
             .into_iter()
-            .map(|(key, value)| (key, value as u32))
+            .map(|(key, value)| (key, WordIdInt(value as u32)))
             .collect();
 
         let mut tags = DefaultHashMap::new();
@@ -100,13 +100,13 @@ impl From<TaggerFields> for Tagger {
             let word_id = *word_store.get_by_left(word).unwrap();
 
             let value_bytes = value.to_be_bytes();
-            let inflection_id = u32::from_be_bytes([
+            let inflection_id = WordIdInt(u32::from_be_bytes([
                 value_bytes[0],
                 value_bytes[1],
                 value_bytes[2],
                 value_bytes[3],
-            ]);
-            let pos_id = u16::from_be_bytes([value_bytes[6], value_bytes[7]]);
+            ]));
+            let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
 
             let group = groups.entry(inflection_id).or_insert_with(Vec::new);
             if !group.contains(&word_id) {
@@ -133,10 +133,10 @@ impl From<TaggerFields> for Tagger {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    tags: DefaultHashMap<u32, IndexMap<u32, Vec<u16>>>,
-    tag_store: BiMap<String, u16>,
-    word_store: BiMap<String, u32>,
-    groups: DefaultHashMap<u32, Vec<u32>>,
+    tags: DefaultHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
+    tag_store: BiMap<String, PosIdInt>,
+    word_store: BiMap<String, WordIdInt>,
+    groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
 }
 
 impl Tagger {
@@ -242,12 +242,12 @@ impl Tagger {
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), i as u32))
+            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
             .collect();
         let tag_store: BiMap<_, _> = tag_store
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), i as u16))
+            .map(|(i, x)| (x.to_string(), PosIdInt(i as u16)))
             .collect();
 
         for (word, inflection, tag) in lines.iter() {
@@ -286,8 +286,8 @@ impl Tagger {
             for (key, value) in map.iter() {
                 for pos_id in value {
                     output.push(WordData::new(
-                        self.id_word(self.word_store.get_by_right(key).unwrap().as_str().into()),
-                        self.id_tag(self.tag_store.get_by_right(pos_id).unwrap().as_str()),
+                        self.id_word(self.str_for_word_id(key).into()),
+                        self.id_tag(self.str_for_pos_id(pos_id)),
                     ))
                 }
             }
@@ -317,12 +317,24 @@ impl Tagger {
         tags
     }
 
-    pub fn tag_store(&self) -> &BiMap<String, u16> {
+    pub(crate) fn tag_store(&self) -> &BiMap<String, PosIdInt> {
         &self.tag_store
     }
 
-    pub fn word_store(&self) -> &BiMap<String, u32> {
+    pub(crate) fn word_store(&self) -> &BiMap<String, WordIdInt> {
         &self.word_store
+    }
+
+    fn str_for_word_id(&self, id: &WordIdInt) -> &str {
+        self.word_store
+            .get_by_right(id)
+            .expect("only valid word ids are created")
+    }
+
+    fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
+        self.tag_store
+            .get_by_right(id)
+            .expect("only valid pos ids are created")
     }
 
     pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
@@ -333,7 +345,7 @@ impl Tagger {
                     "'{}' not found in tag store, please add it to the `extra_tags`. Using UNKNOWN instead.",
                     tag
                 );
-                self.tag_store.get_by_left("UNKNOWN").unwrap()
+                self.tag_store.get_by_left("UNKNOWN").expect("UNKNOWN tag must exist in tag store")
             }),
         )
     }
@@ -369,9 +381,12 @@ impl Tagger {
                     .take(std::cmp::max(n_chars - 4, 0) as usize)
                     .skip(1)
                     .map(|x| x.0);
+                // the word always has at least one char if the above condition is satisfied
+                // but semantically this is false if no char exists
+                let starts_with_uppercase = word.chars().next().map_or(false, |x| x.is_uppercase());
 
                 for i in indices {
-                    let next = if word.chars().next().unwrap().is_uppercase() {
+                    let next = if starts_with_uppercase {
                         crate::utils::apply_to_first(&word[i..], |c| c.to_uppercase().collect())
                     } else {
                         word[i..].to_string()
@@ -404,11 +419,7 @@ impl Tagger {
         self.word_store
             .get_by_left(lemma)
             .and_then(|x| self.groups.get(x))
-            .map(|vec| {
-                vec.iter()
-                    .map(|x| self.word_store.get_by_right(x).unwrap().as_str())
-                    .collect()
-            })
+            .map(|vec| vec.iter().map(|x| self.str_for_word_id(x)).collect())
             .unwrap_or_else(Vec::new)
     }
 }

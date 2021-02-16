@@ -23,7 +23,7 @@ fn max_matches() -> usize {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegexCache {
-    cache: DefaultHashMap<u64, Option<DefaultHashSet<u32>>>,
+    cache: DefaultHashMap<u64, Option<DefaultHashSet<WordIdInt>>>,
     // this is compared with the hash of the word store of the tagger
     word_hash: u64,
 }
@@ -44,11 +44,11 @@ impl RegexCache {
         &self.word_hash
     }
 
-    pub fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<u32>>> {
+    pub(crate) fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<WordIdInt>>> {
         self.cache.get(key)
     }
 
-    pub fn insert(&mut self, key: u64, value: Option<DefaultHashSet<u32>>) {
+    pub(crate) fn insert(&mut self, key: u64, value: Option<DefaultHashSet<WordIdInt>>) {
         self.cache.insert(key, value);
     }
 }
