@@ -20,3 +20,4 @@ nlprule = { path = "../nlprule", features = ["compile"], version = "0.4.4-pre" }
 
 [dev-dependencies]
 tempdir = "0.3"
+smush = "0.1.5" 
