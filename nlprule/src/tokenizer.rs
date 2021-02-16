@@ -122,7 +122,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    /// Creates a new tokenizer set from a path to a binary.
+    /// Creates a new tokenizer from a path to a binary.
     ///
     /// # Errors
     /// - If the file can not be opened.
