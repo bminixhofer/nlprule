@@ -143,7 +143,8 @@ fn parse_match_attribs(
                                 .to_string(),
                         )
                     },
-                    either::Right,
+                    // this is validated in Composition::new, otherwise creating a graph id is not valid!
+                    |id| either::Right(GraphId(id)),
                 ),
                 negate,
                 case_sensitive,
@@ -377,11 +378,7 @@ fn parse_token(
     Ok(parts)
 }
 
-fn parse_match(
-    m: structure::Match,
-    composition: &Option<&Composition>,
-    info: &mut BuildInfo,
-) -> Result<Match, Error> {
+fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Result<Match, Error> {
     if m.postag.is_some()
         || m.postag_regex.is_some()
         || m.postag_replace.is_some()
@@ -398,17 +395,9 @@ fn parse_match(
         ));
     }
 
-    let mut id =
+    let id =
         m.no.parse::<usize>()
             .expect("no must be parsable as usize.");
-
-    if let Some(composition) = composition {
-        let last_id = get_last_id(&composition.parts) as usize - 1;
-
-        if id > last_id {
-            id = last_id;
-        }
-    }
 
     let case_conversion = if let Some(conversion) = &m.case_conversion {
         Some(conversion.as_str())
@@ -447,7 +436,7 @@ fn parse_match(
     };
 
     Ok(Match {
-        id,
+        id: engine.to_graph_id(id)?,
         conversion: match case_conversion {
             Some("alllower") => Conversion::AllLower,
             Some("startlower") => Conversion::StartLower,
@@ -466,7 +455,7 @@ fn parse_match(
     })
 }
 
-fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
+fn parse_synthesizer_text(text: &str, engine: &Engine) -> Result<Vec<SynthesizerPart>, Error> {
     lazy_static! {
         static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").expect("number regex is valid");
     }
@@ -481,14 +470,14 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
             parts.push(SynthesizerPart::Text((&text[end_index..start]).to_string()))
         }
 
-        let index = capture
+        let id = capture
             .at(1)
             .expect("1st regex group exists")
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
         parts.push(SynthesizerPart::Match(Match {
-            id: index,
+            id: engine.to_graph_id(id)?,
             conversion: Conversion::Nop,
             pos_replacer: None,
             regex_replacer: None,
@@ -499,22 +488,22 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
     if end_index < text.len() {
         parts.push(SynthesizerPart::Text((&text[end_index..]).to_string()))
     }
-    parts
+    Ok(parts)
 }
 
 fn parse_suggestion(
     data: structure::Suggestion,
-    composition: &Option<&Composition>,
+    engine: &Engine,
     info: &mut BuildInfo,
 ) -> Result<Synthesizer, Error> {
     let mut parts = Vec::new();
     for part in data.parts {
         match part {
             structure::SuggestionPart::Text(text) => {
-                parts.extend(parse_synthesizer_text(text.as_str()));
+                parts.extend(parse_synthesizer_text(text.as_str(), engine)?);
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(SynthesizerPart::Match(parse_match(m, composition, info)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?));
             }
         }
     }
@@ -522,7 +511,7 @@ fn parse_suggestion(
     Ok(Synthesizer {
         parts,
         // use titlecase adjustment (i. e. make replacement title case if match is title case) if token rule
-        use_titlecase_adjust: composition.is_some(),
+        use_titlecase_adjust: matches!(engine, Engine::Token(_)),
     })
 }
 
@@ -642,9 +631,9 @@ fn parse_pattern(
     }
 
     let start = start.unwrap_or(1) as usize;
-    let end = end.unwrap_or_else(|| get_last_id(&composition_parts)) as usize;
+    let end = end.unwrap_or_else(|| get_last_id(&composition_parts)) as usize - 1;
 
-    let composition = Composition::new(composition_parts);
+    let composition = Composition::new(composition_parts)?;
 
     Ok((composition, start, end))
 }
@@ -745,9 +734,12 @@ impl Rule {
                 };
                 let mark = regex.mark.map_or(Ok(0), |x| x.parse())?;
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
-                let id_to_idx: DefaultHashMap<usize, usize> =
-                    (0..regex.captures_len() + 1).enumerate().collect();
-                Ok((Engine::Text(regex, id_to_idx), mark, mark + 1))
+                let id_to_idx: DefaultHashMap<GraphId, usize> = (0..regex.captures_len() + 1)
+                    .enumerate()
+                    // the IDs in a regex rule are just the same as indices
+                    .map(|(key, value)| (GraphId(key), value))
+                    .collect();
+                Ok((Engine::Text(regex, id_to_idx), mark, mark))
             }
         }?;
 
@@ -776,28 +768,23 @@ impl Rule {
         for part in data.message.parts {
             match part {
                 structure::MessagePart::Suggestion(suggestion) => {
-                    let suggester = parse_suggestion(suggestion.clone(), &maybe_composition, info)?;
+                    let suggester = parse_suggestion(suggestion.clone(), &engine, info)?;
                     // simpler to just parse a second time than cloning the result
-                    message_parts
-                        .extend(parse_suggestion(suggestion, &maybe_composition, info)?.parts);
+                    message_parts.extend(parse_suggestion(suggestion, &engine, info)?.parts);
                     suggesters.push(suggester);
                 }
                 structure::MessagePart::Text(text) => {
-                    message_parts.extend(parse_synthesizer_text(text.as_str()));
+                    message_parts.extend(parse_synthesizer_text(text.as_str(), &engine)?);
                 }
                 structure::MessagePart::Match(m) => {
-                    message_parts.push(SynthesizerPart::Match(parse_match(
-                        m,
-                        &maybe_composition,
-                        info,
-                    )?));
+                    message_parts.push(SynthesizerPart::Match(parse_match(m, &engine, info)?));
                 }
             }
         }
 
         if let Some(suggestions) = data.suggestions {
             for suggestion in suggestions {
-                suggesters.push(parse_suggestion(suggestion, &maybe_composition, info)?);
+                suggesters.push(parse_suggestion(suggestion, &engine, info)?);
             }
         }
 
@@ -887,11 +874,11 @@ impl Rule {
         };
 
         Ok(Rule {
+            start: engine.to_graph_id(start)?,
+            end: engine.to_graph_id(end)?,
             engine,
             unification,
             examples,
-            start,
-            end,
             suggesters,
             message: Synthesizer {
                 parts: message_parts,
@@ -1005,6 +992,11 @@ impl DisambiguationRule {
                 "`unify` in antipattern is not supported.".into(),
             ));
         }
+
+        let engine = Engine::Token(TokenEngine {
+            composition,
+            antipatterns,
+        });
 
         let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()
@@ -1212,6 +1204,7 @@ impl DisambiguationRule {
             Some(super::impls::filters::get_filter(
                 filter_data.class.split('.').next_back().unwrap(),
                 args,
+                &engine,
             )?)
         } else {
             None
@@ -1278,10 +1271,9 @@ impl DisambiguationRule {
         }
 
         Ok(DisambiguationRule {
-            engine: Engine::Token(TokenEngine {
-                composition,
-                antipatterns,
-            }),
+            start: engine.to_graph_id(start)?,
+            end: engine.to_graph_id(end)?,
+            engine,
             unification: if unify_filters.is_empty() {
                 None
             } else {
@@ -1292,8 +1284,6 @@ impl DisambiguationRule {
             },
             filter,
             disambiguations,
-            start,
-            end,
             examples,
             id: String::new(),
         })

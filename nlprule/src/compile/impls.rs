@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     rule::{
         disambiguation::POSFilter,
-        engine::composition::{Matcher, PosMatcher, TextMatcher},
+        engine::{
+            composition::{GraphId, Matcher, PosMatcher, TextMatcher},
+            Engine,
+        },
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesOptions},
@@ -59,7 +62,8 @@ impl TextMatcher {
     pub fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
         let graph = MatchGraph::default();
 
-        let set = if matcher.needs_graph() {
+        // can not cache a matcher that depends on the graph
+        let set = if matcher.graph_id().is_some() {
             None
         } else if let either::Right(regex) = &matcher.matcher {
             let mut hasher = DefaultHasher::default();
@@ -397,15 +401,80 @@ impl SerializeRegex {
     }
 }
 
+impl Engine {
+    pub fn to_graph_id(&self, id: usize) -> Result<GraphId, Error> {
+        let mut id = GraphId(id);
+
+        let map = match &self {
+            Engine::Token(engine) => &engine.composition.id_to_idx,
+            Engine::Text(_, id_to_idx) => &id_to_idx,
+        };
+
+        let max_id = *map
+            .keys()
+            .max()
+            .ok_or_else(|| Error::Unexpected("graph is empty".into()))?;
+
+        // ideally this should throw an error but LT is more lenient than nlprule
+        if !map.contains_key(&id) {
+            id = max_id;
+        }
+
+        Ok(id)
+    }
+}
+
 mod composition {
     use super::*;
     use crate::{
         rule::engine::composition::{
-            AndAtom, Atom, Composition, FalseAtom, NotAtom, OffsetAtom, OrAtom, Part, Quantifier,
-            TrueAtom,
+            AndAtom, Atom, Composition, FalseAtom, GraphId, NotAtom, OffsetAtom, OrAtom, Part,
+            Quantifier, TrueAtom,
         },
         utils::regex::SerializeRegex,
     };
+
+    impl Atom {
+        fn iter_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Atom> + 'a> {
+            match self {
+                Atom::ChunkAtom(_)
+                | Atom::SpaceBeforeAtom(_)
+                | Atom::TextAtom(_)
+                | Atom::WordDataAtom(_)
+                | Atom::FalseAtom(_)
+                | Atom::TrueAtom(_) => Box::new(std::iter::once(self)),
+                Atom::AndAtom(x) => Box::new(x.atoms.iter_mut()),
+                Atom::OrAtom(x) => Box::new(x.atoms.iter_mut()),
+                Atom::NotAtom(x) => x.atom.iter_mut(),
+                Atom::OffsetAtom(x) => x.atom.iter_mut(),
+            }
+        }
+
+        pub fn mut_graph_ids<'a>(&'a mut self) -> Vec<&'a mut GraphId> {
+            let mut ids = Vec::new();
+
+            for atom in self.iter_mut() {
+                let id = match atom {
+                    Atom::ChunkAtom(atom) => atom.matcher.mut_graph_id(),
+                    Atom::TextAtom(atom) => atom.matcher.matcher.mut_graph_id(),
+                    Atom::WordDataAtom(atom) => atom
+                        .matcher
+                        .inflect_matcher
+                        .as_mut()
+                        .and_then(|x| x.matcher.mut_graph_id()),
+                    _ => {
+                        continue;
+                    }
+                };
+
+                if let Some(id) = id {
+                    ids.push(id);
+                }
+            }
+
+            ids
+        }
+    }
 
     impl Matcher {
         pub fn new_regex(regex: SerializeRegex, negate: bool, empty_always_false: bool) -> Self {
@@ -418,7 +487,7 @@ mod composition {
         }
 
         pub fn new_string(
-            string_or_idx: either::Either<String, usize>,
+            string_or_idx: either::Either<String, GraphId>,
             negate: bool,
             case_sensitive: bool,
             empty_always_false: bool,
@@ -431,8 +500,20 @@ mod composition {
             }
         }
 
-        pub fn needs_graph(&self) -> bool {
-            matches!(&self.matcher, either::Left(either::Right(_)))
+        pub fn graph_id(&self) -> Option<GraphId> {
+            if let either::Left(either::Right(id)) = &self.matcher {
+                Some(*id)
+            } else {
+                None
+            }
+        }
+
+        pub fn mut_graph_id(&mut self) -> Option<&mut GraphId> {
+            if let either::Left(either::Right(id)) = &mut self.matcher {
+                Some(id)
+            } else {
+                None
+            }
         }
     }
 
@@ -497,14 +578,14 @@ mod composition {
     }
 
     impl Composition {
-        pub fn new(parts: Vec<Part>) -> Self {
-            let mut group_ids_to_idx = DefaultHashMap::default();
-            group_ids_to_idx.insert(0, 0);
+        pub fn new(mut parts: Vec<Part>) -> Result<Self, Error> {
+            let mut id_to_idx = DefaultHashMap::default();
+            id_to_idx.insert(GraphId(0), 0);
             let mut current_id = 1;
 
             for (i, part) in parts.iter().enumerate() {
                 if part.visible {
-                    group_ids_to_idx.insert(current_id, i + 1);
+                    id_to_idx.insert(GraphId(current_id), i + 1);
                     current_id += 1;
                 }
             }
@@ -513,11 +594,28 @@ mod composition {
                 .map(|i| parts[i..].iter().all(|x| x.quantifier.min == 0))
                 .collect();
 
-            Composition {
-                parts,
-                group_ids_to_idx,
-                can_stop_mask,
+            for (i, part) in parts.iter_mut().enumerate() {
+                for id in part.atom.mut_graph_ids() {
+                    loop {
+                        let index = *id_to_idx.get(&id).ok_or_else(|| {
+                            Error::Unexpected(format!("id must exist in graph: {:?}", id))
+                        })?;
+
+                        // ideally this should throw an error but LT is more lenient than nlprule
+                        if index > i {
+                            *id = GraphId(id.0 - 1);
+                        } else {
+                            break;
+                        }
+                    }
+                }
             }
+
+            Ok(Composition {
+                parts,
+                id_to_idx,
+                can_stop_mask,
+            })
         }
     }
 }
@@ -526,20 +624,20 @@ pub mod filters {
     use super::Error;
     use std::collections::HashMap;
 
-    use crate::{filter::*, utils::regex::SerializeRegex};
+    use crate::{filter::*, rule::engine::Engine, utils::regex::SerializeRegex};
 
     trait FromArgs: Sized {
-        fn from_args(args: HashMap<String, String>) -> Result<Self, Error>;
+        fn from_args(args: HashMap<String, String>, engine: &Engine) -> Result<Self, Error>;
     }
 
     impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
-        fn from_args(args: HashMap<String, String>) -> Result<Self, Error> {
+        fn from_args(args: HashMap<String, String>, engine: &Engine) -> Result<Self, Error> {
             if args.contains_key("negate_postag") {
                 panic!("negate_postag not supported in NoDisambiguationEnglishPartialPosTagFilter");
             }
 
             Ok(NoDisambiguationEnglishPartialPosTagFilter {
-                index: args
+                id: engine.to_graph_id(args
                     .get("no")
                     .ok_or_else(|| {
                         Error::Unexpected(
@@ -547,7 +645,7 @@ pub mod filters {
                                 .into(),
                         )
                     })?
-                    .parse::<usize>()?,
+                    .parse::<usize>()?)?,
                 regexp: SerializeRegex::new(
                     &args.get("regexp").ok_or_else(|| {
                         Error::Unexpected(
@@ -573,10 +671,14 @@ pub mod filters {
         }
     }
 
-    pub fn get_filter(name: &str, args: HashMap<String, String>) -> Result<Filter, Error> {
+    pub fn get_filter(
+        name: &str,
+        args: HashMap<String, String>,
+        engine: &Engine,
+    ) -> Result<Filter, Error> {
         match name {
             "NoDisambiguationEnglishPartialPosTagFilter" => {
-                Ok(NoDisambiguationEnglishPartialPosTagFilter::from_args(args)?.into())
+                Ok(NoDisambiguationEnglishPartialPosTagFilter::from_args(args, engine)?.into())
             }
             _ => Err(Error::Unexpected(format!("unsupported filter {}", name))),
         }

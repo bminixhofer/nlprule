@@ -317,10 +317,12 @@ impl Tagger {
         tags
     }
 
+    #[allow(dead_code)] // used by compile module
     pub(crate) fn tag_store(&self) -> &BiMap<String, PosIdInt> {
         &self.tag_store
     }
 
+    #[allow(dead_code)] // used by compile module
     pub(crate) fn word_store(&self) -> &BiMap<String, WordIdInt> {
         &self.word_store
     }
