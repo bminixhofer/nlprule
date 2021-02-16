@@ -450,7 +450,7 @@ mod composition {
             }
         }
 
-        pub fn mut_graph_ids<'a>(&'a mut self) -> Vec<&'a mut GraphId> {
+        pub fn mut_graph_ids(&mut self) -> Vec<&mut GraphId> {
             let mut ids = Vec::new();
 
             for atom in self.iter_mut() {
