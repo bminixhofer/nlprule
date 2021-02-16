@@ -84,40 +84,30 @@ fn parse_match_attribs(
 ) -> Result<Atom, Error> {
     let mut atoms: Vec<Atom> = Vec::new();
 
-    let case_sensitive = if let Some(case_sensitive) = attribs.case_sensitive() {
-        match case_sensitive.as_str() {
-            "yes" => true,
-            "no" => false,
-            x => panic!("unknown case_sensitive value {}", x),
-        }
-    } else {
-        case_sensitive
+    let case_sensitive = match attribs.case_sensitive().as_deref() {
+        Some("yes") => true,
+        Some("no") => false,
+        None => case_sensitive,
+        x => panic!("unknown case_sensitive value {:?}", x),
     };
 
-    let inflected = if let Some(inflected) = attribs.inflected() {
-        match inflected.as_str() {
-            "yes" => true,
-            "no" => false,
-            x => panic!("unknown inflected value {}", x),
-        }
-    } else {
-        false
+    let inflected = match attribs.inflected().as_deref() {
+        Some("yes") => true,
+        Some("no") => false,
+        None => false,
+        x => panic!("unknown inflected value {:?}", x),
     };
 
-    let is_regex = if let Some(regexp) = attribs.regexp() {
-        match regexp.as_str() {
-            "yes" => true,
-            x => panic!("unknown regexp value {}", x),
-        }
-    } else {
-        false
+    let is_regex = match attribs.regexp().as_deref() {
+        Some("yes") => true,
+        None => false,
+        x => panic!("unknown regexp value {:?}", x),
     };
 
-    // TODO: also reformat is_regex etc., maybe macro?
     let is_postag_regexp = match attribs.postag_regexp().as_deref() {
         Some("yes") => true,
         None => false,
-        x => panic!("unknown is_postag_regexp value {:?}", x),
+        x => panic!("unknown postag_regexp value {:?}", x),
     };
 
     let negate = match attribs.negate().as_deref() {

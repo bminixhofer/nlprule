@@ -4,6 +4,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
+    sync::Arc,
 };
 
 use log::warn;
@@ -115,7 +116,7 @@ impl Rules {
     pub fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
-        options: RulesOptions,
+        options: &RulesOptions,
     ) -> Self {
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
@@ -204,7 +205,7 @@ impl Tokenizer {
         chunker: Option<chunk::Chunker>,
         multiword_tagger: Option<MultiwordTagger>,
         sentencizer: srx::Rules,
-        options: TokenizerOptions,
+        options: Arc<TokenizerOptions>,
     ) -> Result<Self, Error> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
@@ -383,10 +384,15 @@ impl SerializeRegex {
             fixed
         };
 
+        let fixed = if case_sensitive {
+            fixed
+        } else {
+            format!("(?i){}", fixed)
+        };
+
         Ok(SerializeRegex {
-            regex: SerializeRegex::compile(&fixed, case_sensitive)?,
-            regex_str: fixed,
-            case_sensitive,
+            regex: SerializeRegex::compile(&fixed)?,
+            string: fixed,
         })
     }
 }

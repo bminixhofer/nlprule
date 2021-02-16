@@ -184,14 +184,14 @@ pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
         chunker,
         multiword_tagger,
         srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
-        tokenizer_options,
+        tokenizer_options.clone(),
     )?;
 
     let f = BufWriter::new(File::create(&opts.tokenizer_out)?);
     bincode::serialize_into(f, &tokenizer)?;
 
     info!("Creating grammar rules.");
-    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_options);
+    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, &rules_options);
 
     let f = BufWriter::new(File::create(&opts.rules_out)?);
     bincode::serialize_into(f, &rules)?;

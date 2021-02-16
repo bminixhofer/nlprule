@@ -98,11 +98,11 @@ where
 #[derive(Default)]
 pub struct PyTagger {
     tagger: Arc<Tagger>,
-    options: TokenizerOptions,
+    options: Arc<TokenizerOptions>,
 }
 
 impl PyTagger {
-    fn new(tagger: Arc<Tagger>, options: TokenizerOptions) -> Self {
+    fn new(tagger: Arc<Tagger>, options: Arc<TokenizerOptions>) -> Self {
         PyTagger { tagger, options }
     }
 }

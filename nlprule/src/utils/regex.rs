@@ -1,42 +1,54 @@
 use onig::{Regex, RegexOptions};
-use serde::{Deserialize, Serialize};
-use std::hash::{Hash, Hasher};
+use serde::{Deserialize, Serialize, Serializer};
 use std::ops::Deref;
+use std::{
+    convert::TryFrom,
+    hash::{Hash, Hasher},
+};
 
-#[derive(Serialize, Deserialize, Debug)]
-struct RegexFields {
-    regex_str: String,
-    case_sensitive: bool,
-}
+impl TryFrom<String> for SerializeRegex {
+    type Error = onig::Error;
 
-impl From<RegexFields> for SerializeRegex {
-    fn from(data: RegexFields) -> Self {
-        SerializeRegex {
-            regex: SerializeRegex::compile(&data.regex_str, data.case_sensitive).unwrap(),
-            regex_str: data.regex_str,
-            case_sensitive: data.case_sensitive,
-        }
+    fn try_from(string: String) -> Result<Self, onig::Error> {
+        Ok(SerializeRegex {
+            regex: SerializeRegex::compile(&string)?,
+            string,
+        })
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(from = "RegexFields")]
+#[derive(Deserialize, Debug)]
+#[serde(try_from = "String")]
 pub struct SerializeRegex {
-    pub(crate) regex_str: String,
-    pub(crate) case_sensitive: bool,
-    #[serde(skip_serializing)]
+    pub(crate) string: String,
     pub(crate) regex: Regex,
+}
+
+impl Serialize for SerializeRegex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.string)
+    }
 }
 
 impl Hash for SerializeRegex {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.regex_str.hash(state);
-        self.case_sensitive.hash(state);
+        self.string.hash(state);
     }
 }
 
 impl SerializeRegex {
-    pub fn compile(regex_str: &str, case_sensitive: bool) -> Result<Regex, onig::Error> {
+    pub fn compile(regex_str: &str) -> Result<Regex, onig::Error> {
+        let mut case_sensitive = true;
+        let regex_str = if let Some(stripped) = regex_str.strip_suffix("(?i)") {
+            case_sensitive = false;
+            stripped
+        } else {
+            regex_str
+        };
+
         Regex::with_options(
             regex_str,
             if case_sensitive {
