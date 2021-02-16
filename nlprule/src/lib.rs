@@ -54,6 +54,8 @@
 //! By convention the lifetime `'t` in this crate is the lifetime of the input text.
 //! Almost all structures with a lifetime are bound to this lifetime.
 
+use std::io;
+
 use thiserror::Error;
 
 #[cfg(feature = "compile")]
@@ -70,10 +72,10 @@ pub use tokenizer::Tokenizer;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("unexpected condition: {0}")]
-    Unexpected(String),
-    #[error("feature not implemented: {0}")]
-    Unimplemented(String),
+    #[error("i/o error: {0}")]
+    Io(#[from] io::Error),
+    #[error("deserialization error: {0}")]
+    Deserialization(#[from] bincode::Error),
 }
 
 /// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.

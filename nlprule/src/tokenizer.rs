@@ -7,6 +7,7 @@
 use crate::{
     types::*,
     utils::{parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
+    Error,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -125,14 +126,14 @@ impl Tokenizer {
     ///
     /// # Panics
     /// - If the file can not be opened.
-    pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
-        let reader = BufReader::new(File::open(p).expect("could not open file"));
-        bincode::deserialize_from(reader)
+    pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
+        let reader = BufReader::new(File::open(p)?);
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     /// Creates a new tokenizer from a reader.
     pub fn from_reader<R: Read>(reader: R) -> bincode::Result<Self> {
-        bincode::deserialize_from(reader)
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     pub fn rules(&self) -> &Vec<DisambiguationRule> {

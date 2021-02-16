@@ -112,8 +112,12 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 
                 for group in captures.iter_pos() {
                     if let Some(group) = group {
-                        let start = *bi_to_ci.get(&group.0).unwrap();
-                        let end = *bi_to_ci.get(&group.1).unwrap();
+                        let start = *bi_to_ci
+                            .get(&group.0)
+                            .expect("byte index is at char boundary");
+                        let end = *bi_to_ci
+                            .get(&group.1)
+                            .expect("byte index is at char boundary");
 
                         groups.push(Group::new((start, end)));
                     } else {

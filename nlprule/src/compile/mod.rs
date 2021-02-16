@@ -109,17 +109,15 @@ pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
         .map(|x| x.to_string())
         .collect();
 
-    let tokenizer_options = utils::tokenizer_options(&lang_code)
-        .ok_or_else(|| Error::ConfigDoesNotExist {
+    let tokenizer_options =
+        utils::tokenizer_options(&lang_code).ok_or_else(|| Error::ConfigDoesNotExist {
             lang_code: lang_code.clone(),
-        })?
-        .clone();
+        })?;
 
-    let rules_options = utils::rules_options(&lang_code)
-        .ok_or_else(|| Error::ConfigDoesNotExist {
+    let rules_options =
+        utils::rules_options(&lang_code).ok_or_else(|| Error::ConfigDoesNotExist {
             lang_code: lang_code.clone(),
-        })?
-        .clone();
+        })?;
 
     info!("Creating tagger.");
     let tagger = Tagger::from_dumps(
@@ -184,7 +182,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
         chunker,
         multiword_tagger,
         srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
-        tokenizer_options.clone(),
+        tokenizer_options,
     )?;
 
     let f = BufWriter::new(File::create(&opts.tokenizer_out)?);

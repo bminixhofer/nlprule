@@ -400,8 +400,7 @@ impl Tagger {
     }
 
     /// Get the words with the same lemma as the given lemma.
-    #[allow(clippy::clippy::ptr_arg)]
-    pub fn get_group_members(&self, lemma: &String) -> Vec<&str> {
+    pub fn get_group_members(&self, lemma: &str) -> Vec<&str> {
         self.word_store
             .get_by_left(lemma)
             .and_then(|x| self.groups.get(x))
