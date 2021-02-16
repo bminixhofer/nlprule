@@ -3,7 +3,7 @@
 use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{compile::Error, rule::Rule};
+use crate::{rule::Rule, Error};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,

@@ -17,7 +17,7 @@
 //!     rules.correct("She was not been here since Monday.", &tokenizer),
 //!     String::from("She was not here since Monday.")
 //! );
-//! # Ok::<(), bincode::Error>(())
+//! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
 //! # Example: get suggestions and correct a text
@@ -45,7 +45,7 @@
 //! let corrected = apply_suggestions(text, &suggestions);
 //!
 //! assert_eq!(corrected, "She was not here since Monday.");
-//! # Ok::<(), bincode::Error>(())
+//! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
 //! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).

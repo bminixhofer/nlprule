@@ -124,15 +124,16 @@ pub struct Tokenizer {
 impl Tokenizer {
     /// Creates a new tokenizer set from a path to a binary.
     ///
-    /// # Panics
+    /// # Errors
     /// - If the file can not be opened.
+    /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
         let reader = BufReader::new(File::open(p)?);
         Ok(bincode::deserialize_from(reader)?)
     }
 
     /// Creates a new tokenizer from a reader.
-    pub fn from_reader<R: Read>(reader: R) -> bincode::Result<Self> {
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
         Ok(bincode::deserialize_from(reader)?)
     }
 
