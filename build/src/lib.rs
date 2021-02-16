@@ -1,4 +1,4 @@
-//! This crate provides a builder to make it easier to use the correct binaries for [nlprule](https://github.com/bminixhofer/nlprule). 
+//! This crate provides a builder to make it easier to use the correct binaries for [nlprule](https://github.com/bminixhofer/nlprule).
 //! See `README.md` for details.
 
 use flate2::read::GzDecoder;
@@ -94,7 +94,7 @@ pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), 
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).unwrap();
+        let mut file = archive.by_index(i)?;
         let outpath = match file.enclosed_name() {
             Some(path) => out_dir
                 .as_ref()
@@ -104,15 +104,15 @@ pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), 
         };
 
         if (&*file.name()).ends_with('/') {
-            fs::create_dir_all(&outpath).unwrap();
+            fs::create_dir_all(&outpath)?;
         } else {
             if let Some(p) = outpath.parent() {
                 if !p.exists() {
-                    fs::create_dir_all(&p).unwrap();
+                    fs::create_dir_all(&p)?;
                 }
             }
-            let mut outfile = fs::File::create(&outpath).unwrap();
-            io::copy(&mut file, &mut outfile).unwrap();
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
         }
 
         // Get and Set permissions
@@ -121,7 +121,7 @@ pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), 
             use std::os::unix::fs::PermissionsExt;
 
             if let Some(mode) = file.unix_mode() {
-                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode)).unwrap();
+                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
             }
         }
     }
@@ -145,7 +145,7 @@ pub struct BinaryBuilder {
     cache_dir: Option<PathBuf>,
     fallback_to_build_dir: bool,
     build_dir: Option<PathBuf>,
-    outputs: Vec<PathBuf>
+    outputs: Vec<PathBuf>,
 }
 
 impl BinaryBuilder {
@@ -167,12 +167,7 @@ impl BinaryBuilder {
         ]
         .iter()
         {
-            let response = get_binary(
-                &self.version,
-                lang_code,
-                *binary,
-                self.cache_dir.as_ref(),
-            );
+            let response = get_binary(&self.version, lang_code, *binary, self.cache_dir.as_ref());
 
             (match response {
                 Ok(mut reader) => {
@@ -260,10 +255,10 @@ impl BinaryBuilder {
             cache_dir,
             fallback_to_build_dir: false,
             build_dir,
-            outputs: Vec::new()
+            outputs: Vec::new(),
         }
     }
-    
+
     /// Sets the version for which to fetch binaries.
     /// The version of `nlprule-build` (kept in sync with `nlprule` version) by default.
     /// Typically does not need to be modified.
@@ -291,7 +286,7 @@ impl BinaryBuilder {
         self
     }
 
-    /// Sets the path the build directories should be stored at. 
+    /// Sets the path the build directories should be stored at.
     /// Only relevant if `fallback_to_build_dir` is true.
     /// `cache_dir.join("build_dirs")` by default.
     pub fn build_dir(mut self, build_dir: Option<PathBuf>) -> Self {
@@ -313,12 +308,20 @@ impl BinaryBuilder {
             let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
             let rules_out = self.out_dir.join(rules_filename(lang_code));
 
-            nlprule::Rules::new(rules_out).unwrap_or_else(
-                |e| panic!("failed to validate rules binary for {lang_code}: {error}", lang_code=lang_code, error=e)
-            );
-            nlprule::Tokenizer::new(tokenizer_out).unwrap_or_else(
-                |e| panic!("failed to validate tokenizer binary for {lang_code}: {error}", lang_code=lang_code, error=e)
-            );
+            nlprule::Rules::new(rules_out).unwrap_or_else(|e| {
+                panic!(
+                    "failed to validate rules binary for {lang_code}: {error}",
+                    lang_code = lang_code,
+                    error = e
+                )
+            });
+            nlprule::Tokenizer::new(tokenizer_out).unwrap_or_else(|e| {
+                panic!(
+                    "failed to validate tokenizer binary for {lang_code}: {error}",
+                    lang_code = lang_code,
+                    error = e
+                )
+            });
         }
 
         self

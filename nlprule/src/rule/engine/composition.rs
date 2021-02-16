@@ -394,8 +394,7 @@ impl<'t> MatchGraph<'t> {
             .rev()
             .find_map(|x| {
                 x.tokens(&self.tokens)
-                    .rev()
-                    .next()
+                    .next_back()
                     .map(|token| token.char_span.1)
             })
             .expect("graph must contain at least one token");

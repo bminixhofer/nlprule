@@ -90,7 +90,7 @@ pub fn rules_filename(lang_code: &str) -> String {
 #[macro_export]
 macro_rules! tokenizer_filename {
     ($lang_code:literal) => {
-       concat!($lang_code, "_tokenizer.bin")
+        concat!($lang_code, "_tokenizer.bin")
     };
 }
 
@@ -98,6 +98,6 @@ macro_rules! tokenizer_filename {
 #[macro_export]
 macro_rules! rules_filename {
     ($lang_code:literal) => {
-       concat!($lang_code, "_rules.bin")
+        concat!($lang_code, "_rules.bin")
     };
 }

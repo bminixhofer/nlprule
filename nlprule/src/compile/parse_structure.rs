@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use super::structure;
-use crate::{filter::get_filter, utils, utils::regex::SerializeRegex, Error};
+use super::{structure, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
+use crate::{utils, utils::regex::SerializeRegex};
 use lazy_static::lazy_static;
 use onig::Regex;
 use serde::{Deserialize, Serialize};
@@ -136,13 +136,23 @@ fn parse_match_attribs(
     let mut pos_matcher = None;
 
     if text.is_some() || text_match_idx.is_some() {
-        let matcher = if is_regex && text_match_idx.is_none() {
-            let regex = SerializeRegex::new(text.unwrap().trim(), true, case_sensitive);
-            Matcher::new_regex(regex?, negate, inflected)
+        let matcher = if is_regex {
+            if let Some(text) = text {
+                let regex = SerializeRegex::new(text.trim(), true, case_sensitive);
+                Matcher::new_regex(regex?, negate, inflected)
+            } else {
+                return Err(Error::Unexpected("`text` must be set if regex".into()));
+            }
         } else {
             Matcher::new_string(
                 text_match_idx.map_or_else(
-                    || either::Left(text.unwrap().trim().to_string()),
+                    || {
+                        either::Left(
+                            text.expect("either `text_match_idx` or `text` are set.")
+                                .trim()
+                                .to_string(),
+                        )
+                    },
                     either::Right,
                 ),
                 negate,
@@ -256,7 +266,10 @@ fn get_exceptions(
                     None
                 };
                 let mut atom =
-                    parse_match_attribs(x, exception_text, case_sensitive, None, info).unwrap();
+                    match parse_match_attribs(x, exception_text, case_sensitive, None, info) {
+                        Ok(atom) => atom,
+                        Err(err) => return Some(Err(err)),
+                    };
 
                 let offset = if let Some(scope) = &x.scope {
                     match scope.as_str() {
@@ -274,12 +287,12 @@ fn get_exceptions(
                 }
 
                 if !only_shifted || (offset != 0) {
-                    Some(atom)
+                    Some(Ok(atom))
                 } else {
                     None
                 }
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(NotAtom::not(OrAtom::or(exceptions)))
     } else {
         Ok((TrueAtom {}).into())
@@ -302,10 +315,14 @@ fn parse_token(
     };
 
     let text_match_idx = if let Some(parts) = &token.parts {
-        parts.iter().find_map(|x| match x {
-            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().unwrap() + 1),
+        match parts.iter().find_map(|x| match x {
+            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().map(|x| x + 1)),
             _ => None,
-        })
+        }) {
+            None => None,
+            Some(Ok(x)) => Some(x),
+            Some(Err(err)) => return Err(err.into()),
+        }
     } else {
         None
     };
@@ -461,14 +478,14 @@ fn parse_match(
 
 fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
     lazy_static! {
-        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").unwrap();
+        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").expect("number regex is valid");
     }
 
     let mut parts = Vec::new();
     let mut end_index = 0;
 
     for capture in MATCH_REGEX.captures_iter(&text) {
-        let (start, end) = capture.pos(0).unwrap();
+        let (start, end) = capture.pos(0).expect("0th regex group exists");
 
         if end_index != start {
             parts.push(SynthesizerPart::Text((&text[end_index..start]).to_string()))
@@ -476,7 +493,7 @@ fn parse_synthesizer_text(text: &str) -> Vec<SynthesizerPart> {
 
         let index = capture
             .at(1)
-            .unwrap()
+            .expect("1st regex group exists")
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
@@ -736,7 +753,7 @@ impl Rule {
                     None => false,
                     x => panic!("unknown case_sensitive value {:?}", x),
                 };
-                let mark = regex.mark.map_or(0, |x| x.parse().unwrap());
+                let mark = regex.mark.map_or(Ok(0), |x| x.parse())?;
                 let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
                 let id_to_idx: DefaultHashMap<usize, usize> =
                     (0..regex.captures_len() + 1).enumerate().collect();
@@ -903,14 +920,16 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, info: &mut BuildInfo) -> owned::Word {
+fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<owned::Word, Error> {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").unwrap();
+        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").expect("tag form regex is valid");
     }
 
-    let captures = REGEX.captures(form).unwrap();
-    let text = captures.at(1).unwrap().to_string();
-    let tags = captures.at(2).unwrap();
+    let captures = REGEX
+        .captures(form)
+        .ok_or_else(|| Error::Unexpected(format!("tag form must match regex, found '{}'", form)))?;
+    let text = captures.at(1).expect("1st regex group exists").to_string();
+    let tags = captures.at(2).expect("2nd regex group exists");
 
     let tags = tags
         .split(',')
@@ -932,10 +951,10 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> owned::Word {
         })
         .collect();
 
-    owned::Word {
+    Ok(owned::Word {
         text: info.tagger.id_word(text.into()).to_owned_id(),
         tags,
-    }
+    })
 }
 
 impl owned::WordData {
@@ -1200,7 +1219,7 @@ impl DisambiguationRule {
                 })
                 .collect();
 
-            Some(get_filter(
+            Some(super::impls::filters::get_filter(
                 filter_data.class.split('.').next_back().unwrap(),
                 args,
             )?)
@@ -1251,14 +1270,14 @@ impl DisambiguationRule {
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
                             info,
-                        ),
+                        )?,
                         after: parse_tag_form(
                             &example
                                 .outputform
                                 .as_ref()
                                 .expect("must have inputform when ambiguous example"),
                             info,
-                        ),
+                        )?,
                         char_span: char_span.expect("must have marker when ambiguous example"),
                     }),
                     x => panic!("unknown disambiguation example type {}", x),

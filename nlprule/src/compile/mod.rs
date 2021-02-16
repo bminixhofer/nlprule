@@ -4,6 +4,7 @@ use std::{
     fs::{self, File},
     hash::{Hash, Hasher},
     io::{BufReader, BufWriter},
+    num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -71,7 +72,7 @@ impl BuildFilePaths {
 }
 
 #[derive(Error, Debug)]
-pub enum CompileError {
+pub enum Error {
     #[error("input/output error")]
     Io(#[from] std::io::Error),
     #[error("serialization error")]
@@ -84,9 +85,17 @@ pub enum CompileError {
     Other(#[from] Box<dyn std::error::Error>),
     #[error("config does not exist for '{lang_code}'")]
     ConfigDoesNotExist { lang_code: String },
+    #[error("regex compilation error: {0}")]
+    Regex(#[from] onig::Error),
+    #[error("unexpected condition: {0}")]
+    Unexpected(String),
+    #[error("feature not implemented: {0}")]
+    Unimplemented(String),
+    #[error("error parsing to integer: {0}")]
+    ParseError(#[from] ParseIntError),
 }
 
-pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
+pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
     let paths = BuildFilePaths::new(&opts.build_dir);
 
     let lang_code = fs::read_to_string(paths.lang_code_path)?;
@@ -101,13 +110,13 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         .collect();
 
     let tokenizer_options = utils::tokenizer_options(&lang_code)
-        .ok_or_else(|| CompileError::ConfigDoesNotExist {
+        .ok_or_else(|| Error::ConfigDoesNotExist {
             lang_code: lang_code.clone(),
         })?
         .clone();
 
     let rules_options = utils::rules_options(&lang_code)
-        .ok_or_else(|| CompileError::ConfigDoesNotExist {
+        .ok_or_else(|| Error::ConfigDoesNotExist {
             lang_code: lang_code.clone(),
         })?
         .clone();
@@ -150,7 +159,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
     let chunker = if paths.chunker_path.exists() {
         info!("{} exists. Building chunker.", paths.chunker_path.display());
         let reader = BufReader::new(File::open(paths.chunker_path)?);
-        let chunker = Chunker::from_json(reader);
+        let chunker = Chunker::from_json(reader)?;
         Some(chunker)
     } else {
         None
@@ -163,7 +172,7 @@ pub fn compile(opts: &BuildOptions) -> Result<(), CompileError> {
         Some(MultiwordTagger::from_dump(
             paths.multiword_tag_path,
             &build_info,
-        ))
+        )?)
     } else {
         None
     };

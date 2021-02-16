@@ -68,7 +68,7 @@ fn get_token_strs<'t>(
     let extra_regexes = EXTRA_REGEXES.get_or_init(|| {
         extra_join_regexes
             .iter()
-            .map(|string| Regex::new(string).unwrap())
+            .map(|string| Regex::new(string).expect("`extra_join_regexes` must be valid"))
             .collect()
     });
 
@@ -192,7 +192,7 @@ pub struct Tokenizer {
 
 impl Tokenizer {
     /// Creates a new tokenizer set from a path to a binary.
-    /// 
+    ///
     /// # Panics
     /// - If the file can not be opened.
     pub fn new<P: AsRef<Path>>(p: P) -> bincode::Result<Self> {
@@ -351,16 +351,12 @@ mod tests {
     use super::Tokenizer;
     use lazy_static::lazy_static;
     use quickcheck_macros::quickcheck;
-    use std::fs::File;
-    use std::io::BufReader;
 
     #[quickcheck]
     fn can_tokenize_anything(text: String) -> bool {
         lazy_static! {
-            static ref TOKENIZER: Tokenizer = {
-                let reader = BufReader::new(File::open("../storage/en_tokenizer.bin").unwrap());
-                bincode::deserialize_from(reader).unwrap()
-            };
+            static ref TOKENIZER: Tokenizer =
+                Tokenizer::new("../storage/en_tokenizer.bin").unwrap();
         }
 
         TOKENIZER.tokenize(&text);

@@ -524,7 +524,7 @@ impl MaxentChunker {
     #[allow(clippy::manual_strip)]
     fn valid(&self, _input: &[(&str, &str)], outcomes: &[&str], _i: usize, outcome: &str) -> bool {
         if outcome.starts_with("I-") {
-            if let Some(prev_outcome) = outcomes.iter().rev().next() {
+            if let Some(prev_outcome) = outcomes.iter().next_back() {
                 // can byte index here because "I, B, E, -" are all 1 byte
                 *prev_outcome == "O" || prev_outcome[2..] == outcome[2..]
             } else {

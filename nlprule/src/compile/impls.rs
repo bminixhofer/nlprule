@@ -1,9 +1,8 @@
 use std::{
     collections::HashMap,
-    error::Error,
     fs::File,
     hash::{Hash, Hasher},
-    io::{BufRead, BufReader},
+    io::{self, BufRead, BufReader},
     path::Path,
 };
 
@@ -23,18 +22,18 @@ use crate::{
         Tokenizer, TokenizerOptions,
     },
     types::*,
-    utils::parallelism::MaybeParallelIterator,
+    utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
 };
 
-use super::parse_structure::BuildInfo;
+use super::{parse_structure::BuildInfo, Error};
 
 impl MultiwordTagger {
-    pub fn from_dump<P: AsRef<Path>>(dump: P, info: &BuildInfo) -> Self {
-        let reader = BufReader::new(File::open(dump).unwrap());
+    pub fn from_dump<P: AsRef<Path>>(dump: P, info: &BuildInfo) -> Result<Self, io::Error> {
+        let reader = BufReader::new(File::open(dump)?);
         let mut multiwords = Vec::new();
 
         for line in reader.lines() {
-            let line = line.unwrap();
+            let line = line?;
 
             // strip comments
             let line = &line[..line.find('#').unwrap_or_else(|| line.len())].trim();
@@ -51,7 +50,7 @@ impl MultiwordTagger {
             multiwords.push((word, pos));
         }
 
-        (MultiwordTaggerFields { multiwords }).into()
+        Ok((MultiwordTaggerFields { multiwords }).into())
     }
 }
 
@@ -206,7 +205,7 @@ impl Tokenizer {
         multiword_tagger: Option<MultiwordTagger>,
         sentencizer: srx::Rules,
         options: TokenizerOptions,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, Error> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
 
@@ -256,7 +255,10 @@ impl Tokenizer {
             if options.allow_errors {
                 warn!("Error constructing Disambiguator: {}", x)
             } else {
-                return Err(format!("Error constructing Disambiguator: {}", x).into());
+                return Err(Error::Unexpected(format!(
+                    "Error constructing Disambiguator: {}",
+                    x
+                )));
             }
         }
 
@@ -306,7 +308,7 @@ impl From<ModelData> for chunk::Model {
 }
 
 impl chunk::Chunker {
-    pub fn from_json<R: std::io::Read>(reader: R) -> chunk::Chunker {
+    pub fn from_json<R: std::io::Read>(reader: R) -> Result<chunk::Chunker, serde_json::Error> {
         #[derive(Serialize, Deserialize)]
         struct ChunkData {
             token_model: ModelData,
@@ -315,8 +317,8 @@ impl chunk::Chunker {
             chunk_model: ModelData,
         }
 
-        let chunk_data: ChunkData = serde_json::from_reader(reader).unwrap();
-        chunk::Chunker {
+        let chunk_data: ChunkData = serde_json::from_reader(reader)?;
+        Ok(chunk::Chunker {
             token_model: chunk::MaxentTokenizer {
                 model: chunk_data.token_model.into(),
             },
@@ -327,13 +329,65 @@ impl chunk::Chunker {
             chunk_model: chunk::MaxentChunker {
                 model: chunk_data.chunk_model.into(),
             },
-        }
+        })
     }
 }
 
 impl POSFilter {
     pub fn new(matcher: PosMatcher) -> Self {
         POSFilter { matcher }
+    }
+}
+
+impl SerializeRegex {
+    pub fn new(
+        regex_str: &str,
+        must_fully_match: bool,
+        case_sensitive: bool,
+    ) -> Result<Self, Error> {
+        fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
+            let placeholder = "###escaped_backslash###";
+
+            string
+                .as_ref()
+                .replace(r"\\", placeholder)
+                .replace(&format!(r"\{}", c), c)
+                .replace(placeholder, r"\\")
+        }
+
+        // TODO: more exhaustive backslash check
+        let mut fixed = unescape(unescape(unescape(regex_str, "!"), ","), "/");
+        let mut case_sensitive = case_sensitive;
+
+        fixed = fixed
+            .replace("\\\\s", "###backslash_before_s###")
+            .replace("\\$", "###escaped_dollar###")
+            // apparently \s in Java regexes only matches an actual space, not e.g non-breaking space
+            .replace("\\s", " ")
+            .replace("$+", "$")
+            .replace("$?", "$")
+            .replace("$*", "$")
+            .replace("###escaped_dollar###", "\\$")
+            .replace("###backslash_before_s###", "\\\\s");
+
+        for pattern in &["(?iu)", "(?i)"] {
+            if fixed.contains(pattern) {
+                case_sensitive = false;
+                fixed = fixed.replace(pattern, "");
+            }
+        }
+
+        let fixed = if must_fully_match {
+            format!("^({})$", fixed)
+        } else {
+            fixed
+        };
+
+        Ok(SerializeRegex {
+            regex: SerializeRegex::compile(&fixed, case_sensitive)?,
+            regex_str: fixed,
+            case_sensitive,
+        })
     }
 }
 
@@ -458,6 +512,67 @@ mod composition {
                 group_ids_to_idx,
                 can_stop_mask,
             }
+        }
+    }
+}
+
+pub mod filters {
+    use super::Error;
+    use std::collections::HashMap;
+
+    use crate::{filter::*, utils::regex::SerializeRegex};
+
+    trait FromArgs: Sized {
+        fn from_args(args: HashMap<String, String>) -> Result<Self, Error>;
+    }
+
+    impl FromArgs for NoDisambiguationEnglishPartialPosTagFilter {
+        fn from_args(args: HashMap<String, String>) -> Result<Self, Error> {
+            if args.contains_key("negate_postag") {
+                panic!("negate_postag not supported in NoDisambiguationEnglishPartialPosTagFilter");
+            }
+
+            Ok(NoDisambiguationEnglishPartialPosTagFilter {
+                index: args
+                    .get("no")
+                    .ok_or_else(|| {
+                        Error::Unexpected(
+                            "NoDisambiguationEnglishPartialPosTagFilter must have `no` argument"
+                                .into(),
+                        )
+                    })?
+                    .parse::<usize>()?,
+                regexp: SerializeRegex::new(
+                    &args.get("regexp").ok_or_else(|| {
+                        Error::Unexpected(
+                        "NoDisambiguationEnglishPartialPosTagFilter must have `regexp` argument"
+                            .into(),
+                    )
+                    })?,
+                    true,
+                    true,
+                )?,
+                postag_regexp: SerializeRegex::new(
+                    &args.get("postag_regexp").ok_or_else(|| {
+                        Error::Unexpected(
+                        "NoDisambiguationEnglishPartialPosTagFilter must have `postag_regexp` argument"
+                            .into(),
+                    )
+                    })?,
+                    true,
+                    true,
+                )?,
+                negate_postag: args.get("negate_postag").map_or(false, |x| x == "yes"),
+            })
+        }
+    }
+
+    pub fn get_filter(name: &str, args: HashMap<String, String>) -> Result<Filter, Error> {
+        match name {
+            "NoDisambiguationEnglishPartialPosTagFilter" => {
+                Ok(NoDisambiguationEnglishPartialPosTagFilter::from_args(args)?.into())
+            }
+            _ => Err(Error::Unexpected(format!("unsupported filter {}", name))),
         }
     }
 }
