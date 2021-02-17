@@ -278,7 +278,7 @@ impl Tokenizer {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct ModelData {
     outcome_labels: Vec<String>,
     pmap: DefaultHashMap<String, ContextData>,
@@ -314,7 +314,7 @@ impl From<ModelData> for chunk::Model {
 
 impl chunk::Chunker {
     pub fn from_json<R: std::io::Read>(reader: R) -> Result<chunk::Chunker, serde_json::Error> {
-        #[derive(Serialize, Deserialize)]
+        #[derive(Deserialize)]
         struct ChunkData {
             token_model: ModelData,
             pos_model: ModelData,

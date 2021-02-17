@@ -20,40 +20,7 @@ fn softmax(vec: &mut Vec<f32>) {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ContextFields {
-    parameters: Vec<bf16>,
-    outcomes: Vec<u16>,
-}
-
-impl From<Context> for ContextFields {
-    fn from(context: Context) -> Self {
-        ContextFields {
-            parameters: context.parameters.into_iter().map(bf16::from_f32).collect(),
-            outcomes: context
-                .outcomes
-                .into_iter()
-                .map(|x| {
-                    assert!(x <= std::u16::MAX as usize);
-
-                    x as u16
-                })
-                .collect(),
-        }
-    }
-}
-
-impl From<ContextFields> for Context {
-    fn from(data: ContextFields) -> Self {
-        Context {
-            parameters: data.parameters.into_iter().map(|x| x.to_f32()).collect(),
-            outcomes: data.outcomes.into_iter().map(|x| x as usize).collect(),
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(from = "ContextFields", into = "ContextFields")]
 pub(crate) struct Context {
     pub(crate) parameters: Vec<f32>,
     pub(crate) outcomes: Vec<usize>,
@@ -155,6 +122,85 @@ pub(crate) mod hash {
 }
 
 #[derive(Serialize, Deserialize)]
+struct ModelFields {
+    outcome_labels: Vec<String>,
+    // stores each hash and the length of the context of the hash
+    // this is kind of close to gzip compression already and it is difficult
+    // where to draw the line. The chunker model should have a custom
+    // serialization implementation anyway for bf16 compression so this is OK here.
+    cols: Vec<(u64, u8)>,
+    // stores the context outcome labels
+    rows: Vec<u8>,
+    // stores the context parameter values
+    values: Vec<bf16>,
+}
+
+impl From<Model> for ModelFields {
+    fn from(model: Model) -> Self {
+        let mut cols = Vec::new();
+        let mut rows = Vec::new();
+        let mut values = Vec::new();
+
+        for (key, context) in model.pmap.iter() {
+            assert_eq!(context.outcomes.len(), context.parameters.len());
+            assert!(context.outcomes.len() <= std::u8::MAX as usize);
+            cols.push((*key, context.outcomes.len() as u8));
+
+            for (label, value) in context.outcomes.iter().zip(context.parameters.iter()) {
+                assert!(*label <= std::u8::MAX as usize);
+
+                rows.push(*label as u8);
+                values.push(bf16::from_f32(*value));
+            }
+        }
+
+        ModelFields {
+            outcome_labels: model.outcome_labels,
+            cols,
+            rows,
+            values,
+        }
+    }
+}
+
+impl From<ModelFields> for Model {
+    fn from(data: ModelFields) -> Self {
+        let mut pmap = DefaultHashMap::new();
+
+        let mut row_iter = data.rows.iter();
+        let mut value_iter = data.values.iter();
+
+        for (key, n) in data.cols.iter() {
+            let outcomes: Vec<_> = (0..*n as usize)
+                .map(|_| *row_iter.next().expect("checked in From<Model> impl") as usize)
+                .collect();
+            let parameters: Vec<_> = (0..*n as usize)
+                .map(|_| {
+                    value_iter
+                        .next()
+                        .expect("checked in From<Model> impl")
+                        .to_f32()
+                })
+                .collect();
+
+            pmap.insert(
+                *key,
+                Context {
+                    outcomes,
+                    parameters,
+                },
+            );
+        }
+
+        Model {
+            outcome_labels: data.outcome_labels,
+            pmap,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(from = "ModelFields", into = "ModelFields")]
 pub(crate) struct Model {
     pub(crate) outcome_labels: Vec<String>,
     pub(crate) pmap: DefaultHashMap<u64, Context>,
