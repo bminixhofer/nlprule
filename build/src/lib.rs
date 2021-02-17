@@ -4,8 +4,8 @@
 use flate2::read::GzDecoder;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::{
-    fs,
-    io::{self, Cursor, Read},
+    fs::{self, File},
+    io::{self, BufWriter, Cursor, Read},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -19,6 +19,8 @@ pub enum Error {
     IOError(#[from] io::Error),
     #[error("zip error: {0}")]
     ZipError(#[from] ZipError),
+    #[error("error postprocessing binaries: {0}")]
+    PostprocessingError(Box<dyn std::error::Error>),
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
@@ -331,10 +333,70 @@ impl BinaryBuilder {
     pub fn outputs(&self) -> &[PathBuf] {
         &self.outputs
     }
+
+    /// Applies the given postprocessing function to the binaries e. g. for compression.
+    /// Modifies the output path by the given path function.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use nlprule_build::BinaryBuilder;
+    /// # use std::io::Write;
+    /// # let tempdir = tempdir::TempDir::new("builder_test")?;
+    /// # let tempdir = tempdir.path();
+    /// #
+    /// # let mut builder = BinaryBuilder::new(Some(&["en"]), tempdir).version("0.3.0");
+    /// builder
+    ///    .build()
+    ///    .validate()
+    ///    .postprocess(
+    ///        |buffer, writer| {
+    ///            Ok(
+    ///                flate2::write::GzEncoder::new(writer, flate2::Compression::default())
+    ///                    .write_all(&buffer)?,
+    ///            )
+    ///        },
+    ///        |p| {
+    ///            let mut path = p.as_os_str().to_os_string();
+    ///            path.push(".gz");
+    ///            path
+    ///        },
+    ///    )?;
+    /// # Ok::<(), nlprule_build::Error>(())
+    /// ```
+    pub fn postprocess<F, C, P: AsRef<Path>>(
+        mut self,
+        proc_fn: C,
+        path_fn: F,
+    ) -> Result<Self, Error>
+    where
+        C: Fn(Vec<u8>, BufWriter<File>) -> Result<(), Box<dyn std::error::Error>>,
+        F: Fn(PathBuf) -> P,
+    {
+        for (i, path) in self.outputs.to_vec().iter().enumerate() {
+            let buffer = fs::read(&path)?;
+
+            let new_path = path_fn(path.clone());
+            let new_path = new_path.as_ref();
+
+            let writer = BufWriter::new(File::create(new_path)?);
+
+            proc_fn(buffer, writer).map_err(Error::PostprocessingError)?;
+
+            if new_path != path {
+                self.outputs[i] = new_path.to_path_buf();
+                fs::remove_file(path)?;
+            }
+        }
+
+        Ok(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use io::Write;
+
     use super::*;
 
     #[test]
@@ -378,6 +440,82 @@ mod tests {
         BinaryBuilder::new(Some(&["en"]), tempdir)
             .version("0.3.0")
             .build();
+
+        Ok(())
+    }
+
+    #[test]
+    fn binary_builder_works_with_smush() -> Result<(), Error> {
+        let tempdir = tempdir::TempDir::new("builder_test")?;
+        let tempdir = tempdir.path();
+
+        BinaryBuilder::new(Some(&["en"]), tempdir)
+            .version("0.3.0")
+            .build()
+            .postprocess(
+                |buffer, mut writer| {
+                    Ok(writer.write_all(&smush::encode(
+                        &buffer,
+                        smush::Codec::Gzip,
+                        smush::Quality::Default,
+                    )?)?)
+                },
+                |p| {
+                    let mut path = p.as_os_str().to_os_string();
+                    path.push(".gz");
+                    path
+                },
+            )?;
+
+        let tokenizer_path = tempdir
+            .join(Path::new(&tokenizer_filename("en")))
+            .with_extension("bin.gz");
+        assert!(tokenizer_path.exists());
+        smush::decode(&fs::read(tokenizer_path)?, smush::Codec::Gzip).unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn binary_builder_works_with_flate2() -> Result<(), Error> {
+        let tempdir = tempdir::TempDir::new("builder_test")?;
+        let tempdir = tempdir.path();
+
+        let builder = BinaryBuilder::new(Some(&["en"]), tempdir)
+            .version("0.3.0")
+            .build()
+            .postprocess(
+                |buffer, writer| {
+                    Ok(
+                        flate2::write::GzEncoder::new(writer, flate2::Compression::default())
+                            .write_all(&buffer)?,
+                    )
+                },
+                |p| {
+                    let mut path = p.as_os_str().to_os_string();
+                    path.push(".gz");
+                    path
+                },
+            )?;
+
+        assert_eq!(
+            builder.outputs(),
+            &[
+                tempdir.join("en_tokenizer.bin.gz"),
+                tempdir.join("en_rules.bin.gz")
+            ]
+        );
+
+        let rules_path = tempdir
+            .join(Path::new(&rules_filename("en")))
+            .with_extension("bin.gz");
+        assert!(rules_path.exists());
+
+        let encoded = fs::read(rules_path)?;
+        let mut decoder = flate2::read::GzDecoder::new(&encoded[..]);
+
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).unwrap();
 
         Ok(())
     }
