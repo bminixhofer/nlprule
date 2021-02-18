@@ -1,27 +1,32 @@
 //! This crate provides a builder to make it easier to use the correct binaries for [nlprule](https://github.com/bminixhofer/nlprule).
 //! See `README.md` for details.
 
-use flate2::read::GzDecoder;
+use flate2::bufread::GzDecoder;
+use io::BufReader;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::{
-    fs::{self, File},
     io::{self, BufWriter, Cursor, Read},
     path::{Path, PathBuf},
+    result,
 };
-use thiserror::Error;
 use zip::result::ZipError;
+use fs_err as fs;
+use fs::File;
+use std::fs::Permissions;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("request error: {0}")]
+    #[error(transparent)]
     RequestError(#[from] reqwest::Error),
-    #[error("i/o error: {0}")]
+    #[error(transparent)]
     IOError(#[from] io::Error),
-    #[error("zip error: {0}")]
+    #[error(transparent)]
     ZipError(#[from] ZipError),
     #[error("error postprocessing binaries: {0}")]
-    PostprocessingError(Box<dyn std::error::Error>),
+    PostprocessingError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Binary {
@@ -46,7 +51,7 @@ pub fn get_binary<P: AsRef<Path>>(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<P>,
-) -> Result<impl Read, Error> {
+) -> Result<Box<dyn Read + Send>> {
     let filename = binary.filename(lang_code);
 
     let mut cache_path: Option<PathBuf> = None;
@@ -58,7 +63,7 @@ pub fn get_binary<P: AsRef<Path>>(
     // if the file can be read, the data is already cached
     if let Some(path) = &cache_path {
         if let Ok(bytes) = fs::read(path) {
-            return Ok(Cursor::new(bytes));
+            return Ok(Box::new(Cursor::new(bytes)));
         }
     }
 
@@ -80,10 +85,10 @@ pub fn get_binary<P: AsRef<Path>>(
         fs::write(path, &buffer)?;
     }
 
-    Ok(Cursor::new(buffer))
+    Ok(Box::new(Cursor::new(buffer)))
 }
 
-pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), Error> {
+pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<()> {
     let bytes = reqwest::blocking::get(&format!(
         "https://f000.backblazeb2.com/file/nlprule/{}.zip",
         lang_code
@@ -123,7 +128,7 @@ pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<(), 
             use std::os::unix::fs::PermissionsExt;
 
             if let Some(mode) = file.unix_mode() {
-                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
+                fs::set_permissions(&outpath, Permissions::from_mode(mode))?;
             }
         }
     }
@@ -139,7 +144,6 @@ pub fn supported_language_codes() -> Vec<&'static str> {
 }
 
 /// Places all nlprule binaries for the given languages in some directory.
-#[derive(Debug)]
 pub struct BinaryBuilder {
     language_codes: Vec<String>,
     out_dir: PathBuf,
@@ -148,37 +152,48 @@ pub struct BinaryBuilder {
     fallback_to_build_dir: bool,
     build_dir: Option<PathBuf>,
     outputs: Vec<PathBuf>,
+    transform_data_func: Option<Box<dyn Fn(BufReader<Box<dyn Read + Send>>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>>>,
+    transform_path_func: Option<Box<dyn Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>>>,
 }
 
 impl BinaryBuilder {
+
     /// Acquires the rule and tokenizer binaries for one language by:
     /// - Trying to download them from their distribution source (or load them local cache).
     /// - If they are not found (i. e. a dev version of nlprule is used) and `fallback_to_build_dir`is true
     /// downloads the latest build directory  and builds the binaries from it.
     /// This can still fail if the dev version is sufficiently outdated for the latest build dir.
     /// In that case, the user can't be helped.
-    fn build_language(&mut self, lang_code: &str) {
+    fn build_language(&mut self, lang_code: &str) -> Result<()> {
         let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
         let rules_out = self.out_dir.join(rules_filename(lang_code));
 
         let mut did_not_find_binaries = false;
 
-        for (binary, out) in [
+        for (binary, out) in vec![
             (Binary::Tokenizer, &tokenizer_out),
             (Binary::Rules, &rules_out),
         ]
-        .iter()
         {
-            let response = get_binary(&self.version, lang_code, *binary, self.cache_dir.as_ref());
+            let response = get_binary(&self.version, lang_code, binary, self.cache_dir.as_ref());
 
             (match response {
-                Ok(mut reader) => {
-                    let mut bytes = Vec::new();
-                    reader
-                        .read_to_end(&mut bytes)
-                        .expect("reading binary bytes failed");
+                Ok(reader) => {
+                    let out = out.to_owned();
+                    let dest = if let Some(ref fx) = self.transform_path_func {
+                        fx(out)?
+                    } else {
+                        out
+                    };
+                    let dest = fs::OpenOptions::new().create(true).truncate(true).write(true).open(&dest)?;
+                    let mut dest = BufWriter::new(dest);
 
-                    fs::write(out, bytes).expect("writing binary to file failed");
+                    let mut reader = BufReader::new(reader);
+                    if let Some(ref fx) = self.transform_data_func {
+                        fx(reader, dest)?;
+                    } else {
+                        io::copy(&mut reader, &mut dest)?;
+                    }
 
                     Ok(())
                 }
@@ -192,8 +207,7 @@ impl BinaryBuilder {
                     Err(error.into())
                 }
                 Err(x) => Err(x),
-            })
-            .expect("error loading binary")
+            })?;
         }
 
         if did_not_find_binaries && self.fallback_to_build_dir {
@@ -227,21 +241,21 @@ impl BinaryBuilder {
 
         self.outputs.push(tokenizer_out);
         self.outputs.push(rules_out);
+        Ok(())
     }
 
     /// Creates a new binary builder. `language_codes` must be in ISO 639-1 (two-letter) format.
-    /// If `language_codes` is `None`, uses all supported languages.
+    /// If `language_codes` is `&[]`, uses all supported languages.
     /// If this is used in a `build.rs`, `out_dir` should probably be the OUT_DIR environment variable.
-    pub fn new<P: AsRef<Path>>(language_codes: Option<&[&str]>, out_dir: P) -> Self {
-        let language_codes: Vec<_> = language_codes.map_or_else(
-            || {
-                supported_language_codes()
+    pub fn new<P: AsRef<Path>>(language_codes: &[&str], out_dir: P) -> Self {
+        let language_codes: Vec<_> = if language_codes.is_empty() {
+            supported_language_codes()
                     .into_iter()
                     .map(|x| x.to_owned())
                     .collect()
-            },
-            |x| x.iter().map(|x| x.to_string()).collect(),
-        );
+        } else {
+            language_codes.into_iter().map(ToOwned::to_owned).map(ToOwned::to_owned).collect::<Vec<String>>()
+        };
 
         let project_dir = directories::ProjectDirs::from("", "", "nlprule");
         // this should be CARGO_ARTIFACT_DIR once it is merged: https://github.com/rust-lang/rfcs/pull/3035
@@ -258,6 +272,8 @@ impl BinaryBuilder {
             fallback_to_build_dir: false,
             build_dir,
             outputs: Vec::new(),
+            transform_data_func: None,
+            transform_path_func: None,
         }
     }
 
@@ -297,11 +313,11 @@ impl BinaryBuilder {
     }
 
     /// Builds by {downloading, copying, building} the binaries to the out directory.
-    pub fn build(mut self) -> Self {
-        for lang_code in self.language_codes[..].to_vec() {
-            self.build_language(&lang_code);
-        }
-        self
+    pub fn build(mut self) -> Result<Self> {
+        self.language_codes.clone().into_iter().try_for_each(|lang_code| {
+            self.build_language(&lang_code)
+        })?;
+        Ok(self)
     }
 
     /// Validates the binaries by checking if they can be loaded by nlprule.
@@ -332,6 +348,30 @@ impl BinaryBuilder {
     /// Gets the paths to all files this builder created.
     pub fn outputs(&self) -> &[PathBuf] {
         &self.outputs
+    }
+
+
+    /// Applies the given transformation before placing a binencoded file into the cache
+    /// Allows for easier compression usage.
+    /// Modifies the cached path by the given path function.
+    ///
+    /// The resulting files will then reside in the given cache dir if any.
+    ///
+    /// Attention: Any compression applied here, must be undone in the
+    /// `fn postprocess` provided closure to retain the original binenc file
+    /// to be consumed by the application code.
+    pub fn transform<F, C, P: AsRef<Path>, Q: AsRef<Path>>(
+        mut self,
+        proc_fn: C,
+        path_fn: F,
+    ) -> Self
+    where
+        C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
+        F: Fn(PathBuf) -> P,
+    {
+        self.transform_data_func = Some(Box::new(proc_fn));
+        self.transform_path_func = Some(Box::new(path_fn));
+        self
     }
 
     /// Applies the given postprocessing function to the binaries e. g. for compression.
@@ -368,20 +408,20 @@ impl BinaryBuilder {
         mut self,
         proc_fn: C,
         path_fn: F,
-    ) -> Result<Self, Error>
+    ) -> Result<Self>
     where
-        C: Fn(Vec<u8>, BufWriter<File>) -> Result<(), Box<dyn std::error::Error>>,
+        C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
         F: Fn(PathBuf) -> P,
     {
         for (i, path) in self.outputs.to_vec().iter().enumerate() {
-            let buffer = fs::read(&path)?;
+            let reader = BufReader::new(fs::File::open(&path)?);
 
             let new_path = path_fn(path.clone());
             let new_path = new_path.as_ref();
 
             let writer = BufWriter::new(File::create(new_path)?);
 
-            proc_fn(buffer, writer).map_err(Error::PostprocessingError)?;
+            proc_fn(reader, writer).map_err(Error::PostprocessingError)?;
 
             if new_path != path {
                 self.outputs[i] = new_path.to_path_buf();
@@ -400,7 +440,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn getting_binary_works() -> Result<(), Error> {
+    fn getting_binary_works() -> Result<()> {
         // this is nice to keep roughly in sync with the latest released version but it is not necessary
         get_binary::<String>("0.3.0", "en", Binary::Rules, None)?;
 
@@ -408,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn getting_build_dir_works() -> Result<(), Error> {
+    fn getting_build_dir_works() -> Result<()> {
         let tempdir = tempdir::TempDir::new("build_dir_test")?;
         let tempdir = tempdir.path();
 
@@ -420,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_builder_works() -> Result<(), Error> {
+    fn binary_builder_works() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
@@ -433,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_builder_works_with_released_version() -> Result<(), Error> {
+    fn binary_builder_works_with_released_version() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
@@ -445,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_builder_works_with_smush() -> Result<(), Error> {
+    fn binary_builder_works_with_smush() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
@@ -477,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_builder_works_with_flate2() -> Result<(), Error> {
+    fn binary_builder_works_with_flate2() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
