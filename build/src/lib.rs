@@ -2,16 +2,16 @@
 //! See `README.md` for details.
 
 use flate2::bufread::GzDecoder;
+use fs::File;
+use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
+use std::fs::Permissions;
 use std::{
-    io::{self, BufWriter, Cursor, Read, BufReader, SeekFrom, Seek},
+    io::{self, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     result,
 };
 use zip::result::ZipError;
-use fs_err as fs;
-use fs::File;
-use std::fs::Permissions;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -31,21 +31,33 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformDataFn<I: Read>: for<'r> Fn(I, Cursor<&'r mut Vec<u8>>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {}
+pub trait TransformDataFn<I: Read>:
+    for<'r> Fn(
+    I,
+    Cursor<&'r mut Vec<u8>>,
+) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+{
+}
 
-impl<T,I: Read> TransformDataFn<I> for T
-where
-    T: for<'r> Fn(I, Cursor<&'r mut Vec<u8>>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {}
-
+impl<T, I: Read> TransformDataFn<I> for T where
+    T: for<'r> Fn(
+        I,
+        Cursor<&'r mut Vec<u8>>,
+    ) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+{
+}
 
 /// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformPathFn: Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>> {}
+pub trait TransformPathFn:
+    Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>
+{
+}
 
-impl<T> TransformPathFn for T
-where
-    T: Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>> {}
+impl<T> TransformPathFn for T where
+    T: Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>
+{
+}
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Binary {
@@ -79,13 +91,13 @@ fn obtain_binary_from_github_release(
         "https://github.com/bminixhofer/nlprule/releases/download/{}/{}.gz",
         version, filename
     ))?
-    .error_for_status().map_err(|e| {
+    .error_for_status()
+    .map_err(|e| {
         if let Some(404) = e.status().map(|x| x.as_u16()) {
             Error::BinariesNotFound
         } else {
             e.into()
         }
-
     })?
     .bytes()?;
 
@@ -96,7 +108,6 @@ fn obtain_binary_from_github_release(
     Ok(Cursor::new(buffer))
 }
 
-
 fn construct_cache_path(
     version: &str,
     lang_code: &str,
@@ -106,16 +117,17 @@ fn construct_cache_path(
 ) -> Result<Option<PathBuf>> {
     let filename = binary.filename(lang_code);
 
-    cache_dir.map(move |dir| {
-        let path = dir.join(version).join(lang_code).join(&filename);
-        Ok(if let Some(transform_path_fn) = transform_path_fn {
-            transform_path_fn(path)?
-        } else {
-            path
+    cache_dir
+        .map(move |dir| {
+            let path = dir.join(version).join(lang_code).join(&filename);
+            Ok(if let Some(transform_path_fn) = transform_path_fn {
+                transform_path_fn(path)?
+            } else {
+                path
+            })
         })
-    }).transpose()
+        .transpose()
 }
-
 
 /// Returns a `dyn Read` type, that is either directly feed
 /// from an in-memory slice or from the on disk cache.
@@ -131,7 +143,13 @@ fn obtain_binary_cache_or_github(
     transform_path_fn: Option<&Box<dyn TransformPathFn>>,
     transform_data_fn: Option<&Box<dyn TransformDataFn<Cursor<Vec<u8>>>>>,
 ) -> Result<Cursor<Vec<u8>>> {
-    let cache_path = construct_cache_path(version, lang_code, binary, cache_dir.clone(), transform_path_fn)?;
+    let cache_path = construct_cache_path(
+        version,
+        lang_code,
+        binary,
+        cache_dir.clone(),
+        transform_path_fn,
+    )?;
 
     // if the file can be read, the data is already cached and the transform was applied before
     if let Some(ref cache_path) = cache_path {
@@ -158,7 +176,11 @@ fn obtain_binary_cache_or_github(
     // update the cache entry
     if let Some(ref cache_path) = cache_path {
         fs::create_dir_all(cache_path.parent().expect("path must have parent"))?;
-        let mut cache_file = fs::OpenOptions::new().truncate(true).create(true).write(true).open(cache_path)?;
+        let mut cache_file = fs::OpenOptions::new()
+            .truncate(true)
+            .create(true)
+            .write(true)
+            .open(cache_path)?;
         io::copy(&mut reader_transformed, &mut cache_file)?;
     }
 
@@ -168,7 +190,6 @@ fn obtain_binary_cache_or_github(
     Ok(reader_transformed)
 }
 
-
 fn assure_binary_availability(
     version: &str,
     lang_code: &str,
@@ -177,12 +198,21 @@ fn assure_binary_availability(
     transform_path_fn: Option<&Box<dyn TransformPathFn>>,
     transform_data_fn: Option<&Box<dyn TransformDataFn<Cursor<Vec<u8>>>>>,
     out: PathBuf,
-    ) -> Result<()> {
+) -> Result<()> {
+    let mut source = obtain_binary_cache_or_github(
+        version,
+        lang_code,
+        binary,
+        cache_dir,
+        transform_path_fn,
+        transform_data_fn,
+    )?;
 
-    let mut source = obtain_binary_cache_or_github(version, lang_code, binary, cache_dir,
-         transform_path_fn, transform_data_fn)?;
-
-    let mut out_file = fs::OpenOptions::new().truncate(true).create(true).write(true).open(out)?;
+    let mut out_file = fs::OpenOptions::new()
+        .truncate(true)
+        .create(true)
+        .write(true)
+        .open(out)?;
     io::copy(&mut source, &mut out_file)?;
     Ok(())
 }
@@ -288,12 +318,17 @@ impl BinaryBuilder {
         for (binary, out) in vec![
             (Binary::Tokenizer, &tokenizer_out),
             (Binary::Rules, &rules_out),
-        ]
-        {
+        ] {
             let out = out.to_owned();
-            if let Err(e) = assure_binary_availability(&self.version,
-                lang_code, binary, self.cache_dir.as_ref(),
-                self.transform_path_fn.as_ref(), self.transform_data_fn.as_ref(), out) {
+            if let Err(e) = assure_binary_availability(
+                &self.version,
+                lang_code,
+                binary,
+                self.cache_dir.as_ref(),
+                self.transform_path_fn.as_ref(),
+                self.transform_data_fn.as_ref(),
+                out,
+            ) {
                 if let Error::BinariesNotFound = e {
                     did_not_find_binaries = true;
                     break;
@@ -341,11 +376,15 @@ impl BinaryBuilder {
     pub fn new<P: AsRef<Path>>(language_codes: &[&str], out_dir: P) -> Self {
         let language_codes: Vec<_> = if language_codes.is_empty() {
             supported_language_codes()
-                    .into_iter()
-                    .map(ToOwned::to_owned)
-                    .collect()
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .collect()
         } else {
-            language_codes.into_iter().map(ToOwned::to_owned).map(ToOwned::to_owned).collect::<Vec<String>>()
+            language_codes
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<String>>()
         };
 
         let project_dir = directories::ProjectDirs::from("", "", "nlprule");
@@ -405,9 +444,10 @@ impl BinaryBuilder {
 
     /// Builds by {downloading, copying, building} the binaries to the out directory.
     pub fn build(mut self) -> Result<Self> {
-        self.language_codes.clone().into_iter().try_for_each(|lang_code| {
-            self.build_language(&lang_code)
-        })?;
+        self.language_codes
+            .clone()
+            .into_iter()
+            .try_for_each(|lang_code| self.build_language(&lang_code))?;
         Ok(self)
     }
 
@@ -418,17 +458,9 @@ impl BinaryBuilder {
             let rules_out = self.out_dir.join(rules_filename(lang_code));
 
             nlprule::Rules::new(rules_out)
-                .map_err(|e| Error::ValidationFailed(
-                    lang_code.to_owned(),
-                    Binary::Rules,
-                    e
-                ))?;
+                .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Rules, e))?;
             nlprule::Tokenizer::new(tokenizer_out)
-                .map_err(|e| Error::ValidationFailed(
-                    lang_code.to_owned(),
-                    Binary::Tokenizer,
-                    e
-                ))?;
+                .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Tokenizer, e))?;
         }
 
         Ok(self)
@@ -439,7 +471,6 @@ impl BinaryBuilder {
         &self.outputs
     }
 
-
     /// Applies the given transformation before placing a binencoded file into the cache
     /// Allows for easier compression usage.
     /// Modifies the cached path by the given path function.
@@ -449,11 +480,7 @@ impl BinaryBuilder {
     /// Attention: Any compression applied here, must be undone in the
     /// `fn postprocess` provided closure to retain the original binenc file
     /// to be consumed by the application code.
-    pub fn transform<F, C>(
-        mut self,
-        proc_fn: C,
-        path_fn: F,
-    ) -> Self
+    pub fn transform<F, C>(mut self, proc_fn: C, path_fn: F) -> Self
     where
         C: TransformDataFn<Cursor<Vec<u8>>> + 'static,
         F: TransformPathFn + 'static,
@@ -493,13 +520,12 @@ impl BinaryBuilder {
     ///    )?;
     /// # Ok::<(), nlprule_build::Error>(())
     /// ```
-    pub fn postprocess<F, C, P>(
-        mut self,
-        proc_fn: C,
-        path_fn: F,
-    ) -> Result<Self>
+    pub fn postprocess<F, C, P>(mut self, proc_fn: C, path_fn: F) -> Result<Self>
     where
-        C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
+        C: Fn(
+            BufReader<File>,
+            BufWriter<File>,
+        ) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
         F: Fn(PathBuf) -> P,
         P: AsRef<Path>,
     {
@@ -525,7 +551,7 @@ impl BinaryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use brotli::{BrotliCompress, CompressorReader, enc::BrotliEncoderParams};
+    use brotli::{enc::BrotliEncoderParams, BrotliCompress, CompressorReader};
     use io::Write;
 
     use super::*;
@@ -657,8 +683,6 @@ mod tests {
         Ok(())
     }
 
-
-
     #[test]
     fn build_with_brotli_transform() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
@@ -666,9 +690,14 @@ mod tests {
 
         let builder = BinaryBuilder::new(&["en"], tempdir)
             .version("0.3.0")
-            .transform( |mut buffer: Cursor<Vec<u8>>, mut writer: Cursor<&'_ mut Vec<u8>>| {
+            .transform(
+                |mut buffer: Cursor<Vec<u8>>, mut writer: Cursor<&'_ mut Vec<u8>>| {
                     dbg!("transform pre");
-                    let data = smush::encode(buffer.into_inner().as_slice(), smush::Codec::Zstd, smush::Quality::Maximum)?;
+                    let data = smush::encode(
+                        buffer.into_inner().as_slice(),
+                        smush::Codec::Zstd,
+                        smush::Quality::Maximum,
+                    )?;
                     writer.write_all(&data)?;
 
                     // XXX hangs forever, not sure what's going on
@@ -676,11 +705,12 @@ mod tests {
                     dbg!("transform post");
                     Ok(())
                 },
-            |p: PathBuf| {
-                let mut s = p.to_string_lossy().to_string();
-                s.push_str(".zstd");
-                Ok(PathBuf::from(s))
-            })
+                |p: PathBuf| {
+                    let mut s = p.to_string_lossy().to_string();
+                    s.push_str(".zstd");
+                    Ok(PathBuf::from(s))
+                },
+            )
             .build()?
             .postprocess(
                 |mut buffer, mut writer| {
