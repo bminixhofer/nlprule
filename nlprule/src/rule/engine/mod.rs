@@ -1,5 +1,7 @@
-use crate::{types::*, utils::regex::SerializeRegex};
-use onig::FindCaptures;
+use crate::{
+    types::*,
+    utils::regex::{CapturesIter, Regex},
+};
 use serde::{Deserialize, Serialize};
 pub mod composition;
 
@@ -54,7 +56,7 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(SerializeRegex, DefaultHashMap<GraphId, usize>),
+    Text(Regex, DefaultHashMap<GraphId, usize>),
 }
 
 struct TokenMatches<'a> {
@@ -66,7 +68,7 @@ struct TokenMatches<'a> {
 struct TextMatches<'a, 't> {
     byte_idx_to_char_idx: DefaultHashMap<usize, usize>,
     id_to_idx: &'a DefaultHashMap<GraphId, usize>,
-    captures: FindCaptures<'a, 't>,
+    captures: CapturesIter<'a, 't>,
 }
 
 enum InnerMatches<'a: 't, 't> {
@@ -112,13 +114,13 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
                 let bi_to_ci = &inner.byte_idx_to_char_idx;
                 let mut groups = Vec::new();
 
-                for group in captures.iter_pos() {
+                for group in captures.iter() {
                     if let Some(group) = group {
                         let start = *bi_to_ci
-                            .get(&group.0)
+                            .get(&group.start())
                             .expect("byte index is at char boundary");
                         let end = *bi_to_ci
-                            .get(&group.1)
+                            .get(&group.end())
                             .expect("byte index is at char boundary");
 
                         groups.push(Group::new((start, end)));

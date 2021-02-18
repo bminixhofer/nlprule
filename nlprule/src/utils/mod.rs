@@ -26,14 +26,6 @@ pub fn is_uppercase(string: &str) -> bool {
     !string.chars().any(|x| x.is_lowercase())
 }
 
-// see https://github.com/rust-onig/rust-onig/issues/59#issuecomment-340160520
-pub fn dollar_replace(mut replacement: String, caps: &Captures) -> String {
-    for i in 1..caps.len() {
-        replacement = replacement.replace(&format!("${}", i), caps.at(i).unwrap_or(""));
-    }
-    replacement
-}
-
 // remove duplicate whitespaces
 pub fn normalize_whitespace(string: &str) -> String {
     lazy_static! {

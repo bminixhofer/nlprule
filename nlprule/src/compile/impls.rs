@@ -26,7 +26,7 @@ use crate::{
         Tokenizer, TokenizerOptions,
     },
     types::*,
-    utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
+    utils::{parallelism::MaybeParallelIterator, regex::Regex},
 };
 
 use super::{parse_structure::BuildInfo, Error};
@@ -344,10 +344,10 @@ impl POSFilter {
     }
 }
 
-impl SerializeRegex {
-    pub fn new(
+impl Regex {
+    pub fn from_java_regex(
         regex_str: &str,
-        must_fully_match: bool,
+        full_match: bool,
         case_sensitive: bool,
     ) -> Result<Self, Error> {
         fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
@@ -382,7 +382,7 @@ impl SerializeRegex {
             }
         }
 
-        let fixed = if must_fully_match {
+        let fixed = if full_match {
             format!("^({})$", fixed)
         } else {
             fixed
@@ -394,10 +394,9 @@ impl SerializeRegex {
             format!("(?i){}", fixed)
         };
 
-        Ok(SerializeRegex {
-            regex: SerializeRegex::compile(&fixed)?,
-            string: fixed,
-        })
+        let regex = Regex::new(fixed);
+        regex.try_compile().map_err(Error::Regex)?;
+        Ok(regex)
     }
 }
 
@@ -431,7 +430,7 @@ mod composition {
             AndAtom, Atom, Composition, FalseAtom, GraphId, NotAtom, OffsetAtom, OrAtom, Part,
             Quantifier, TrueAtom,
         },
-        utils::regex::SerializeRegex,
+        utils::regex::Regex,
     };
 
     impl Atom {
@@ -477,11 +476,11 @@ mod composition {
     }
 
     impl Matcher {
-        pub fn new_regex(regex: SerializeRegex, negate: bool, empty_always_false: bool) -> Self {
+        pub fn new_regex(regex: Regex, negate: bool, empty_always_false: bool) -> Self {
             Matcher {
                 matcher: either::Right(regex),
                 negate,
-                case_sensitive: true, // handled by regex
+                case_sensitive: true, // handled by regex, should maybe be an option
                 empty_always_false,
             }
         }
@@ -624,7 +623,7 @@ pub mod filters {
     use super::Error;
     use std::collections::HashMap;
 
-    use crate::{filter::*, rule::engine::Engine, utils::regex::SerializeRegex};
+    use crate::{filter::*, rule::engine::Engine, utils::regex::Regex};
 
     trait FromArgs: Sized {
         fn from_args(args: HashMap<String, String>, engine: &Engine) -> Result<Self, Error>;
@@ -646,7 +645,7 @@ pub mod filters {
                         )
                     })?
                     .parse::<usize>()?)?,
-                regexp: SerializeRegex::new(
+                regexp: Regex::from_java_regex(
                     &args.get("regexp").ok_or_else(|| {
                         Error::Unexpected(
                         "NoDisambiguationEnglishPartialPosTagFilter must have `regexp` argument"
@@ -656,7 +655,7 @@ pub mod filters {
                     true,
                     true,
                 )?,
-                postag_regexp: SerializeRegex::new(
+                postag_regexp: Regex::from_java_regex(
                     &args.get("postag_regexp").ok_or_else(|| {
                         Error::Unexpected(
                         "NoDisambiguationEnglishPartialPosTagFilter must have `postag_regexp` argument"

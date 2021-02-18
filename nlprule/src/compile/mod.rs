@@ -68,18 +68,18 @@ pub enum Error {
     JSON(#[from] serde_json::Error),
     #[error("error loading SRX")]
     SRX(#[from] srx::Error),
-    #[error("unknown error")]
-    Other(#[from] Box<dyn std::error::Error>),
     #[error("config does not exist for '{lang_code}'")]
     ConfigDoesNotExist { lang_code: String },
     #[error("regex compilation error: {0}")]
-    Regex(#[from] onig::Error),
+    Regex(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("unexpected condition: {0}")]
     Unexpected(String),
     #[error("feature not implemented: {0}")]
     Unimplemented(String),
     #[error("error parsing to integer: {0}")]
     ParseError(#[from] ParseIntError),
+    #[error("unknown error")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 pub fn compile(

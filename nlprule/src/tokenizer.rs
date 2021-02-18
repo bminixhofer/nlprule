@@ -6,7 +6,7 @@
 
 use crate::{
     types::*,
-    utils::{parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
+    utils::{parallelism::MaybeParallelRefIterator, regex::Regex},
     Error,
 };
 use serde::{Deserialize, Serialize};
@@ -90,7 +90,7 @@ pub struct TokenizerOptions {
     pub extra_split_chars: Vec<char>,
     /// Extra language-specific Regexes of which the matches will *not* be split into multiple tokens.
     #[serde(default)]
-    pub extra_join_regexes: Vec<SerializeRegex>,
+    pub extra_join_regexes: Vec<Regex>,
 }
 
 impl Default for TokenizerOptions {
@@ -222,10 +222,12 @@ impl Tokenizer {
         let mut joins = Vec::new();
 
         for regex in self.options.extra_join_regexes.iter() {
-            for (start, end) in regex.find_iter(text) {
-                if !joined_mask[start..end].iter().any(|x| *x) {
-                    joins.push(start..end);
-                    joined_mask[start..end].iter_mut().for_each(|x| *x = true);
+            for mat in regex.find_iter(text) {
+                if !joined_mask[mat.start()..mat.end()].iter().any(|x| *x) {
+                    joins.push(mat.start()..mat.end());
+                    joined_mask[mat.start()..mat.end()]
+                        .iter_mut()
+                        .for_each(|x| *x = true);
                 }
             }
         }
