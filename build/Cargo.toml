@@ -1,7 +1,7 @@
 [package]
 name = "nlprule-build"
 version = "0.4.5-pre"
-authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>"]
+authors = ["Benjamin Minixhofer <bminixhofer@gmail.com>", "Bernhard Schuster <bernhard@ahoi.io>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 description = "Build tools for a fast, low-resource Natural Language Processing and Error Correction library."

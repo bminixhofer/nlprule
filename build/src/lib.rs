@@ -2,10 +2,9 @@
 //! See `README.md` for details.
 
 use flate2::bufread::GzDecoder;
-use io::BufReader;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::{
-    io::{self, BufWriter, Cursor, Read},
+    io::{self, BufWriter, Cursor, Read, BufReader, SeekFrom, Seek},
     path::{Path, PathBuf},
     result,
 };
@@ -18,6 +17,8 @@ use std::fs::Permissions;
 pub enum Error {
     #[error(transparent)]
     RequestError(#[from] reqwest::Error),
+    #[error("Binaries were not found on the remote")]
+    BinariesNotFound,
     #[error(transparent)]
     IOError(#[from] io::Error),
     #[error(transparent)]
@@ -27,6 +28,13 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+
+/// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
+pub trait TransformDataFn: Fn(Box<dyn Read + Send>, Cursor<&mut Vec<u8>>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {}
+
+/// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer datasets.
+pub trait TransformPathFn: Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>> {}
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Binary {
@@ -45,47 +53,126 @@ impl Binary {
 
 /// Stores the binaries for the given language and version in out_dir.
 /// Tries downloading the binaries from their distribution source.
-/// Optionally caches them at some directory.
-pub fn get_binary<P: AsRef<Path>>(
+///
+/// This implicitly unpacks the originally gzip'd sources and returns
+/// an in-memory buffer.
+fn obtain_binary_from_github_release(
     version: &str,
     lang_code: &str,
     binary: Binary,
-    cache_dir: Option<P>,
-) -> Result<Box<dyn Read + Send>> {
+) -> Result<Cursor<Vec<u8>>> {
     let filename = binary.filename(lang_code);
-
-    let mut cache_path: Option<PathBuf> = None;
-
-    if let Some(dir) = cache_dir {
-        cache_path = Some(dir.as_ref().join(version).join(lang_code).join(&filename));
-    }
-
-    // if the file can be read, the data is already cached
-    if let Some(path) = &cache_path {
-        if let Ok(bytes) = fs::read(path) {
-            return Ok(Box::new(Cursor::new(bytes)));
-        }
-    }
 
     // ... otherwise, request the data from the URL ...
     let bytes = reqwest::blocking::get(&format!(
         "https://github.com/bminixhofer/nlprule/releases/download/{}/{}.gz",
         version, filename
     ))?
-    .error_for_status()?
+    .error_for_status().map_err(|e| {
+        if let Some(404) = e.status().map(|x| x.as_u16()) {
+            Error::BinariesNotFound
+        } else {
+            e.into()
+        }
+
+    })?
     .bytes()?;
 
     let mut gz = GzDecoder::new(&bytes[..]);
     let mut buffer = Vec::new();
     gz.read_to_end(&mut buffer)?;
 
-    // ... and then cache the data at the provided file, if one was found
-    if let Some(path) = &cache_path {
-        fs::create_dir_all(path.parent().expect("path must have parent"))?;
-        fs::write(path, &buffer)?;
+    Ok(Cursor::new(buffer))
+}
+
+
+fn construct_cache_path(
+    version: &str,
+    lang_code: &str,
+    binary: Binary,
+    cache_dir: Option<&PathBuf>,
+    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
+) -> Result<Option<PathBuf>> {
+    let filename = binary.filename(lang_code);
+
+    cache_dir.map(move |dir| {
+        let path = dir.join(version).join(lang_code).join(&filename);
+        Ok(if let Some(fx) = transform_path_fn {
+            fx(path)?
+        } else {
+            path
+        })
+    }).transpose()
+}
+
+
+/// Returns a `dyn Read` type, that is either directly feed
+/// from an in-memory slice or from the on disk cache.
+/// If the on-disk cache is disabled or is not present,
+/// it will attempt to download it via [`obtain_binary_from_github_release`].
+/// The data is then written into `dest`.
+/// Also updates the cache.
+fn obtain_binary_cache_or_github(
+    version: &str,
+    lang_code: &str,
+    binary: Binary,
+    cache_dir: Option<&PathBuf>,
+    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
+    transform_data_fn: Option<&Box<dyn TransformDataFn>>,
+) -> Result<Cursor<Vec<u8>>> {
+    let cache_path = construct_cache_path(version, lang_code, binary, cache_dir.clone(), transform_path_fn)?;
+
+    // if the file can be read, the data is already cached and the transform was applied before
+    if let Some(ref cache_path) = cache_path {
+        if let Ok(bytes) = fs::read(cache_path) {
+            if bytes.len() > 256 {
+                return Ok(Cursor::new(bytes));
+            }
+        }
     }
 
-    Ok(Box::new(Cursor::new(buffer)))
+    // the binencoded data from github
+    let reader_binenc = obtain_binary_from_github_release(version, lang_code, binary)?;
+
+    // apply the transform if any to an intermediate buffer
+    let mut reader_transformed = if let Some(fx) = transform_data_fn {
+        // TODO this is not optimal, the additional copy is a bit annoying
+        let mut intermediate = Vec::<u8>::with_capacity(4096 * 1024);
+        fx(Box::new(reader_binenc), Cursor::new(&mut intermediate))?;
+        Cursor::new(intermediate)
+    } else {
+        reader_binenc
+    };
+
+    // update the cache entry
+    if let Some(ref cache_path) = cache_path {
+        fs::create_dir_all(cache_path.parent().expect("path must have parent"))?;
+        let mut cache_file = fs::OpenOptions::new().truncate(true).create(true).write(true).open(cache_path)?;
+        io::copy(&mut reader_transformed, &mut cache_file)?;
+    }
+
+    // move the cursor back to the beginning
+    reader_transformed.seek(SeekFrom::Start(0_u64))?;
+
+    Ok(reader_transformed)
+}
+
+
+fn assure_binary_availability(
+    version: &str,
+    lang_code: &str,
+    binary: Binary,
+    cache_dir: Option<&PathBuf>,
+    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
+    transform_data_fn: Option<&Box<dyn TransformDataFn>>,
+    out: PathBuf,
+    ) -> Result<()> {
+
+    let mut source = obtain_binary_cache_or_github(version, lang_code, binary, cache_dir, transform_path_fn, transform_data_fn)?;
+
+    let mut out_file = fs::OpenOptions::new().truncate(true).create(true).write(true).open(out)?;
+    io::copy(&mut source, &mut out_file)?;
+    Ok(())
 }
 
 pub fn get_build_dir<P: AsRef<Path>>(lang_code: &str, out_dir: P) -> Result<()> {
@@ -152,21 +239,37 @@ pub struct BinaryBuilder {
     fallback_to_build_dir: bool,
     build_dir: Option<PathBuf>,
     outputs: Vec<PathBuf>,
-    transform_data_func: Option<Box<dyn Fn(BufReader<Box<dyn Read + Send>>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>>>,
-    transform_path_func: Option<Box<dyn Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>>>,
+    transform_data_fn: Option<Box<dyn TransformDataFn>>,
+    transform_path_fn: Option<Box<dyn TransformPathFn>>,
 }
 
 impl BinaryBuilder {
-
+    /// ```plain
+    /// github release resource --[fn transform]--> $cache_dir --[fn postprocess]--> $OUT_DIR/
+    /// ```
+    ///
+    /// ```plain
+    /// github release resource --[fn transform]--> $OUT_DIR --[fn postprocess]--> $OUT_DIR/
+    /// ```
+    ///
     /// Acquires the rule and tokenizer binaries for one language by:
     /// - Trying to download them from their distribution source (or load them local cache).
     /// - If they are not found (i. e. a dev version of nlprule is used) and `fallback_to_build_dir`is true
     /// downloads the latest build directory  and builds the binaries from it.
     /// This can still fail if the dev version is sufficiently outdated for the latest build dir.
-    /// In that case, the user can't be helped.
+    /// In that case, the user is encouraged to update to a release or a newer git sha.
     fn build_language(&mut self, lang_code: &str) -> Result<()> {
-        let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
-        let rules_out = self.out_dir.join(rules_filename(lang_code));
+        // adjust the destination path for now
+        let path_transform = |out: PathBuf| -> Result<PathBuf> {
+            Ok(if let Some(ref fx) = self.transform_path_fn {
+                fx(out)?
+            } else {
+                out
+            })
+        };
+
+        let tokenizer_out = path_transform(self.out_dir.join(tokenizer_filename(lang_code)))?;
+        let rules_out = path_transform(self.out_dir.join(rules_filename(lang_code)))?;
 
         let mut did_not_find_binaries = false;
 
@@ -175,39 +278,15 @@ impl BinaryBuilder {
             (Binary::Rules, &rules_out),
         ]
         {
-            let response = get_binary(&self.version, lang_code, binary, self.cache_dir.as_ref());
-
-            (match response {
-                Ok(reader) => {
-                    let out = out.to_owned();
-                    let dest = if let Some(ref fx) = self.transform_path_func {
-                        fx(out)?
-                    } else {
-                        out
-                    };
-                    let dest = fs::OpenOptions::new().create(true).truncate(true).write(true).open(&dest)?;
-                    let mut dest = BufWriter::new(dest);
-
-                    let mut reader = BufReader::new(reader);
-                    if let Some(ref fx) = self.transform_data_func {
-                        fx(reader, dest)?;
-                    } else {
-                        io::copy(&mut reader, &mut dest)?;
-                    }
-
-                    Ok(())
+            let out = out.to_owned();
+            if let Err(e) = assure_binary_availability(&self.version,
+                lang_code, binary, self.cache_dir.as_ref(),
+                self.transform_path_fn.as_ref(), self.transform_data_fn.as_ref(), out) {
+                if let Error::BinariesNotFound = e {
+                    did_not_find_binaries = true;
+                    break;
                 }
-                Err(Error::RequestError(error)) => {
-                    if let Some(404) = error.status().map(|x| x.as_u16()) {
-                        // binaries for this version are not distributed, fall back to building them
-                        did_not_find_binaries = true;
-                        break;
-                    }
-
-                    Err(error.into())
-                }
-                Err(x) => Err(x),
-            })?;
+            }
         }
 
         if did_not_find_binaries && self.fallback_to_build_dir {
@@ -251,7 +330,7 @@ impl BinaryBuilder {
         let language_codes: Vec<_> = if language_codes.is_empty() {
             supported_language_codes()
                     .into_iter()
-                    .map(|x| x.to_owned())
+                    .map(ToOwned::to_owned)
                     .collect()
         } else {
             language_codes.into_iter().map(ToOwned::to_owned).map(ToOwned::to_owned).collect::<Vec<String>>()
@@ -272,8 +351,8 @@ impl BinaryBuilder {
             fallback_to_build_dir: false,
             build_dir,
             outputs: Vec::new(),
-            transform_data_func: None,
-            transform_path_func: None,
+            transform_data_fn: None,
+            transform_path_fn: None,
         }
     }
 
@@ -366,11 +445,11 @@ impl BinaryBuilder {
         path_fn: F,
     ) -> Self
     where
-        C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
-        F: Fn(PathBuf) -> P,
+        C: TransformDataFn + 'static,
+        F: TransformPathFn + 'static,
     {
-        self.transform_data_func = Some(Box::new(proc_fn));
-        self.transform_path_func = Some(Box::new(path_fn));
+        self.transform_data_fn = Some(Box::new(proc_fn));
+        self.transform_path_fn = Some(Box::new(path_fn));
         self
     }
 
@@ -413,7 +492,7 @@ impl BinaryBuilder {
         C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
         F: Fn(PathBuf) -> P,
     {
-        for (i, path) in self.outputs.to_vec().iter().enumerate() {
+        for (i, path) in self.outputs.clone().into_iter().enumerate() {
             let reader = BufReader::new(fs::File::open(&path)?);
 
             let new_path = path_fn(path.clone());
