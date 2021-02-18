@@ -22,4 +22,4 @@ fs-err = "2.5"
 [dev-dependencies]
 tempdir = "0.3"
 smush = "0.1.5"
-brotli = "3.3.0"
+brotli = { version = "3.3.0", features = ["std"] }
