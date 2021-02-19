@@ -56,8 +56,9 @@ impl Regex {
         if let Some(regex) = self.regex.borrow() {
             regex
         } else {
-            let regex =
-                regex_impl::Regex::new(&self.regex_str).expect("regex string should be pre-tested");
+            let regex = regex_impl::Regex::new(&self.regex_str).unwrap_or_else(|_| {
+                panic!("regex string should be pre-tested: {}", self.regex_str)
+            });
             self.regex.fill(regex).ok();
             self.regex.borrow().unwrap()
         }
@@ -88,7 +89,8 @@ impl Regex {
     }
 }
 
-mod regex_impl {
+#[cfg(feature = "regex-fancy")]
+mod regex_impl_fancy {
     pub use fancy_regex::{Captures, Match};
     use std::error::Error;
     pub struct Matches<'r, 't>(fancy_regex::Matches<'r, 't>);
@@ -186,16 +188,19 @@ mod regex_impl {
     }
 }
 
-#[cfg(feature = "")]
-mod regex_impl {
+#[cfg(feature = "regex-onig")]
+#[allow(dead_code)]
+mod regex_impl_onig {
     use std::error::Error;
 
     pub struct CaptureMatches<'r, 't>(onig::FindCaptures<'r, 't>, &'t str);
 
+    #[derive(Debug)]
     pub struct Captures<'t>(onig::Captures<'t>, &'t str);
 
     pub struct Matches<'r, 't>(onig::FindMatches<'r, 't>, &'t str);
 
+    #[derive(Debug)]
     pub struct Match<'t> {
         text: &'t str,
         start: usize,
@@ -232,6 +237,14 @@ mod regex_impl {
                     end,
                 })
             })
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
         }
     }
 
@@ -297,7 +310,7 @@ mod regex_impl {
         }
 
         pub fn captures_len(&self) -> usize {
-            self.regex.captures_len()
+            self.regex.captures_len() + 1
         }
 
         pub fn captures<'t>(&self, text: &'t str) -> Option<Captures<'t>> {
@@ -315,5 +328,152 @@ mod regex_impl {
                 replacement
             })
         }
+    }
+}
+
+#[cfg(feature = "regex-all-test")]
+mod regex_impl_all {
+    use super::{regex_impl_fancy as impl_fancy, regex_impl_onig as impl_onig};
+    pub use impl_fancy::{CaptureMatches, Captures, Match, Matches};
+    use itertools::{EitherOrBoth, Itertools};
+    use std::error::Error;
+
+    macro_rules! option_eq {
+        ($a:expr, $b:expr) => {
+            match (&$a, &$b) {
+                (&Some(ref lhs), &Some(ref rhs)) if lhs == rhs => true,
+                (&None, &None) => true,
+                _ => false,
+            }
+        };
+    }
+
+    impl<'t> PartialEq<Match<'t>> for impl_onig::Match<'t> {
+        fn eq(&self, other: &impl_fancy::Match<'t>) -> bool {
+            self.start() == other.start()
+                && self.end() == other.end()
+                && self.as_str() == other.as_str()
+        }
+    }
+
+    impl<'t> PartialEq<Captures<'t>> for impl_onig::Captures<'t> {
+        fn eq(&self, other: &impl_fancy::Captures<'t>) -> bool {
+            self.len() == other.len()
+                && self.iter().zip(other.iter()).all(|(a, b)| option_eq!(a, b))
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Regex {
+        fancy_regex: impl_fancy::Regex,
+        onig_regex: impl_onig::Regex,
+    }
+
+    impl Regex {
+        pub fn new(regex_str: &str) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+            let fancy_regex = impl_fancy::Regex::new(regex_str);
+            let onig_regex = impl_onig::Regex::new(regex_str);
+
+            Ok(Regex {
+                fancy_regex: fancy_regex?,
+                onig_regex: onig_regex?,
+            })
+        }
+
+        pub fn is_match(&self, text: &str) -> bool {
+            let match_fancy = self.fancy_regex.is_match(text);
+
+            assert_eq!(
+                match_fancy,
+                self.onig_regex.is_match(text),
+                "{} {:?}",
+                text,
+                self.fancy_regex
+            );
+            match_fancy
+        }
+
+        pub fn captures_iter<'r, 't>(&'r self, text: &'t str) -> CaptureMatches<'r, 't> {
+            assert!(
+                self.fancy_regex
+                    .captures_iter(text)
+                    .zip_longest(self.onig_regex.captures_iter(text))
+                    .all(|elem| {
+                        if let EitherOrBoth::Both(a, b) = elem {
+                            b == a
+                        } else {
+                            false
+                        }
+                    }),
+                "{:?}",
+                self.fancy_regex
+            );
+
+            self.fancy_regex.captures_iter(text)
+        }
+
+        pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> Matches<'r, 't> {
+            assert!(
+                self.fancy_regex
+                    .find_iter(text)
+                    .zip_longest(self.onig_regex.find_iter(text))
+                    .all(|elem| {
+                        if let EitherOrBoth::Both(a, b) = elem {
+                            b == a
+                        } else {
+                            false
+                        }
+                    }),
+                "{:?}",
+                self.fancy_regex
+            );
+
+            self.fancy_regex.find_iter(text)
+        }
+
+        pub fn captures_len(&self) -> usize {
+            let out = self.fancy_regex.captures_len();
+            assert_eq!(
+                out,
+                self.onig_regex.captures_len(),
+                "{:?}",
+                self.fancy_regex
+            );
+            out
+        }
+
+        pub fn captures<'t>(&self, text: &'t str) -> Option<Captures<'t>> {
+            let out = self.fancy_regex.captures(text);
+            let onig_out = self.onig_regex.captures(text);
+            assert!(
+                option_eq!(onig_out, out),
+                "{:?}: Fancy: {:#?}, Onig: {:#?}",
+                self.fancy_regex,
+                out,
+                onig_out
+            );
+            out
+        }
+
+        pub fn replace_all(&self, text: &str, replacement: &str) -> String {
+            let out = self.fancy_regex.replace_all(text, replacement);
+            assert_eq!(
+                out,
+                self.onig_regex.replace_all(text, replacement),
+                "{:?}",
+                self.fancy_regex
+            );
+            out
+        }
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "regex-all-test")] {
+        use regex_impl_all as regex_impl;
+    } else if #[cfg(feature = "regex-onig")] {
+        use regex_impl_onig as regex_impl;
+    } else {
+        use regex_impl_fancy as regex_impl;
     }
 }

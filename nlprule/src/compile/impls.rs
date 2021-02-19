@@ -359,6 +359,14 @@ impl Regex {
         for (i, c) in chars.iter().enumerate() {
             let string = String::from(*c);
 
+            // unicode ligatures are treated differently in oniguruma vs rust regex
+            if *c as usize >= 0xFB00 && *c as usize <= 0xFB4F {
+                return Err(Error::Unimplemented(format!(
+                    "Unicode ligatures in regex are not supported: {}",
+                    java_regex_str
+                )));
+            }
+
             // the number of consecutive backslashes before this char
             let backslash_count = if i > 0 {
                 i - 1 - (0..i).rev().find(|j| chars[*j] != '\\').unwrap_or(0)
@@ -387,12 +395,15 @@ impl Regex {
                 && quantify_chars.contains(c)
                 && i < chars.len() - 1
                 && quantify_chars.contains(&chars[i + 1])
+                // this is ok, signifies non-greedy quantification
+                && chars[i + 1] != '?'
             {
                 // a quantifying char followed by another quantifying char seems to be allowed in Java
                 // behavior is not clearly defined so we reject this
-                return Err(Error::Unexpected(
-                    "Consecutive quantifiers in Regex are not valid.".into(),
-                ));
+                return Err(Error::Unexpected(format!(
+                    "Consecutive quantifiers in Regex are not valid: {}",
+                    java_regex_str
+                )));
             }
 
             out_chars.push(*c);
@@ -411,7 +422,7 @@ impl Regex {
         }
 
         regex_str = if full_match {
-            format!("^({})$", regex_str)
+            format!("^(?:{})$", regex_str)
         } else {
             regex_str
         };
@@ -420,11 +431,13 @@ impl Regex {
             regex_str
         } else {
             lazy_static! {
-                static ref REGEX_PATTERN: Regex = Regex::new(r"(\\p{\w+?})".into());
+                // matches a \p class plus the quantifier after it (if one exists)
+                // parsing a regex with a regex.. not sure if this is a good idea
+                static ref REGEX_PATTERN: Regex = Regex::new(r"(\\p{\w+?}(\+|\*|(\{\d+(,\d*)?\}))?)".into());
             }
             // classes must be case sensitive even if the regex is globally case insensitive
             // so we disable case insensitivity right before the class and reeenable it afterwards
-            regex_str = REGEX_PATTERN.replace_all(&regex_str, "(?-i)$1(?i)");
+            regex_str = REGEX_PATTERN.replace_all(&regex_str, "(?:(?-i)$1(?i))");
             format!("(?i){}", regex_str)
         };
 

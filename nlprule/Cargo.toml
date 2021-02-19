@@ -29,6 +29,7 @@ aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
 srx = { version = "^0.1.2", features = ["serde"] }
 lazycell = "1"
+cfg-if = "1"
 
 rayon-cond = "0.1"
 rayon = "1.5"
@@ -62,9 +63,13 @@ regex-onig = ["onig"]
 # to switch to the fancy-regex engine, disable default features and add this feature
 regex-fancy = ["fancy-regex"]
 
+# this enables both regex backends at the same time and makes sure they are equivalent
+# used only for compilation and tests
+regex-all-test = ["regex-onig", "regex-fancy"]
+
 # needed for the bin test targets and to compile nlprule binaries, you'll usually not need these
 bin = ["clap", "env_logger"]
-compile = ["regex", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "bin"]
+compile = ["regex", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test", "bin"]
 
 [[bin]]
 name = "compile"
