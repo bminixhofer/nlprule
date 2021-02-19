@@ -13,6 +13,8 @@ use std::{
 };
 use zip::result::ZipError;
 
+pub type OtherError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -26,36 +28,38 @@ pub enum Error {
     #[error(transparent)]
     ZipError(#[from] ZipError),
     #[error("error postprocessing binaries: {0}")]
-    PostprocessingError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+    PostprocessingError(#[source] OtherError),
+    #[error("error postprocessing binaries: {0}")]
+    TransformError(#[source] OtherError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformDataFn<I: Read>:
+pub trait TransformDataFn:
     for<'r> Fn(
-    I,
+    Cursor<Vec<u8>>,
     Cursor<&'r mut Vec<u8>>,
-) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+) -> result::Result<(), OtherError>
 {
 }
 
-impl<T, I: Read> TransformDataFn<I> for T where
+impl<T> TransformDataFn for T where
     T: for<'r> Fn(
-        I,
+        Cursor<Vec<u8>>,
         Cursor<&'r mut Vec<u8>>,
-    ) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+    ) -> result::Result<(), OtherError>
 {
 }
 
 /// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer datasets.
 pub trait TransformPathFn:
-    Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>
+    Fn(PathBuf) -> result::Result<PathBuf, OtherError>
 {
 }
 
 impl<T> TransformPathFn for T where
-    T: Fn(PathBuf) -> result::Result<PathBuf, Box<dyn std::error::Error + Send + Sync + 'static>>
+    T: Fn(PathBuf) -> result::Result<PathBuf, OtherError>
 {
 }
 
@@ -113,7 +117,7 @@ fn construct_cache_path(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
+    transform_path_fn: Option<&dyn TransformPathFn>,
 ) -> Result<Option<PathBuf>> {
     let filename = binary.filename(lang_code);
 
@@ -121,7 +125,7 @@ fn construct_cache_path(
         .map(move |dir| {
             let path = dir.join(version).join(lang_code).join(&filename);
             Ok(if let Some(transform_path_fn) = transform_path_fn {
-                transform_path_fn(path)?
+                transform_path_fn(path).map_err(Error::TransformError)?
             } else {
                 path
             })
@@ -140,8 +144,8 @@ fn obtain_binary_cache_or_github(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
-    transform_data_fn: Option<&Box<dyn TransformDataFn<Cursor<Vec<u8>>>>>,
+    transform_path_fn: Option<&dyn TransformPathFn>,
+    transform_data_fn: Option<&dyn TransformDataFn>,
 ) -> Result<Cursor<Vec<u8>>> {
     let cache_path = construct_cache_path(
         version,
@@ -167,7 +171,7 @@ fn obtain_binary_cache_or_github(
     let mut reader_transformed = if let Some(transform_data_fn) = transform_data_fn {
         // TODO this is not optimal, the additional copy is a bit annoying
         let mut intermediate = Vec::<u8>::with_capacity(4096 * 1024);
-        transform_data_fn(reader_binenc, Cursor::new(&mut intermediate))?;
+        transform_data_fn(reader_binenc, Cursor::new(&mut intermediate)).map_err(Error::TransformError)?;
         Cursor::new(intermediate)
     } else {
         reader_binenc
@@ -195,8 +199,8 @@ fn assure_binary_availability(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&Box<dyn TransformPathFn>>,
-    transform_data_fn: Option<&Box<dyn TransformDataFn<Cursor<Vec<u8>>>>>,
+    transform_path_fn: Option<&dyn TransformPathFn>,
+    transform_data_fn: Option<&dyn TransformDataFn>,
     out: PathBuf,
 ) -> Result<()> {
     let mut source = obtain_binary_cache_or_github(
@@ -282,7 +286,7 @@ pub struct BinaryBuilder {
     build_dir: Option<PathBuf>,
     outputs: Vec<PathBuf>,
     transform_path_fn: Option<Box<dyn TransformPathFn>>,
-    transform_data_fn: Option<Box<dyn TransformDataFn<Cursor<Vec<u8>>>>>,
+    transform_data_fn: Option<Box<dyn TransformDataFn>>,
 }
 
 impl BinaryBuilder {
@@ -303,8 +307,8 @@ impl BinaryBuilder {
     fn build_language(&mut self, lang_code: &str) -> Result<()> {
         // adjust the destination path for now
         let path_transform = |out: PathBuf| -> Result<PathBuf> {
-            Ok(if let Some(ref fx) = self.transform_path_fn {
-                fx(out)?
+            Ok(if let Some(ref transform_path_fn) = self.transform_path_fn {
+                transform_path_fn(out).map_err(Error::TransformError)?
             } else {
                 out
             })
@@ -325,8 +329,8 @@ impl BinaryBuilder {
                 lang_code,
                 binary,
                 self.cache_dir.as_ref(),
-                self.transform_path_fn.as_ref(),
-                self.transform_data_fn.as_ref(),
+                self.transform_path_fn.as_ref().map(|x| x.as_ref()),
+                self.transform_data_fn.as_ref().map(|x| x.as_ref()),
                 out,
             ) {
                 if let Error::BinariesNotFound = e {
@@ -482,7 +486,7 @@ impl BinaryBuilder {
     /// to be consumed by the application code.
     pub fn transform<F, C>(mut self, proc_fn: C, path_fn: F) -> Self
     where
-        C: TransformDataFn<Cursor<Vec<u8>>> + 'static,
+        C: TransformDataFn + 'static,
         F: TransformPathFn + 'static,
     {
         self.transform_data_fn = Some(Box::new(proc_fn));
@@ -525,7 +529,7 @@ impl BinaryBuilder {
         C: Fn(
             BufReader<File>,
             BufWriter<File>,
-        ) -> result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>,
+        ) -> result::Result<(), OtherError>,
         F: Fn(PathBuf) -> P,
         P: AsRef<Path>,
     {
@@ -551,7 +555,6 @@ impl BinaryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use brotli::{enc::BrotliEncoderParams, BrotliCompress, CompressorReader};
     use io::Write;
 
     use super::*;
@@ -684,15 +687,14 @@ mod tests {
     }
 
     #[test]
-    fn build_with_brotli_transform() -> Result<()> {
+    fn build_with_zstd_transform() -> Result<()> {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
         let builder = BinaryBuilder::new(&["en"], tempdir)
             .version("0.3.0")
             .transform(
-                |mut buffer: Cursor<Vec<u8>>, mut writer: Cursor<&'_ mut Vec<u8>>| {
-                    dbg!("transform pre");
+                |buffer: Cursor<Vec<u8>>, mut writer: Cursor<&'_ mut Vec<u8>>| {
                     let data = smush::encode(
                         buffer.into_inner().as_slice(),
                         smush::Codec::Zstd,
@@ -700,9 +702,8 @@ mod tests {
                     )?;
                     writer.write_all(&data)?;
 
-                    // XXX hangs forever, not sure what's going on
+                    // XXX hangs forever, both with `smush` and `brotli` directly
                     // let _ = brotli::BrotliCompress(&mut buffer, &mut sink, &Default::default())?;
-                    dbg!("transform post");
                     Ok(())
                 },
                 |p: PathBuf| {
@@ -720,7 +721,7 @@ mod tests {
                     let data = smush::decode(tmp.as_slice(), smush::Codec::Zstd)?;
                     writer.write_all(data.as_slice())?;
                     Ok(())
-                    // XXX never reached
+                    // XXX
                     // Ok(brotli::BrotliDecompress(&mut buffer, &mut writer)?)
                 },
                 |p| {
@@ -745,8 +746,13 @@ mod tests {
             .with_extension("bin");
         assert!(rules_path.exists());
 
-        // XXX will always fail
-        // let _ = nlprule::Rules::new(rules_path).map_err(|e| Error::ValidationFailed("en".to_owned(), Binary::Rules, e))?;
+        // The following will always fail since the versions will mismatch and rebuilding does not make sense
+        // `get_build_dir` is tested separately
+        //
+        // ```rust,no_run
+        // let _ = nlprule::Rules::new(rules_path)
+        // .map_err(|e| Error::ValidationFailed("en".to_owned(), Binary::Rules, e))?;
+        // ```
         Ok(())
     }
 }
