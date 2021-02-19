@@ -171,7 +171,7 @@ fn obtain_binary_cache_or_github(
     // apply the transform if any to an intermediate buffer
     let mut reader_transformed = if let Some(transform_data_fn) = transform_data_fn {
         // TODO this is not optimal, the additional copy is a bit annoying
-        let mut intermediate = Box::new(Cursor::new(Vec::<u8>::with_capacity(4096 * 1024)));
+        let mut intermediate = Box::new(Cursor::new(Vec::<u8>::new()));
         transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate)).map_err(Error::TransformError)?;
         intermediate
     } else {
