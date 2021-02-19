@@ -309,7 +309,7 @@ impl BinaryBuilder {
             (Binary::Rules, &rules_out),
         ] {
             let out = out.to_owned().to_owned();
-            if let Err(e) = assure_binary_availability(
+            match assure_binary_availability(
                 &self.version,
                 lang_code,
                 *binary,
@@ -318,10 +318,11 @@ impl BinaryBuilder {
                 self.transform_data_fn.as_ref().map(|x| x.as_ref()),
                 out,
             ) {
-                if let Error::BinariesNotFound = e {
+                Err(e) if Error::BinariesNotFound => {
                     did_not_find_binaries = true;
                     break;
                 }
+                res => res?,
             }
         }
 
