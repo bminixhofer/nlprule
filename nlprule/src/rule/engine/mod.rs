@@ -1,6 +1,6 @@
 use crate::{
     types::*,
-    utils::regex::{CapturesIter, Regex},
+    utils::regex::{CaptureMatches, Regex},
 };
 use serde::{Deserialize, Serialize};
 pub mod composition;
@@ -56,7 +56,8 @@ impl TokenEngine {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Engine {
     Token(TokenEngine),
-    Text(Regex, DefaultHashMap<GraphId, usize>),
+    // regex with the `fancy_regex` backend is large on the stack
+    Text(Box<Regex>, DefaultHashMap<GraphId, usize>),
 }
 
 struct TokenMatches<'a> {
@@ -68,7 +69,7 @@ struct TokenMatches<'a> {
 struct TextMatches<'a, 't> {
     byte_idx_to_char_idx: DefaultHashMap<usize, usize>,
     id_to_idx: &'a DefaultHashMap<GraphId, usize>,
-    captures: CapturesIter<'a, 't>,
+    captures: CaptureMatches<'a, 't>,
 }
 
 enum InnerMatches<'a: 't, 't> {

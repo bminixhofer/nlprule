@@ -142,7 +142,8 @@ impl Match {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SynthesizerPart {
     Text(String),
-    Match(Match),
+    // Regex with the `fancy_regex` backend is large on the stack
+    Match(Box<Match>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

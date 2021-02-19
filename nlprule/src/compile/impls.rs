@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use lazy_static::lazy_static;
 use log::warn;
 use serde::{Deserialize, Serialize};
 
@@ -346,56 +347,92 @@ impl POSFilter {
 
 impl Regex {
     pub fn from_java_regex(
-        regex_str: &str,
+        java_regex_str: &str,
         full_match: bool,
-        case_sensitive: bool,
+        mut case_sensitive: bool,
     ) -> Result<Self, Error> {
-        fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
-            let placeholder = "###escaped_backslash###";
+        let mut out_chars = Vec::new();
+        let chars: Vec<_> = java_regex_str.chars().collect();
 
-            string
-                .as_ref()
-                .replace(r"\\", placeholder)
-                .replace(&format!(r"\{}", c), c)
-                .replace(placeholder, r"\\")
+        let quantify_chars = ['+', '?', '*', '{'];
+
+        for (i, c) in chars.iter().enumerate() {
+            let string = String::from(*c);
+
+            // the number of consecutive backslashes before this char
+            let backslash_count = if i > 0 {
+                i - 1 - (0..i).rev().find(|j| chars[*j] != '\\').unwrap_or(0)
+            } else {
+                0
+            };
+            // if the count is even, the characters before are just escaped backslashes
+            // if it is odd, this char is actually escaped
+            let is_escaped = backslash_count % 2 != 0;
+
+            if i > 0
+                && is_escaped
+                && regex::escape(&string) == string
+                 // some chars do not have to be escaped on their own
+                 // but are still valid if escaped because they have a special meaning
+                 // this list should be exhaustive but it is possible something is missing
+                && !['b', 'u', 'p', 'd', 'w', 'W', 'D', 's'].contains(c)
+            {
+                out_chars.pop();
+            } else if is_escaped && *c == 's' {
+                // apparently \s in Java regexes only matches an actual space, not e.g non-breaking space
+                out_chars.pop();
+                out_chars.push(' ');
+                continue;
+            } else if !is_escaped
+                && quantify_chars.contains(c)
+                && i < chars.len() - 1
+                && quantify_chars.contains(&chars[i + 1])
+            {
+                // a quantifying char followed by another quantifying char seems to be allowed in Java
+                // behavior is not clearly defined so we reject this
+                return Err(Error::Unexpected(
+                    "Consecutive quantifiers in Regex are not valid.".into(),
+                ));
+            }
+
+            out_chars.push(*c);
         }
 
-        // TODO: more exhaustive backslash check
-        let mut fixed = unescape(unescape(unescape(regex_str, "!"), ","), "/");
-        let mut case_sensitive = case_sensitive;
-
-        fixed = fixed
-            .replace("\\\\s", "###backslash_before_s###")
-            .replace("\\$", "###escaped_dollar###")
-            // apparently \s in Java regexes only matches an actual space, not e.g non-breaking space
-            .replace("\\s", " ")
-            .replace("$+", "$")
-            .replace("$?", "$")
-            .replace("$*", "$")
-            .replace("###escaped_dollar###", "\\$")
-            .replace("###backslash_before_s###", "\\\\s");
+        let mut regex_str: String = out_chars.iter().collect();
 
         for pattern in &["(?iu)", "(?i)"] {
-            if fixed.contains(pattern) {
+            // this is probably not sound but I'm not sure of the significance of (?iu)
+            // in the middle of a regex - maybe an error
+            let removed = regex_str.replace(pattern, "");
+            if removed != regex_str {
                 case_sensitive = false;
-                fixed = fixed.replace(pattern, "");
+                regex_str = removed.to_owned();
             }
         }
 
-        let fixed = if full_match {
-            format!("^({})$", fixed)
+        regex_str = if full_match {
+            format!("^({})$", regex_str)
         } else {
-            fixed
+            regex_str
         };
 
-        let fixed = if case_sensitive {
-            fixed
+        regex_str = if case_sensitive {
+            regex_str
         } else {
-            format!("(?i){}", fixed)
+            lazy_static! {
+                static ref REGEX_PATTERN: Regex = Regex::new(r"(\\p{\w+?})".into());
+            }
+            // classes must be case sensitive even if the regex is globally case insensitive
+            // so we disable case insensitivity right before the class and reeenable it afterwards
+            regex_str = REGEX_PATTERN.replace_all(&regex_str, "(?-i)$1(?i)");
+            format!("(?i){}", regex_str)
         };
 
-        let regex = Regex::new(fixed);
-        regex.try_compile().map_err(Error::Regex)?;
+        let regex = Regex::new(regex_str);
+        if let Err(error) = regex.try_compile() {
+            return Err(Error::Regex(error));
+        }
+
         Ok(regex)
     }
 }

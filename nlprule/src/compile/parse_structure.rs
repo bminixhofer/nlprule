@@ -478,12 +478,15 @@ fn parse_synthesizer_text(text: &str, engine: &Engine) -> Result<Vec<Synthesizer
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
-        parts.push(SynthesizerPart::Match(Match {
-            id: engine.to_graph_id(id)?,
-            conversion: Conversion::Nop,
-            pos_replacer: None,
-            regex_replacer: None,
-        }));
+        parts.push(SynthesizerPart::Match(
+            Match {
+                id: engine.to_graph_id(id)?,
+                conversion: Conversion::Nop,
+                pos_replacer: None,
+                regex_replacer: None,
+            }
+            .into(),
+        ));
         end_index = mat.end();
     }
 
@@ -505,7 +508,7 @@ fn parse_suggestion(
                 parts.extend(parse_synthesizer_text(text.as_str(), engine)?);
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?.into()));
             }
         }
     }
@@ -741,7 +744,7 @@ impl Rule {
                     // the IDs in a regex rule are just the same as indices
                     .map(|(key, value)| (GraphId(key), value))
                     .collect();
-                Ok((Engine::Text(regex, id_to_idx), mark, mark))
+                Ok((Engine::Text(regex.into(), id_to_idx), mark, mark))
             }
         }?;
 
@@ -779,7 +782,9 @@ impl Rule {
                     message_parts.extend(parse_synthesizer_text(text.as_str(), &engine)?);
                 }
                 structure::MessagePart::Match(m) => {
-                    message_parts.push(SynthesizerPart::Match(parse_match(m, &engine, info)?));
+                    message_parts.push(SynthesizerPart::Match(
+                        parse_match(m, &engine, info)?.into(),
+                    ));
                 }
             }
         }
