@@ -637,7 +637,7 @@ mod tests {
                     let mut tmp = Vec::new();
                     buffer.read_to_end(&mut tmp)?;
                     Ok(writer.write_all(&smush::encode(
-                        &mut tmp,
+                        &tmp,
                         smush::Codec::Gzip,
                         smush::Quality::Default,
                     )?)?)
