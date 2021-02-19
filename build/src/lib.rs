@@ -385,7 +385,7 @@ impl BinaryBuilder {
                 .collect()
         } else {
             language_codes
-                .into_iter()
+                .iter()
                 .map(ToOwned::to_owned)
                 .map(ToOwned::to_owned)
                 .collect::<Vec<String>>()
