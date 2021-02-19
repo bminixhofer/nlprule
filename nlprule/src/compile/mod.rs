@@ -1,9 +1,11 @@
 //! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
 
+use fs::File;
+use fs_err as fs;
+
 use std::{
-    fs::{self, File},
     hash::{Hash, Hasher},
-    io::{BufReader, BufWriter},
+    io::{self, BufReader, BufWriter},
     num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
@@ -15,7 +17,6 @@ use crate::{
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
     types::DefaultHasher,
 };
-use clap::Clap;
 use log::info;
 
 use self::parse_structure::{BuildInfo, RegexCache};
@@ -25,20 +26,6 @@ mod impls;
 mod parse_structure;
 mod structure;
 mod utils;
-
-#[derive(Clap)]
-#[clap(
-    version = env!("CARGO_PKG_VERSION"),
-    author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
-)]
-pub struct BuildOptions {
-    #[clap(long, parse(from_os_str))]
-    pub build_dir: PathBuf,
-    #[clap(long, parse(from_os_str))]
-    pub tokenizer_out: PathBuf,
-    #[clap(long, parse(from_os_str))]
-    pub rules_out: PathBuf,
-}
 
 struct BuildFilePaths {
     lang_code_path: PathBuf,
@@ -95,8 +82,12 @@ pub enum Error {
     ParseError(#[from] ParseIntError),
 }
 
-pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
-    let paths = BuildFilePaths::new(&opts.build_dir);
+pub fn compile(
+    build_dir: impl AsRef<Path>,
+    mut rules_dest: impl io::Write,
+    mut tokenizer_dest: impl io::Write,
+) -> Result<(), Error> {
+    let paths = BuildFilePaths::new(&build_dir);
 
     let lang_code = fs::read_to_string(paths.lang_code_path)?;
 
@@ -185,14 +176,11 @@ pub fn compile(opts: &BuildOptions) -> Result<(), Error> {
         tokenizer_options,
     )?;
 
-    let f = BufWriter::new(File::create(&opts.tokenizer_out)?);
-    bincode::serialize_into(f, &tokenizer)?;
+    bincode::serialize_into(&mut tokenizer_dest, &tokenizer)?;
 
     info!("Creating grammar rules.");
     let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, &rules_options);
-
-    let f = BufWriter::new(File::create(&opts.rules_out)?);
-    bincode::serialize_into(f, &rules)?;
+    bincode::serialize_into(&mut rules_dest, &rules)?;
 
     // we need to write the regex cache after building the rules, otherwise it isn't fully populated
     let f = BufWriter::new(File::create(&paths.regex_cache_path)?);
