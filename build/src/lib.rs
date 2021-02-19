@@ -7,7 +7,7 @@ use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::fs::Permissions;
 use std::{
-    io::{self, BufReader, BufWriter, Cursor, Read, Write, Seek, SeekFrom},
+    io::{self, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     result,
 };
@@ -32,38 +32,26 @@ pub enum Error {
     #[error("error transforming binaries: {0}")]
     TransformError(#[source] OtherError),
     #[error("Collation failed")]
-    CollationFailed(#[source] nlprule::compile::Error)
+    CollationFailed(#[source] nlprule::compile::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
 pub trait TransformDataFn:
-    for<'w> Fn(
-        Box<dyn Read>,
-        Box<dyn Write + 'w>,
-    ) -> result::Result<(), OtherError>
+    for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
 impl<T> TransformDataFn for T where
-    T: for<'w> Fn(
-        Box<dyn Read>,
-        Box<dyn Write + 'w>,
-    ) -> result::Result<(), OtherError>
+    T: for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
 /// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformPathFn:
-    Fn(PathBuf) -> result::Result<PathBuf, OtherError>
-{
-}
+pub trait TransformPathFn: Fn(PathBuf) -> result::Result<PathBuf, OtherError> {}
 
-impl<T> TransformPathFn for T where
-    T: Fn(PathBuf) -> result::Result<PathBuf, OtherError>
-{
-}
+impl<T> TransformPathFn for T where T: Fn(PathBuf) -> result::Result<PathBuf, OtherError> {}
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Binary {
@@ -148,13 +136,8 @@ fn obtain_binary_cache_or_github(
     transform_path_fn: Option<&dyn TransformPathFn>,
     transform_data_fn: Option<&dyn TransformDataFn>,
 ) -> Result<Box<dyn Read>> {
-    let cache_path = construct_cache_path(
-        version,
-        lang_code,
-        binary,
-        cache_dir,
-        transform_path_fn,
-    )?;
+    let cache_path =
+        construct_cache_path(version, lang_code, binary, cache_dir, transform_path_fn)?;
 
     // if the file can be read, the data is already cached and the transform was applied before
     if let Some(ref cache_path) = cache_path {
@@ -170,7 +153,8 @@ fn obtain_binary_cache_or_github(
     let mut reader_transformed = if let Some(transform_data_fn) = transform_data_fn {
         // TODO this is not optimal, the additional copy is a bit annoying
         let mut intermediate = Box::new(Cursor::new(Vec::<u8>::new()));
-        transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate)).map_err(Error::TransformError)?;
+        transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate))
+            .map_err(Error::TransformError)?;
         intermediate
     } else {
         Box::new(reader_binenc)
@@ -306,11 +290,13 @@ impl BinaryBuilder {
     fn build_language(&mut self, lang_code: &str) -> Result<()> {
         // adjust the destination path for now
         let path_transform = |out: PathBuf| -> Result<PathBuf> {
-            Ok(if let Some(ref transform_path_fn) = self.transform_path_fn {
-                transform_path_fn(out).map_err(Error::TransformError)?
-            } else {
-                out
-            })
+            Ok(
+                if let Some(ref transform_path_fn) = self.transform_path_fn {
+                    transform_path_fn(out).map_err(Error::TransformError)?
+                } else {
+                    out
+                },
+            )
         };
 
         let tokenizer_out = path_transform(self.out_dir.join(tokenizer_filename(lang_code)))?;
@@ -353,9 +339,20 @@ impl BinaryBuilder {
                 get_build_dir(lang_code, &build_dir).expect("error loading build directory");
             }
 
-
-            let mut rules_sink = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(&rules_out)?);
-            let mut tokenizer_sink = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(&tokenizer_out)?);
+            let mut rules_sink = BufWriter::new(
+                fs::OpenOptions::new()
+                    .truncate(true)
+                    .create(true)
+                    .write(true)
+                    .open(&rules_out)?,
+            );
+            let mut tokenizer_sink = BufWriter::new(
+                fs::OpenOptions::new()
+                    .truncate(true)
+                    .create(true)
+                    .write(true)
+                    .open(&tokenizer_out)?,
+            );
             if let Some(ref transform_data_fn) = self.transform_data_fn {
                 let mut transfer_buffer_rules = Cursor::new(Vec::new());
                 let mut transfer_buffer_tokenizer = Cursor::new(Vec::new());
@@ -364,19 +361,20 @@ impl BinaryBuilder {
                     build_dir,
                     &mut transfer_buffer_rules,
                     &mut transfer_buffer_tokenizer,
-                ).map_err(Error::CollationFailed)?;
+                )
+                .map_err(Error::CollationFailed)?;
 
-                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_sink)).map_err(Error::TransformError)?;
-                transform_data_fn(Box::new(transfer_buffer_tokenizer), Box::new(tokenizer_sink)).map_err(Error::TransformError)?;
-
+                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_sink))
+                    .map_err(Error::TransformError)?;
+                transform_data_fn(
+                    Box::new(transfer_buffer_tokenizer),
+                    Box::new(tokenizer_sink),
+                )
+                .map_err(Error::TransformError)?;
             } else {
-                compile::compile(
-                    build_dir,
-                    &mut rules_sink,
-                    &mut tokenizer_sink,
-                ).map_err(Error::CollationFailed)?;
+                compile::compile(build_dir, &mut rules_sink, &mut tokenizer_sink)
+                    .map_err(Error::CollationFailed)?;
             };
-
         } else if did_not_find_binaries {
             panic!(
                 "Did not find binaries for version {}. \
@@ -503,8 +501,11 @@ impl BinaryBuilder {
     /// Attention: Any compression applied here, must be undone in the
     /// `fn postprocess` provided closure to retain the original binenc file
     /// to be consumed by the application code.
-    pub fn transform(mut self, proc_fn: &'static (dyn TransformDataFn), path_fn: &'static (dyn TransformPathFn)) -> Self
-    {
+    pub fn transform(
+        mut self,
+        proc_fn: &'static (dyn TransformDataFn),
+        path_fn: &'static (dyn TransformPathFn),
+    ) -> Self {
         self.transform_data_fn = Some(Box::new(proc_fn));
         self.transform_path_fn = Some(Box::new(path_fn));
         self
@@ -542,10 +543,7 @@ impl BinaryBuilder {
     /// ```
     pub fn postprocess<F, C, P>(mut self, proc_fn: C, path_fn: F) -> Result<Self>
     where
-        C: Fn(
-            BufReader<File>,
-            BufWriter<File>,
-        ) -> result::Result<(), OtherError>,
+        C: Fn(BufReader<File>, BufWriter<File>) -> result::Result<(), OtherError>,
         F: Fn(PathBuf) -> P,
         P: AsRef<Path>,
     {

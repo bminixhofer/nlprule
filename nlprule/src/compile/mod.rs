@@ -1,7 +1,7 @@
 //! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
 
-use fs_err as fs;
 use fs::File;
+use fs_err as fs;
 
 use std::{
     hash::{Hash, Hasher},
@@ -26,7 +26,6 @@ mod impls;
 mod parse_structure;
 mod structure;
 mod utils;
-
 
 struct BuildFilePaths {
     lang_code_path: PathBuf,
@@ -83,7 +82,11 @@ pub enum Error {
     ParseError(#[from] ParseIntError),
 }
 
-pub fn compile(build_dir: impl AsRef<Path>, mut rules_dest: impl io::Write, mut tokenizer_dest: impl io::Write) -> Result<(), Error> {
+pub fn compile(
+    build_dir: impl AsRef<Path>,
+    mut rules_dest: impl io::Write,
+    mut tokenizer_dest: impl io::Write,
+) -> Result<(), Error> {
     let paths = BuildFilePaths::new(&build_dir);
 
     let lang_code = fs::read_to_string(paths.lang_code_path)?;

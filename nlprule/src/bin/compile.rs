@@ -1,7 +1,7 @@
 use clap::Clap;
+use fs_err as fs;
 use nlprule::compile::{compile, BuildOptions, Error};
 use std::io::BufWriter;
-use fs_err as fs;
 
 #[derive(clap::Clap)]
 #[clap(
