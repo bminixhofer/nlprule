@@ -494,9 +494,11 @@ impl BinaryBuilder {
         &self.outputs
     }
 
-    /// Applies the given transformation before placing a binencoded file into the cache
-    /// Allows for easier compression usage.
-    /// Modifies the cached path by the given path function.
+    /// Applies the given transformation function to the binary immediately after obtaining it.
+    /// This happens before placing the file in the cache (if any) so by using a compression
+    /// function the size of the cache directory can be reduced.
+    /// Modifies the path of the cached binaries by the given `path_fn`.
+    /// If no cache directory is set or the binaries are built from the build dir, the `path_fn` does nothing.
     ///
     /// The resulting files will then reside in the given cache dir if any.
     ///
