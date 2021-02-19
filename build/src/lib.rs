@@ -319,15 +319,15 @@ impl BinaryBuilder {
 
         let mut did_not_find_binaries = false;
 
-        for (binary, out) in vec![
+        for (binary, out) in &[
             (Binary::Tokenizer, &tokenizer_out),
             (Binary::Rules, &rules_out),
         ] {
-            let out = out.to_owned();
+            let out = out.to_owned().to_owned();
             if let Err(e) = assure_binary_availability(
                 &self.version,
                 lang_code,
-                binary,
+                *binary,
                 self.cache_dir.as_ref(),
                 self.transform_path_fn.as_ref().map(|x| x.as_ref()),
                 self.transform_data_fn.as_ref().map(|x| x.as_ref()),
