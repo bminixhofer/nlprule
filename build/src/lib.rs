@@ -30,7 +30,7 @@ pub enum Error {
     ZipError(#[from] ZipError),
     #[error("error postprocessing binaries: {0}")]
     PostprocessingError(#[source] OtherError),
-    #[error("error postprocessing binaries: {0}")]
+    #[error("error transforming binaries: {0}")]
     TransformError(#[source] OtherError),
     #[error("Collation failed")]
     CollationFailed(#[source] nlprule::compile::Error)
