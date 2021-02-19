@@ -32,23 +32,25 @@ pub enum Error {
     PostprocessingError(#[source] OtherError),
     #[error("error postprocessing binaries: {0}")]
     TransformError(#[source] OtherError),
+    #[error("Collation failed")]
+    CollationFailed(#[source] nlprule::compile::Error)
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
 pub trait TransformDataFn:
-    for<'r> Fn(
-    Cursor<Vec<u8>>,
-    Cursor<&'r mut Vec<u8>>,
-) -> result::Result<(), OtherError>
+    for<'w> Fn(
+        Box<dyn Read>,
+        Box<dyn Write + 'w>,
+    ) -> result::Result<(), OtherError>
 {
 }
 
 impl<T> TransformDataFn for T where
-    T: for<'r> Fn(
-        Cursor<Vec<u8>>,
-        Cursor<&'r mut Vec<u8>>,
+    T: for<'w> Fn(
+        Box<dyn Read>,
+        Box<dyn Write + 'w>,
     ) -> result::Result<(), OtherError>
 {
 }
@@ -147,7 +149,7 @@ fn obtain_binary_cache_or_github(
     cache_dir: Option<&PathBuf>,
     transform_path_fn: Option<&dyn TransformPathFn>,
     transform_data_fn: Option<&dyn TransformDataFn>,
-) -> Result<Cursor<Vec<u8>>> {
+) -> Result<Box<dyn Read>> {
     let cache_path = construct_cache_path(
         version,
         lang_code,
@@ -160,7 +162,7 @@ fn obtain_binary_cache_or_github(
     if let Some(ref cache_path) = cache_path {
         if let Ok(bytes) = fs::read(cache_path) {
             if bytes.len() > 256 {
-                return Ok(Cursor::new(bytes));
+                return Ok(Box::new(Cursor::new(bytes)));
             }
         }
     }
@@ -171,11 +173,11 @@ fn obtain_binary_cache_or_github(
     // apply the transform if any to an intermediate buffer
     let mut reader_transformed = if let Some(transform_data_fn) = transform_data_fn {
         // TODO this is not optimal, the additional copy is a bit annoying
-        let mut intermediate = Vec::<u8>::with_capacity(4096 * 1024);
-        transform_data_fn(reader_binenc, Cursor::new(&mut intermediate)).map_err(Error::TransformError)?;
-        Cursor::new(intermediate)
+        let mut intermediate = Box::new(Cursor::new(Vec::<u8>::with_capacity(4096 * 1024)));
+        transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate)).map_err(Error::TransformError)?;
+        intermediate
     } else {
-        reader_binenc
+        Box::new(reader_binenc)
     };
 
     // update the cache entry
@@ -356,26 +358,26 @@ impl BinaryBuilder {
             }
 
 
-            let mut rules_out = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(rules_out)?);
-            let mut tokenizer_out = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(tokenizer_out)?);
-            let (rules_out, tokenizer_out) = if let Some(ref transform_data_fn) = self.transform_data_fn {
-                let mut transfer_buffer_rules = BufWriter::new(Vec::new());
-                let mut transfer_buffer_tokenizer = BufWriter::new(Vec::new());
+            let mut rules_sink = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(&rules_out)?);
+            let mut tokenizer_sink = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(&tokenizer_out)?);
+            if let Some(ref transform_data_fn) = self.transform_data_fn {
+                let mut transfer_buffer_rules = Cursor::new(Vec::new());
+                let mut transfer_buffer_tokenizer = Cursor::new(Vec::new());
 
                 compile::compile(
                     build_dir,
-                    transfer_buffer_rules,
-                    transfer_buffer_tokenizer,
+                    &mut transfer_buffer_rules,
+                    &mut transfer_buffer_tokenizer,
                 ).map_err(Error::CollationFailed)?;
 
-                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_out))?;
-                transform_data_fn(Box::new(transfer_buffer_tokenizer), Box::new(tokenizer_out))?;
+                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_sink)).map_err(Error::TransformError)?;
+                transform_data_fn(Box::new(transfer_buffer_tokenizer), Box::new(tokenizer_sink)).map_err(Error::TransformError)?;
 
             } else {
                 compile::compile(
                     build_dir,
-                    rules_out,
-                    tokenizer_out,
+                    &mut rules_sink,
+                    &mut tokenizer_sink,
                 ).map_err(Error::CollationFailed)?;
             };
 
@@ -503,10 +505,7 @@ impl BinaryBuilder {
     /// Attention: Any compression applied here, must be undone in the
     /// `fn postprocess` provided closure to retain the original binenc file
     /// to be consumed by the application code.
-    pub fn transform<F, C>(mut self, proc_fn: C, path_fn: F) -> Self
-    where
-        C: TransformDataFn + 'static,
-        F: TransformPathFn + 'static,
+    pub fn transform(mut self, proc_fn: &'static (dyn TransformDataFn), path_fn: &'static (dyn TransformPathFn)) -> Self
     {
         self.transform_data_fn = Some(Box::new(proc_fn));
         self.transform_path_fn = Some(Box::new(path_fn));
@@ -713,9 +712,11 @@ mod tests {
         let builder = BinaryBuilder::new(&["en"], tempdir)
             .version("0.3.0")
             .transform(
-                |buffer: Cursor<Vec<u8>>, mut writer: Cursor<&'_ mut Vec<u8>>| {
+                &|mut buffer, mut writer| {
+                    let mut data = Vec::new();
+                    buffer.read_to_end(&mut data)?;
                     let data = smush::encode(
-                        buffer.into_inner().as_slice(),
+                        data.as_slice(),
                         smush::Codec::Zstd,
                         smush::Quality::Maximum,
                     )?;
@@ -725,7 +726,7 @@ mod tests {
                     // let _ = brotli::BrotliCompress(&mut buffer, &mut sink, &Default::default())?;
                     Ok(())
                 },
-                |p: PathBuf| {
+                &|p: PathBuf| {
                     let mut s = p.to_string_lossy().to_string();
                     s.push_str(".zstd");
                     Ok(PathBuf::from(s))
