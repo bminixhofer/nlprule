@@ -92,7 +92,6 @@ fn obtain_binary_from_github_release(
 ) -> Result<Cursor<Vec<u8>>> {
     let filename = binary.filename(lang_code);
 
-    // ... otherwise, request the data from the URL ...
     let bytes = reqwest::blocking::get(&format!(
         "https://github.com/bminixhofer/nlprule/releases/download/{}/{}.gz",
         version, filename
