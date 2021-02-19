@@ -5,9 +5,10 @@ use flate2::bufread::GzDecoder;
 use fs::File;
 use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
+use reqwest::blocking::Response;
 use std::fs::Permissions;
 use std::{
-    io::{self, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom},
+    io::{self, BufReader, BufWriter, Cursor, Read, Write, Seek, SeekFrom},
     path::{Path, PathBuf},
     result,
 };
@@ -354,12 +355,30 @@ impl BinaryBuilder {
                 get_build_dir(lang_code, &build_dir).expect("error loading build directory");
             }
 
-            compile::compile(&compile::BuildOptions {
-                build_dir,
-                rules_out: rules_out.clone(),
-                tokenizer_out: tokenizer_out.clone(),
-            })
-            .expect("Compiling from build directory failed. Upgrading to a more recent development version of NLPRule might fix this problem.");
+
+            let mut rules_out = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(rules_out)?);
+            let mut tokenizer_out = BufWriter::new(fs::OpenOptions::new().truncate(true).create(true).write(true).open(tokenizer_out)?);
+            let (rules_out, tokenizer_out) = if let Some(ref transform_data_fn) = self.transform_data_fn {
+                let mut transfer_buffer_rules = BufWriter::new(Vec::new());
+                let mut transfer_buffer_tokenizer = BufWriter::new(Vec::new());
+
+                compile::compile(
+                    build_dir,
+                    transfer_buffer_rules,
+                    transfer_buffer_tokenizer,
+                ).map_err(Error::CollationFailed)?;
+
+                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_out))?;
+                transform_data_fn(Box::new(transfer_buffer_tokenizer), Box::new(tokenizer_out))?;
+
+            } else {
+                compile::compile(
+                    build_dir,
+                    rules_out,
+                    tokenizer_out,
+                ).map_err(Error::CollationFailed)?;
+            };
+
         } else if did_not_find_binaries {
             panic!(
                 "Did not find binaries for version {}. \

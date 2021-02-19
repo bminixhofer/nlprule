@@ -27,6 +27,7 @@ indexmap = { version = "1", features = ["serde"] }
 unicase = "2.6"
 derivative = "2.2"
 fst = "0.4"
+fs-err = "2.5"
 aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
 srx = { version = "^0.1.2", features = ["serde"] }
