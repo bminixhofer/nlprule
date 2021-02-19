@@ -28,6 +28,7 @@ fs-err = "2.5"
 aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
 srx = { version = "^0.1.2", features = ["serde"] }
+lazycell = "1"
 
 rayon-cond = "0.1"
 rayon = "1.5"
