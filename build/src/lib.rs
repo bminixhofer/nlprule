@@ -154,7 +154,7 @@ fn obtain_binary_cache_or_github(
         version,
         lang_code,
         binary,
-        cache_dir.clone(),
+        cache_dir,
         transform_path_fn,
     )?;
 
