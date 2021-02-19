@@ -17,7 +17,6 @@ use crate::{
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
     types::DefaultHasher,
 };
-use clap::Clap;
 use log::info;
 
 use self::parse_structure::{BuildInfo, RegexCache};
@@ -28,19 +27,6 @@ mod parse_structure;
 mod structure;
 mod utils;
 
-#[derive(Clap)]
-#[clap(
-    version = env!("CARGO_PKG_VERSION"),
-    author = "Benjamin Minixhofer <bminixhofer@gmail.com>"
-)]
-pub struct BuildOptions {
-    #[clap(long, parse(from_os_str))]
-    pub build_dir: PathBuf,
-    #[clap(long, parse(from_os_str))]
-    pub tokenizer_out: PathBuf,
-    #[clap(long, parse(from_os_str))]
-    pub rules_out: PathBuf,
-}
 
 struct BuildFilePaths {
     lang_code_path: PathBuf,
