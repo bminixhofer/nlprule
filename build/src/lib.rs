@@ -5,7 +5,6 @@ use flate2::bufread::GzDecoder;
 use fs::File;
 use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
-use reqwest::blocking::Response;
 use std::fs::Permissions;
 use std::{
     io::{self, BufReader, BufWriter, Cursor, Read, Write, Seek, SeekFrom},
