@@ -318,7 +318,7 @@ impl BinaryBuilder {
                 self.transform_data_fn.as_ref().map(|x| x.as_ref()),
                 out,
             ) {
-                Err(e) if Error::BinariesNotFound => {
+                Err(Error::BinariesNotFound) => {
                     did_not_find_binaries = true;
                     break;
                 }

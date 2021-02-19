@@ -1,7 +1,8 @@
 use clap::Clap;
 use fs_err as fs;
-use nlprule::compile::{compile, BuildOptions, Error};
+use nlprule::compile::{compile, Error};
 use std::io::BufWriter;
+use std::path::PathBuf;
 
 #[derive(clap::Clap)]
 #[clap(
