@@ -161,9 +161,7 @@ fn obtain_binary_cache_or_github(
     // if the file can be read, the data is already cached and the transform was applied before
     if let Some(ref cache_path) = cache_path {
         if let Ok(bytes) = fs::read(cache_path) {
-            if bytes.len() > 256 {
-                return Ok(Box::new(Cursor::new(bytes)));
-            }
+            return Ok(Box::new(Cursor::new(bytes)));
         }
     }
 
@@ -589,6 +587,8 @@ mod tests {
 
     #[test]
     fn getting_build_dir_works() -> Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let tempdir = tempdir::TempDir::new("build_dir_test")?;
         let tempdir = tempdir.path();
 
