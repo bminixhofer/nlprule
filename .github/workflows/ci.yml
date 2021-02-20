@@ -153,6 +153,8 @@ jobs:
           gzip storage/en_rules.bin
           gzip storage/de_tokenizer.bin
           gzip storage/de_rules.bin
+          gzip storage/es_tokenizer.bin
+          gzip storage/es_rules.bin
       - name: Update version
         run: |
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
@@ -193,4 +195,4 @@ jobs:
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: v${{ github.event.release.tag_name }}
-          branch: master
+          branch: main
