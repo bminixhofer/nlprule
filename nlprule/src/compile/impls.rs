@@ -1,14 +1,13 @@
+use fs_err::File;
+use log::warn;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs::File,
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
     sync::Arc,
 };
-
-use log::warn;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     rule::{
@@ -33,7 +32,7 @@ use super::{parse_structure::BuildInfo, Error};
 
 impl MultiwordTagger {
     pub fn from_dump<P: AsRef<Path>>(dump: P, info: &BuildInfo) -> Result<Self, io::Error> {
-        let reader = BufReader::new(File::open(dump)?);
+        let reader = BufReader::new(File::open(dump.as_ref())?);
         let mut multiwords = Vec::new();
 
         for line in reader.lines() {

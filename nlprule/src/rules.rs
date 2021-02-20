@@ -4,9 +4,9 @@ use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::Rule, Error};
+use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::File,
     io::{BufReader, Read},
     iter::{FromIterator, IntoIterator, Iterator},
     path::Path,
@@ -48,7 +48,7 @@ impl Rules {
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
-        let reader = BufReader::new(File::open(p)?);
+        let reader = BufReader::new(File::open(p.as_ref())?);
         Ok(bincode::deserialize_from(reader)?)
     }
 

@@ -3,12 +3,13 @@
 
 use crate::types::*;
 use bimap::BiMap;
+use fs_err::File;
 use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
-use std::{borrow::Cow, fs::File, iter::once};
+use std::{borrow::Cow, iter::once};
 use std::{collections::HashSet, path::Path};
 
 #[derive(Serialize, Deserialize)]
