@@ -1,6 +1,7 @@
 //! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
 
-use fs_err::File;
+use fs_err as fs;
+use fs::File;
 
 use std::{
     hash::{Hash, Hasher},

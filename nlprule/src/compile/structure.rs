@@ -680,7 +680,7 @@ type DisambiguationRuleReading = (DisambiguationRule, Option<Group>, Option<Cate
 pub fn read_rules<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Vec<Result<GrammarRuleReading, serde_xml_rs::Error>> {
-    let file = File::open(path).unwrap();
+    let file = File::open(path.as_ref()).unwrap();
     let file = BufReader::new(file);
 
     let sanitized = preprocess::sanitize(file, &["suggestion"]);
@@ -735,7 +735,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
 pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Vec<Result<DisambiguationRuleReading, serde_xml_rs::Error>> {
-    let file = File::open(path).unwrap();
+    let file = File::open(path.as_ref()).unwrap();
     let file = BufReader::new(file);
 
     let sanitized = preprocess::sanitize(file, &[]);

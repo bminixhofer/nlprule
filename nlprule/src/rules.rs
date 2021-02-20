@@ -48,7 +48,7 @@ impl Rules {
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
-        let reader = BufReader::new(File::open(p)?);
+        let reader = BufReader::new(File::open(p.as_ref())?);
         Ok(bincode::deserialize_from(reader)?)
     }
 

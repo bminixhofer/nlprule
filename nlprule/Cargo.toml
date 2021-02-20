@@ -49,6 +49,7 @@ quickcheck_macros = "1.0"
 
 [build-dependencies]
 serde_json = "1"
+fs-err = "2.5"
 
 [features]
 bin = ["clap", "env_logger"]
