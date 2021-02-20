@@ -316,9 +316,22 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
             };
             let end = end_group.char_span.1;
 
+            // this should never happen, but just return None instead of raising an Error
+            // `end` COULD be equal to `start` if the suggestion is to insert text at this position
+            if end < start {
+                return None;
+            }
+            let text_before: String = tokens[0]
+                .sentence
+                .chars()
+                .skip(start)
+                .take(end - start)
+                .collect();
+
             // fix e. g. "Super , dass"
             let replacements: Vec<String> = replacements
                 .into_iter()
+                .filter(|suggestion| *suggestion != text_before)
                 .map(|x| utils::fix_nospace_chars(&x))
                 .collect();
 
