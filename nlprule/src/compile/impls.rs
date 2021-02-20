@@ -1,12 +1,11 @@
 use std::{
     collections::HashMap,
-    fs::File,
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
     sync::Arc,
 };
-
+use fs_err::File;
 use log::warn;
 use serde::{Deserialize, Serialize};
 

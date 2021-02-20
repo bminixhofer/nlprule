@@ -11,11 +11,11 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::File,
     io::{BufReader, Read},
     path::Path,
     sync::Arc,
 };
+use fs_err::File;
 
 pub mod chunk;
 pub mod multiword;

@@ -8,8 +8,9 @@ use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
-use std::{borrow::Cow, fs::File, iter::once};
+use std::{borrow::Cow, iter::once};
 use std::{collections::HashSet, path::Path};
+use fs_err::File;
 
 #[derive(Serialize, Deserialize)]
 struct TaggerFields {

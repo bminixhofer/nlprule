@@ -6,11 +6,11 @@ use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::Rule, Error};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::File,
     io::{BufReader, Read},
     iter::{FromIterator, IntoIterator, Iterator},
     path::Path,
 };
+use fs_err::File;
 
 /// Options for a rule set.
 #[derive(Serialize, Deserialize, Clone)]

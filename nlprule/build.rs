@@ -4,10 +4,11 @@
 
 use std::{
     collections::HashMap,
-    fs::{self, File},
     io::BufWriter,
     path::Path,
 };
+use fs_err as fs;
+use fs::File;
 
 fn main() {
     let path = env!("CARGO_MANIFEST_DIR");
