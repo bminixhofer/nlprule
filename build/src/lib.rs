@@ -472,7 +472,7 @@ impl BinaryBuilder {
     }
 
     /// Validates the binaries by checking if they can be loaded by nlprule.
-    pub fn validate(self) -> Result<Self> {
+    pub fn validate(self) -> Result<()> {
         for lang_code in &self.language_codes {
             let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
             let rules_out = self.out_dir.join(rules_filename(lang_code));
@@ -483,7 +483,7 @@ impl BinaryBuilder {
                 .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Tokenizer, e))?;
         }
 
-        Ok(self)
+        Ok(())
     }
 
     /// Gets the paths to all files this builder created.
