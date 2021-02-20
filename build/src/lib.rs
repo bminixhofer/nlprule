@@ -472,7 +472,7 @@ impl BinaryBuilder {
     }
 
     /// Validates the binaries by checking if they can be loaded by nlprule.
-    pub fn validate(self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         for lang_code in &self.language_codes {
             let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
             let rules_out = self.out_dir.join(rules_filename(lang_code));
