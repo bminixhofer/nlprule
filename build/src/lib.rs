@@ -656,7 +656,9 @@ mod tests {
             .join(Path::new(&tokenizer_filename("en")))
             .with_extension("bin.gz");
         assert!(tokenizer_path.exists());
-        smush::decode(&fs::read(tokenizer_path)?, smush::Codec::Gzip).unwrap();
+        let decoded = smush::decode(&fs::read(tokenizer_path)?, smush::Codec::Gzip).unwrap();
+
+        let _ = nlprule_030::Tokenizer::new_from(&mut decoded.as_slice()).unwrap();
 
         Ok(())
     }
@@ -703,6 +705,8 @@ mod tests {
 
         let mut decoded = Vec::new();
         decoder.read_to_end(&mut decoded).unwrap();
+
+        let _ = nlprule_030::Rules::new_from(&mut decoded.as_slice()).unwrap();
 
         Ok(())
     }
@@ -767,15 +771,9 @@ mod tests {
         let rules_path = tempdir
             .join(Path::new(&rules_filename("en")))
             .with_extension("bin");
-        assert!(rules_path.exists());
+        assert!(rules_path.is_file());
 
-        // The following will always fail since the versions will mismatch and rebuilding does not make sense
-        // `get_build_dir` is tested separately
-        //
-        // ```rust,no_run
-        // let _ = nlprule::Rules::new(rules_path)
-        // .map_err(|e| Error::ValidationFailed("en".to_owned(), Binary::Rules, e))?;
-        // ```
+        let _ = nlprule_030::Rules::new(rules_path).unwrap();
         Ok(())
     }
 }

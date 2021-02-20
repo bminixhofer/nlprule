@@ -23,3 +23,4 @@ fs-err = "2.5"
 tempdir = "0.3"
 smush = "0.1.5"
 env_logger = "0.8"
+nlprule_030 = { package = "nlprule", version = "0.3.0" }
