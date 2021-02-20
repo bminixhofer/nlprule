@@ -35,3 +35,249 @@ pub(crate) fn tokenizer_options(lang_code: &str) -> Option<Arc<TokenizerOptions>
 pub(crate) fn rules_options(lang_code: &str) -> Option<Arc<RulesOptions>> {
     RULES_CONFIGS.get(lang_code).cloned()
 }
+
+pub use regex::from_java_regex;
+
+mod regex {
+    use std::collections::HashMap;
+
+    use lazy_static::lazy_static;
+    use regex_syntax::ast::{
+        print::Printer, Ast, Class, ClassBracketed, ClassSet, ClassSetItem, ClassSetUnion,
+        ErrorKind, Literal, Position, Span,
+    };
+
+    fn zero_span() -> Span {
+        Span {
+            start: Position::new(0, 0, 0),
+            end: Position::new(0, 0, 0),
+        }
+    }
+
+    fn to_lower_literal(literal: &Literal) -> Option<Literal> {
+        let chars: Vec<_> = literal.c.to_lowercase().collect();
+
+        match &chars[..] {
+            [c] => {
+                let mut out = literal.clone();
+                out.c = *c;
+
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    fn to_upper_literal(literal: &Literal) -> Option<Literal> {
+        let chars: Vec<_> = literal.c.to_uppercase().collect();
+
+        match &chars[..] {
+            [c] => {
+                let mut out = literal.clone();
+                out.c = *c;
+
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    fn literal_to_union(literal: &Literal) -> Option<ClassSetUnion> {
+        let lower = to_lower_literal(literal)?;
+        let upper = to_upper_literal(literal)?;
+
+        Some(ClassSetUnion {
+            span: zero_span(),
+            items: if lower == upper {
+                vec![ClassSetItem::Literal(lower)]
+            } else {
+                vec![ClassSetItem::Literal(lower), ClassSetItem::Literal(upper)]
+            },
+        })
+    }
+
+    fn to_i_item(root: &ClassSetItem) -> ClassSetItem {
+        match root {
+            ClassSetItem::Literal(literal) => {
+                if let Some(union) = literal_to_union(literal) {
+                    ClassSetItem::Union(union)
+                } else {
+                    ClassSetItem::Literal(literal.clone())
+                }
+            }
+            ClassSetItem::Range(range) => {
+                assert!(range.is_valid()); // would have returned an error otherwise
+
+                match (to_upper_literal(&range.start), to_lower_literal(&range.end)) {
+                    (Some(start), Some(end)) => {
+                        let mut out = range.clone();
+                        out.start = start;
+                        out.end = end;
+                        ClassSetItem::Range(out)
+                    }
+                    _ => ClassSetItem::Range(range.clone()),
+                }
+            }
+            ClassSetItem::Union(union) => {
+                let mut union = union.clone();
+
+                union.items = union.items.iter().map(to_i_item).collect();
+                ClassSetItem::Union(union)
+            }
+            ClassSetItem::Bracketed(bracketed) => {
+                let mut bracketed = bracketed.clone();
+                bracketed.kind = to_i_class_set(&bracketed.kind);
+                ClassSetItem::Bracketed(bracketed)
+            }
+            ClassSetItem::Empty(_)
+            | ClassSetItem::Ascii(_)
+            | ClassSetItem::Unicode(_)
+            | ClassSetItem::Perl(_) => root.clone(),
+        }
+    }
+
+    fn to_i_class_set(root: &ClassSet) -> ClassSet {
+        match root {
+            ClassSet::Item(item) => ClassSet::Item(to_i_item(item)),
+            ClassSet::BinaryOp(op) => {
+                let mut op = op.clone();
+                op.rhs = to_i_class_set(&op.rhs).into();
+                op.lhs = to_i_class_set(&op.lhs).into();
+                ClassSet::BinaryOp(op)
+            }
+        }
+    }
+
+    fn to_i_ast(root: &Ast) -> Ast {
+        match root {
+            Ast::Alternation(alternation) => {
+                let mut alternation = alternation.clone();
+
+                alternation.asts = alternation.asts.iter().map(to_i_ast).collect();
+                Ast::Alternation(alternation)
+            }
+            Ast::Concat(concat) => {
+                let mut concat = concat.clone();
+
+                concat.asts = concat.asts.iter().map(to_i_ast).collect();
+                Ast::Concat(concat)
+            }
+            Ast::Class(class) => {
+                let class = match &class {
+                    Class::Bracketed(bracketed) => {
+                        let mut bracketed = bracketed.clone();
+                        bracketed.kind = to_i_class_set(&bracketed.kind);
+                        Class::Bracketed(bracketed)
+                    }
+                    Class::Perl(_) | Class::Unicode(_) => class.clone(),
+                };
+                Ast::Class(class)
+            }
+            Ast::Group(group) => {
+                let mut group = group.clone();
+                group.ast = to_i_ast(&group.ast).into();
+                Ast::Group(group)
+            }
+            Ast::Repetition(repetition) => {
+                let mut repetition = repetition.clone();
+                repetition.ast = to_i_ast(&repetition.ast).into();
+                Ast::Repetition(repetition)
+            }
+            Ast::Literal(literal) => {
+                if let Some(union) = literal_to_union(literal) {
+                    Ast::Class(Class::Bracketed(ClassBracketed {
+                        span: zero_span(),
+                        negated: false,
+                        kind: ClassSet::Item(ClassSetItem::Union(union)),
+                    }))
+                } else {
+                    Ast::Literal(literal.clone())
+                }
+            }
+            Ast::Dot(_) | Ast::Flags(_) | Ast::Assertion(_) | Ast::Empty(_) => root.clone(),
+        }
+    }
+
+    lazy_static! {
+        static ref LOOKAROUND_MAP: HashMap<&'static str, &'static str> = {
+            let mut map = HashMap::new();
+            map.insert("(?!", "(?P<__NEGATIVE_LOOKAHEAD>");
+            map.insert("(?<!", "(?P<__NEGATIVE_LOOKBEHIND>");
+            map.insert("(?=", "(?P<__POSITIVE_LOOKAHEAD>");
+            map.insert("(?<=", "(?P<__POSITIVE_LOOKBEHIND>");
+            map
+        };
+    }
+
+    pub fn from_java_regex(
+        regex: &str,
+        case_sensitive: bool,
+        full_match: bool,
+    ) -> Result<String, regex_syntax::Error> {
+        let mut regex = regex.to_owned();
+        let mut prev_error_start = 0;
+
+        let mut ast = loop {
+            let mut ast_parser = regex_syntax::ast::parse::Parser::new();
+            match ast_parser.parse(&regex) {
+                Err(error) => {
+                    let start = error.span().start.offset;
+                    let end = error.span().end.offset;
+
+                    if prev_error_start == start {
+                        break Err(error);
+                    }
+
+                    match error.kind() {
+                        ErrorKind::EscapeUnrecognized => {
+                            regex = format!("{}{}", &regex[..start], &regex[start + 1..]);
+                        }
+                        ErrorKind::UnsupportedLookAround => {
+                            if let Some(placeholder) = LOOKAROUND_MAP.get(&regex[start..end]) {
+                                regex =
+                                    format!("{}{}{}", &regex[..start], placeholder, &regex[end..]);
+                            } else {
+                                break Err(error);
+                            }
+                        }
+                        _ => break Err(error),
+                    }
+
+                    prev_error_start = start
+                }
+                Ok(ast) => break Ok(ast),
+            }
+        }?;
+
+        if !case_sensitive {
+            ast = to_i_ast(&ast);
+        }
+
+        let mut printer = Printer::new();
+        let mut out = String::new();
+        printer.print(&ast, &mut out).unwrap();
+
+        for (original, placeholder) in LOOKAROUND_MAP.iter() {
+            out = out.replace(placeholder, original);
+        }
+
+        if full_match {
+            out = format!("^(?:{})$", out);
+        }
+
+        Ok(out)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn i_flag_removed() {
+            assert_eq!(
+                from_java_regex(r"(?iu)\p{Lu}\p{Ll}+", false, false).unwrap(),
+                r"\p{Lu}\p{Ll}+"
+            )
+        }
+    }
+}

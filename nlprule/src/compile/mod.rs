@@ -70,6 +70,8 @@ pub enum Error {
     SRX(#[from] srx::Error),
     #[error("config does not exist for '{lang_code}'")]
     ConfigDoesNotExist { lang_code: String },
+    #[error("regex syntax error: {0}")]
+    RegexSyntax(#[from] regex_syntax::Error),
     #[error("regex compilation error: {0}")]
     Regex(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("unexpected condition: {0}")]

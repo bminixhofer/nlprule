@@ -43,7 +43,7 @@ clap = { version = "3.0.0-beta.1", optional = true }
 env_logger = { version = "0.8", optional = true }
 
 # needed for compilation
-regex = { version = "1", optional = true }
+regex-syntax = { version = "0.6", optional = true }
 serde-xml-rs = { version = "0.4", optional = true }
 xml-rs = { version = "0.8", optional = true }
 roxmltree = { version = "0.14.0", optional = true }
@@ -69,7 +69,7 @@ regex-all-test = ["regex-onig", "regex-fancy"]
 
 # needed for the bin test targets and to compile nlprule binaries, you'll usually not need these
 bin = ["clap", "env_logger"]
-compile = ["regex", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test", "bin"]
+compile = ["regex-syntax", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test", "bin"]
 
 [[bin]]
 name = "compile"
