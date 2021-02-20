@@ -155,6 +155,7 @@ fn obtain_binary_cache_or_github(
         let mut intermediate = Box::new(Cursor::new(Vec::<u8>::new()));
         transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate))
             .map_err(Error::TransformError)?;
+        intermediate.seek(SeekFrom::Start(0_u64))?;
         intermediate
     } else {
         Box::new(reader_binenc)
