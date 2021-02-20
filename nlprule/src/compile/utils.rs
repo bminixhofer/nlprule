@@ -265,21 +265,21 @@ mod regex {
     lazy_static! {
         static ref LOOKAROUND_MAP: HashMap<&'static str, &'static str> = {
             let mut map = HashMap::new();
-            map.insert("(?!", "(?P<__NEGATIVE_LOOKAHEAD>");
-            map.insert("(?<!", "(?P<__NEGATIVE_LOOKBEHIND>");
-            map.insert("(?=", "(?P<__POSITIVE_LOOKAHEAD>");
-            map.insert("(?<=", "(?P<__POSITIVE_LOOKBEHIND>");
+            map.insert("(?!", r"(?P<__NEGATIVE_LOOKAHEAD_$1>");
+            map.insert("(?<!", r"(?P<__NEGATIVE_LOOKBEHIND_$1>");
+            map.insert("(?=", r"(?P<__POSITIVE_LOOKAHEAD_$1>");
+            map.insert("(?<=", r"(?P<__POSITIVE_LOOKBEHIND_$1>");
             map
         };
     }
 
     pub fn from_java_regex(
-        regex: &str,
+        in_regex: &str,
         case_sensitive: bool,
         full_match: bool,
     ) -> Result<String, regex_syntax::Error> {
-        let mut regex = regex.to_owned();
-        let mut prev_error_start = usize::MAX;
+        let mut regex = in_regex.to_owned();
+        let mut prev_error_start = None;
 
         let mut ast = loop {
             let mut ast_parser = regex_syntax::ast::parse::Parser::new();
@@ -288,8 +288,10 @@ mod regex {
                     let start = error.span().start.offset;
                     let end = error.span().end.offset;
 
-                    if prev_error_start == start {
-                        break Err(error);
+                    if let Some(prev_error_start) = prev_error_start {
+                        if prev_error_start == start {
+                            break Err(error);
+                        }
                     }
 
                     match error.kind() {
@@ -298,8 +300,12 @@ mod regex {
                         }
                         ErrorKind::UnsupportedLookAround => {
                             if let Some(placeholder) = LOOKAROUND_MAP.get(&regex[start..end]) {
-                                regex =
-                                    format!("{}{}{}", &regex[..start], placeholder, &regex[end..]);
+                                regex = format!(
+                                    "{}{}{}",
+                                    &regex[..start],
+                                    placeholder.replace(r"$1", &start.to_string()),
+                                    &regex[end..]
+                                );
                             } else {
                                 break Err(error);
                             }
@@ -307,7 +313,7 @@ mod regex {
                         _ => break Err(error),
                     }
 
-                    prev_error_start = start
+                    prev_error_start = Some(start);
                 }
                 Ok(ast) => break Ok(ast),
             }
@@ -320,7 +326,11 @@ mod regex {
         printer.print(&ast, &mut out).unwrap();
 
         for (original, placeholder) in LOOKAROUND_MAP.iter() {
-            out = out.replace(placeholder, original);
+            if let Some(index) = prev_error_start {
+                for i in 0..(index + 1) {
+                    out = out.replace(&placeholder.replace("$1", &i.to_string()), original);
+                }
+            }
         }
 
         if full_match {

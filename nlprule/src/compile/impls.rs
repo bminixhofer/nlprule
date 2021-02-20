@@ -353,9 +353,8 @@ impl Regex {
         let regex_string =
             super::utils::from_java_regex(java_regex_str, case_sensitive, full_match)?;
 
-        let regex = Regex::new(regex_string.clone());
+        let regex = Regex::new(regex_string);
         if let Err(error) = regex.try_compile() {
-            println!("{}", regex_string);
             return Err(Error::Regex(error));
         }
 
