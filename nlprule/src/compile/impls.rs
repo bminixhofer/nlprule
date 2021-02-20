@@ -1,3 +1,6 @@
+use fs_err::File;
+use log::warn;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
@@ -5,9 +8,6 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use fs_err::File;
-use log::warn;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     rule::{

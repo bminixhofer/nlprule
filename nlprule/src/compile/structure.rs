@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use fs_err::File;
+use serde::Deserialize;
 use std::io::BufReader;
 use xml::reader::EventReader;
 

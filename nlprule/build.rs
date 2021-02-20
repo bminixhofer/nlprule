@@ -2,13 +2,9 @@
 //! so they can be inlined. These configs are included at compile time because they define the neccessary parameters to
 //! run the rules for a language correctly. They are NOT user configuration.
 
-use std::{
-    collections::HashMap,
-    io::BufWriter,
-    path::Path,
-};
-use fs_err as fs;
 use fs::File;
+use fs_err as fs;
+use std::{collections::HashMap, io::BufWriter, path::Path};
 
 fn main() {
     let path = env!("CARGO_MANIFEST_DIR");

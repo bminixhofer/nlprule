@@ -2,8 +2,8 @@
 //! See `README.md` for details.
 
 use flate2::bufread::GzDecoder;
-use fs_err as fs;
 use fs::File;
+use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::fs::Permissions;
 use std::{

@@ -9,13 +9,13 @@ use crate::{
     utils::{parallelism::MaybeParallelRefIterator, regex::SerializeRegex},
     Error,
 };
+use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
     path::Path,
     sync::Arc,
 };
-use fs_err::File;
 
 pub mod chunk;
 pub mod multiword;

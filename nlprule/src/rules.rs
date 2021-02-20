@@ -4,13 +4,13 @@ use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::Rule, Error};
+use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
     iter::{FromIterator, IntoIterator, Iterator},
     path::Path,
 };
-use fs_err::File;
 
 /// Options for a rule set.
 #[derive(Serialize, Deserialize, Clone)]
