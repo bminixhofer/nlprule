@@ -39,12 +39,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
 pub trait TransformDataFn:
-    for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
+    for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
 impl<T> TransformDataFn for T where
-    T: for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
+    T: for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
@@ -155,6 +155,7 @@ fn obtain_binary_cache_or_github(
         let mut intermediate = Box::new(Cursor::new(Vec::<u8>::new()));
         transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate))
             .map_err(Error::TransformError)?;
+        intermediate.seek(SeekFrom::Start(0_u64))?;
         intermediate
     } else {
         Box::new(reader_binenc)
@@ -355,8 +356,8 @@ impl BinaryBuilder {
                     .open(&tokenizer_out)?,
             );
             if let Some(ref transform_data_fn) = self.transform_data_fn {
-                let mut transfer_buffer_rules = Cursor::new(Vec::new());
-                let mut transfer_buffer_tokenizer = Cursor::new(Vec::new());
+                let mut transfer_buffer_rules = Vec::new();
+                let mut transfer_buffer_tokenizer = Vec::new();
 
                 compile::compile(
                     build_dir,
@@ -365,10 +366,13 @@ impl BinaryBuilder {
                 )
                 .map_err(Error::CollationFailed)?;
 
-                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_sink))
+                assert_ne!(transfer_buffer_rules.len(), 0);
+                assert_ne!(transfer_buffer_tokenizer.len(), 0);
+
+                transform_data_fn(Box::new(&mut transfer_buffer_rules.as_slice()), Box::new(rules_sink))
                     .map_err(Error::TransformError)?;
                 transform_data_fn(
-                    Box::new(transfer_buffer_tokenizer),
+                    Box::new(&mut transfer_buffer_tokenizer.as_slice()),
                     Box::new(tokenizer_sink),
                 )
                 .map_err(Error::TransformError)?;
@@ -652,7 +656,9 @@ mod tests {
             .join(Path::new(&tokenizer_filename("en")))
             .with_extension("bin.gz");
         assert!(tokenizer_path.exists());
-        smush::decode(&fs::read(tokenizer_path)?, smush::Codec::Gzip).unwrap();
+        let decoded = smush::decode(&fs::read(tokenizer_path)?, smush::Codec::Gzip).unwrap();
+
+        let _ = nlprule_030::Tokenizer::new_from(&mut decoded.as_slice()).unwrap();
 
         Ok(())
     }
@@ -699,6 +705,8 @@ mod tests {
 
         let mut decoded = Vec::new();
         decoder.read_to_end(&mut decoded).unwrap();
+
+        let _ = nlprule_030::Rules::new_from(&mut decoded.as_slice()).unwrap();
 
         Ok(())
     }
@@ -763,15 +771,9 @@ mod tests {
         let rules_path = tempdir
             .join(Path::new(&rules_filename("en")))
             .with_extension("bin");
-        assert!(rules_path.exists());
+        assert!(rules_path.is_file());
 
-        // The following will always fail since the versions will mismatch and rebuilding does not make sense
-        // `get_build_dir` is tested separately
-        //
-        // ```rust,no_run
-        // let _ = nlprule::Rules::new(rules_path)
-        // .map_err(|e| Error::ValidationFailed("en".to_owned(), Binary::Rules, e))?;
-        // ```
+        let _ = nlprule_030::Rules::new(rules_path).unwrap();
         Ok(())
     }
 }
