@@ -43,8 +43,8 @@ mod regex {
 
     use lazy_static::lazy_static;
     use regex_syntax::ast::{
-        print::Printer, Ast, Class, ClassBracketed, ClassSet, ClassSetItem, ClassSetUnion,
-        ErrorKind, Literal, Position, Span,
+        print::Printer, Ast, Class, ClassBracketed, ClassPerlKind, ClassSet, ClassSetItem,
+        ClassSetUnion, ErrorKind, Flag, FlagsItemKind, Literal, LiteralKind, Position, Span,
     };
 
     fn zero_span() -> Span {
@@ -148,42 +148,68 @@ mod regex {
         }
     }
 
-    fn to_i_ast(root: &Ast) -> Ast {
-        match root {
+    fn fix_ast(root: &Ast, mut case_sensitive: bool) -> (Ast, bool) {
+        let ast = match root {
             Ast::Alternation(alternation) => {
                 let mut alternation = alternation.clone();
 
-                alternation.asts = alternation.asts.iter().map(to_i_ast).collect();
+                alternation.asts = alternation
+                    .asts
+                    .iter()
+                    .map(|x| {
+                        let (ast, i) = fix_ast(x, case_sensitive);
+                        case_sensitive = i;
+                        ast
+                    })
+                    .collect();
                 Ast::Alternation(alternation)
             }
             Ast::Concat(concat) => {
                 let mut concat = concat.clone();
 
-                concat.asts = concat.asts.iter().map(to_i_ast).collect();
+                concat.asts = concat
+                    .asts
+                    .iter()
+                    .map(|x| {
+                        let (ast, i) = fix_ast(x, case_sensitive);
+                        case_sensitive = i;
+                        ast
+                    })
+                    .collect();
                 Ast::Concat(concat)
             }
-            Ast::Class(class) => {
-                let class = match &class {
-                    Class::Bracketed(bracketed) => {
-                        let mut bracketed = bracketed.clone();
+            Ast::Class(class) => match &class {
+                Class::Bracketed(bracketed) => {
+                    let mut bracketed = bracketed.clone();
+                    if !case_sensitive {
                         bracketed.kind = to_i_class_set(&bracketed.kind);
-                        Class::Bracketed(bracketed)
                     }
-                    Class::Perl(_) | Class::Unicode(_) => class.clone(),
-                };
-                Ast::Class(class)
-            }
+                    Ast::Class(Class::Bracketed(bracketed))
+                }
+                Class::Perl(perl) => {
+                    if matches!(perl.kind, ClassPerlKind::Space) {
+                        Ast::Literal(Literal {
+                            span: zero_span(),
+                            kind: LiteralKind::Verbatim,
+                            c: ' ',
+                        })
+                    } else {
+                        Ast::Class(class.clone())
+                    }
+                }
+                Class::Unicode(_) => Ast::Class(class.clone()),
+            },
             Ast::Group(group) => {
                 let mut group = group.clone();
-                group.ast = to_i_ast(&group.ast).into();
+                group.ast = fix_ast(&group.ast, case_sensitive).0.into();
                 Ast::Group(group)
             }
             Ast::Repetition(repetition) => {
                 let mut repetition = repetition.clone();
-                repetition.ast = to_i_ast(&repetition.ast).into();
+                repetition.ast = fix_ast(&repetition.ast, case_sensitive).0.into();
                 Ast::Repetition(repetition)
             }
-            Ast::Literal(literal) => {
+            Ast::Literal(literal) if !case_sensitive => {
                 if let Some(union) = literal_to_union(literal) {
                     Ast::Class(Class::Bracketed(ClassBracketed {
                         span: zero_span(),
@@ -194,8 +220,46 @@ mod regex {
                     Ast::Literal(literal.clone())
                 }
             }
-            Ast::Dot(_) | Ast::Flags(_) | Ast::Assertion(_) | Ast::Empty(_) => root.clone(),
-        }
+            Ast::Literal(_) => root.clone(),
+            Ast::Flags(flags) => {
+                let mut flags = flags.clone();
+
+                if let Some(i) = flags.flags.flag_state(Flag::CaseInsensitive) {
+                    case_sensitive = !i;
+                }
+
+                flags.flags.items = flags
+                    .flags
+                    .items
+                    .into_iter()
+                    .filter(|flag| {
+                        !matches!(
+                            flag.kind,
+                            FlagsItemKind::Flag(Flag::CaseInsensitive)
+                            // we completely ignore the unicode flag, might not be sound
+                                | FlagsItemKind::Flag(Flag::Unicode)
+                        )
+                    })
+                    .collect();
+
+                if !flags.flags.items.is_empty()
+                    && matches!(
+                        flags.flags.items[flags.flags.items.len() - 1].kind,
+                        FlagsItemKind::Negation
+                    )
+                {
+                    flags.flags.items.pop();
+                }
+
+                if flags.flags.items.is_empty() {
+                    Ast::Empty(zero_span())
+                } else {
+                    Ast::Flags(flags)
+                }
+            }
+            Ast::Dot(_) | Ast::Assertion(_) | Ast::Empty(_) => root.clone(),
+        };
+        (ast, case_sensitive)
     }
 
     lazy_static! {
@@ -215,7 +279,7 @@ mod regex {
         full_match: bool,
     ) -> Result<String, regex_syntax::Error> {
         let mut regex = regex.to_owned();
-        let mut prev_error_start = 0;
+        let mut prev_error_start = usize::MAX;
 
         let mut ast = loop {
             let mut ast_parser = regex_syntax::ast::parse::Parser::new();
@@ -249,9 +313,7 @@ mod regex {
             }
         }?;
 
-        if !case_sensitive {
-            ast = to_i_ast(&ast);
-        }
+        ast = fix_ast(&ast, case_sensitive).0;
 
         let mut printer = Printer::new();
         let mut out = String::new();
@@ -276,7 +338,23 @@ mod regex {
         fn i_flag_removed() {
             assert_eq!(
                 from_java_regex(r"(?iu)\p{Lu}\p{Ll}+", false, false).unwrap(),
-                r"\p{Lu}\p{Ll}+"
+                r"(?u)\p{Lu}\p{Ll}+"
+            )
+        }
+
+        #[test]
+        fn i_flag_used() {
+            assert_eq!(
+                from_java_regex(r"(?i)a(?-i)b", false, false).unwrap(),
+                r"[aA]b"
+            )
+        }
+
+        #[test]
+        fn positive_lookbehind() {
+            assert_eq!(
+                from_java_regex(r"(?i)(?<=x)(?-i)s", false, false).unwrap(),
+                r"(?<=[xX])s"
             )
         }
     }
