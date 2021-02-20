@@ -39,12 +39,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
 pub trait TransformDataFn:
-    for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
+    for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
 impl<T> TransformDataFn for T where
-    T: for<'w> Fn(Box<dyn Read>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
+    T: for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
 {
 }
 
@@ -355,8 +355,8 @@ impl BinaryBuilder {
                     .open(&tokenizer_out)?,
             );
             if let Some(ref transform_data_fn) = self.transform_data_fn {
-                let mut transfer_buffer_rules = Cursor::new(Vec::new());
-                let mut transfer_buffer_tokenizer = Cursor::new(Vec::new());
+                let mut transfer_buffer_rules = Vec::new();
+                let mut transfer_buffer_tokenizer = Vec::new();
 
                 compile::compile(
                     build_dir,
@@ -365,10 +365,13 @@ impl BinaryBuilder {
                 )
                 .map_err(Error::CollationFailed)?;
 
-                transform_data_fn(Box::new(transfer_buffer_rules), Box::new(rules_sink))
+                assert_ne!(transfer_buffer_rules.len(), 0);
+                assert_ne!(transfer_buffer_tokenizer.len(), 0);
+
+                transform_data_fn(Box::new(&mut transfer_buffer_rules.as_slice()), Box::new(rules_sink))
                     .map_err(Error::TransformError)?;
                 transform_data_fn(
-                    Box::new(transfer_buffer_tokenizer),
+                    Box::new(&mut transfer_buffer_tokenizer.as_slice()),
                     Box::new(tokenizer_sink),
                 )
                 .map_err(Error::TransformError)?;
