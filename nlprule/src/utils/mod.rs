@@ -1,8 +1,9 @@
 use lazy_static::lazy_static;
-use onig::{Captures, Regex};
 
 pub mod parallelism;
 pub mod regex;
+
+use regex::Regex;
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust
 pub fn apply_to_first<F>(string: &str, func: F) -> String
@@ -29,10 +30,10 @@ pub fn is_uppercase(string: &str) -> bool {
 // remove duplicate whitespaces
 pub fn normalize_whitespace(string: &str) -> String {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(\s)\s+").unwrap();
+        static ref REGEX: Regex = Regex::new(r"(\s)\s+".into());
     }
 
-    REGEX.replace_all(string, |caps: &Captures| caps.at(1).unwrap().to_string())
+    REGEX.replace_all(string, "$1")
 }
 
 #[inline]

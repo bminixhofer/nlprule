@@ -34,6 +34,7 @@ jobs:
           args: --verbose --all-features
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
+        if: matrix.lang == 'en' # only need to run this once
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
@@ -54,6 +55,22 @@ jobs:
         with:
           command: run
           args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
+      - uses: actions-rs/cargo@v1 # run with fancy-regex backend once
+        if: matrix.lang == 'en'
+        env:
+            RUST_LOG: WARN
+        working-directory: nlprule # otherwise we can't use --features
+        with:
+          command: run
+          args: --features "bin regex-onig" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
+      - uses: actions-rs/cargo@v1 # run with onig backend once
+        if: matrix.lang == 'en'
+        env:
+            RUST_LOG: WARN
+        working-directory: nlprule # otherwise we can't use --features
+        with:
+          command: run
+          args: --features "bin regex-fancy" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
