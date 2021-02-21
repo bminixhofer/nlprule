@@ -376,7 +376,7 @@ mod regex {
         fn i_flag_removed() {
             assert_eq!(
                 from_java_regex(r"(?iu)\p{Lu}\p{Ll}+", false, false).unwrap(),
-                r"(?u)\p{Lu}\p{Ll}+"
+                r"\p{Lu}\p{Ll}+"
             )
         }
 
@@ -397,11 +397,8 @@ mod regex {
         }
 
         #[test]
-        fn consecutive_quantifiers() {
-            assert_eq!(
-                from_java_regex(r"[0-9,.]*{1,}", false, false).unwrap(),
-                r"(?<=[xX])s"
-            )
+        fn nested_quantifiers() {
+            assert!(from_java_regex(r"[0-9,.]*{1,}", false, false).is_err(),)
         }
     }
 }
