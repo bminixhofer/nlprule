@@ -47,6 +47,8 @@ mod regex {
         ClassSetUnion, ErrorKind, Flag, FlagsItemKind, Literal, LiteralKind, Position, Span,
     };
 
+    use crate::compile::Error;
+
     fn zero_span() -> Span {
         Span {
             start: Position::new(0, 0, 0),
@@ -158,7 +160,8 @@ mod regex {
     ///         by a set of the uppercase and lowercase variant of the union e. g. "a" to "[aA]".
     ///     * uppercasing range start and lowercasing range end e.g. [A-Z] to [A-z].
     ///         This is also only done for chars with single-char upper- / lowercase variants.
-    fn fix_ast(root: &Ast, mut case_sensitive: bool) -> (Ast, bool) {
+    /// * disallowing nested quantifiers
+    fn fix_ast(root: &Ast, mut case_sensitive: bool) -> Result<(Ast, bool), Error> {
         let ast = match root {
             Ast::Alternation(alternation) => {
                 let mut alternation = alternation.clone();
@@ -167,11 +170,11 @@ mod regex {
                     .asts
                     .iter()
                     .map(|x| {
-                        let (ast, i) = fix_ast(x, case_sensitive);
+                        let (ast, i) = fix_ast(x, case_sensitive)?;
                         case_sensitive = i;
-                        ast
+                        Ok(ast)
                     })
-                    .collect();
+                    .collect::<Result<_, Error>>()?;
                 Ast::Alternation(alternation)
             }
             Ast::Concat(concat) => {
@@ -181,11 +184,11 @@ mod regex {
                     .asts
                     .iter()
                     .map(|x| {
-                        let (ast, i) = fix_ast(x, case_sensitive);
+                        let (ast, i) = fix_ast(x, case_sensitive)?;
                         case_sensitive = i;
-                        ast
+                        Ok(ast)
                     })
-                    .collect();
+                    .collect::<Result<_, Error>>()?;
                 Ast::Concat(concat)
             }
             Ast::Class(class) => match &class {
@@ -211,12 +214,19 @@ mod regex {
             },
             Ast::Group(group) => {
                 let mut group = group.clone();
-                group.ast = fix_ast(&group.ast, case_sensitive).0.into();
+                group.ast = fix_ast(&group.ast, case_sensitive)?.0.into();
                 Ast::Group(group)
             }
             Ast::Repetition(repetition) => {
                 let mut repetition = repetition.clone();
-                repetition.ast = fix_ast(&repetition.ast, case_sensitive).0.into();
+                repetition.ast = fix_ast(&repetition.ast, case_sensitive)?.0.into();
+                // disallow nested quantifiers because of inconsistent behavior
+                if matches!(*repetition.ast, Ast::Repetition(_)) {
+                    return Err(Error::Unexpected(
+                        "nested quantifiers in regex are not allowed.".into(),
+                    ));
+                }
+
                 Ast::Repetition(repetition)
             }
             Ast::Literal(literal) if !case_sensitive => {
@@ -269,7 +279,7 @@ mod regex {
             }
             Ast::Dot(_) | Ast::Assertion(_) | Ast::Empty(_) => root.clone(),
         };
-        (ast, case_sensitive)
+        Ok((ast, case_sensitive))
     }
 
     lazy_static! {
@@ -289,7 +299,7 @@ mod regex {
         in_regex: &str,
         case_sensitive: bool,
         full_match: bool,
-    ) -> Result<String, regex_syntax::Error> {
+    ) -> Result<String, Error> {
         let mut regex = in_regex.to_owned();
         let mut prev_error_start = None;
 
@@ -336,7 +346,7 @@ mod regex {
             }
         }?;
 
-        ast = fix_ast(&ast, case_sensitive).0;
+        ast = fix_ast(&ast, case_sensitive)?.0;
 
         let mut printer = Printer::new();
         let mut out = String::new();
@@ -382,6 +392,14 @@ mod regex {
         fn positive_lookbehind() {
             assert_eq!(
                 from_java_regex(r"(?i)(?<=x)(?-i)s", false, false).unwrap(),
+                r"(?<=[xX])s"
+            )
+        }
+
+        #[test]
+        fn consecutive_quantifiers() {
+            assert_eq!(
+                from_java_regex(r"[0-9,.]*{1,}", false, false).unwrap(),
                 r"(?<=[xX])s"
             )
         }
