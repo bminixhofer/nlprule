@@ -1,3 +1,8 @@
+//! An abstraction on top of Regular Expressions to add support for Serialization and
+//! to modularize the Regex backend.
+//! Adapts the approach from https://github.com/trishume/syntect/pull/270 with feature flags for the
+//! different backends.
+
 use lazycell::AtomicLazyCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::hash::{Hash, Hasher};
@@ -333,6 +338,8 @@ mod regex_impl_onig {
 
 #[cfg(feature = "regex-all-test")]
 mod regex_impl_all {
+    //! This backend is only used for testing. It uses all other backends and assert they do the same thing.
+
     use super::{regex_impl_fancy as impl_fancy, regex_impl_onig as impl_onig};
     pub use impl_fancy::{CaptureMatches, Captures, Match, Matches};
     use itertools::{EitherOrBoth, Itertools};

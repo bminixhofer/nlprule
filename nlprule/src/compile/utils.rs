@@ -96,6 +96,7 @@ mod regex {
         })
     }
 
+    /// Returns a case insensitive version of the given `ClassSetItem`.
     fn to_i_item(root: &ClassSetItem) -> ClassSetItem {
         match root {
             ClassSetItem::Literal(literal) => {
@@ -136,6 +137,7 @@ mod regex {
         }
     }
 
+    /// Returns a case insensitive version of the given `ClassSet`.
     fn to_i_class_set(root: &ClassSet) -> ClassSet {
         match root {
             ClassSet::Item(item) => ClassSet::Item(to_i_item(item)),
@@ -148,6 +150,14 @@ mod regex {
         }
     }
 
+    /// "Fixes" the AST by:
+    /// * removing case insensitive and unicode flags since their behavior is not consistent
+    ///     e. g. (?i)\p{Lu} is equivalent to \p{L} in `fancy_regex` and to \p{Lu} in Java / Oniguruma
+    /// * manually making the case insensitive parts case insensitive instead. This is done by:
+    ///     * for each literal which has a single-char uppercase and lowercase variant, replace the literal
+    ///         by a set of the uppercase and lowercase variant of the union e. g. "a" to "[aA]".
+    ///     * uppercasing range start and lowercasing range end e.g. [A-Z] to [A-z].
+    ///         This is also only done for chars with single-char upper- / lowercase variants.
     fn fix_ast(root: &Ast, mut case_sensitive: bool) -> (Ast, bool) {
         let ast = match root {
             Ast::Alternation(alternation) => {
@@ -273,6 +283,8 @@ mod regex {
         };
     }
 
+    /// Does a good effort of converting Java Regexes to regular expressions
+    /// usable by `oniguruma` / `fancy-regex`.
     pub fn from_java_regex(
         in_regex: &str,
         case_sensitive: bool,
@@ -288,6 +300,8 @@ mod regex {
                     let start = error.span().start.offset;
                     let end = error.span().end.offset;
 
+                    // exit if an error already occured at the same position
+                    // to prevent infinitely looping
                     if let Some(prev_error_start) = prev_error_start {
                         if prev_error_start == start {
                             break Err(error);
@@ -296,9 +310,12 @@ mod regex {
 
                     match error.kind() {
                         ErrorKind::EscapeUnrecognized => {
-                            regex = format!("{}{}", &regex[..start], &regex[start + 1..]);
+                            // remove the backslash
+                            regex =
+                                format!("{}{}", &regex[..start], &regex[start + '\\'.len_utf8()..]);
                         }
                         ErrorKind::UnsupportedLookAround => {
+                            // replace unsupported lookaround syntax with a placeholder named group
                             if let Some(placeholder) = LOOKAROUND_MAP.get(&regex[start..end]) {
                                 regex = format!(
                                     "{}{}{}",
@@ -325,6 +342,7 @@ mod regex {
         let mut out = String::new();
         printer.print(&ast, &mut out).unwrap();
 
+        // undo the placeholder named group replacement for lookaround
         for (original, placeholder) in LOOKAROUND_MAP.iter() {
             if let Some(index) = prev_error_start {
                 for i in 0..(index + 1) {
