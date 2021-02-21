@@ -69,7 +69,7 @@ regex-all-test = ["regex-onig", "regex-fancy"]
 
 # needed for the bin test targets and to compile nlprule binaries, you'll usually not need these
 bin = ["clap", "env_logger"]
-compile = ["regex-syntax", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test", "bin"]
+compile = ["regex-syntax", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test"]
 
 [[bin]]
 name = "compile"

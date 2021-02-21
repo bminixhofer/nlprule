@@ -398,7 +398,7 @@ mod regex {
 
         #[test]
         fn nested_quantifiers() {
-            assert!(from_java_regex(r"[0-9,.]*{1,}", false, false).is_err(),)
+            assert!(from_java_regex(r"[0-9,.]*{1,}", false, false).is_err())
         }
     }
 }
