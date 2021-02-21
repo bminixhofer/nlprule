@@ -34,6 +34,7 @@ jobs:
           args: --verbose --all-features
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
+        if: matrix.lang == 'en' # only need to run this once
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
@@ -54,6 +55,20 @@ jobs:
         with:
           command: run
           args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
+      - uses: actions-rs/cargo@v1 # run with fancy-regex backend once
+        if: matrix.lang == 'en'
+        env:
+            RUST_LOG: WARN
+        with:
+          command: run
+          args: --manifest-path nlprule/Cargo.toml --features "bin regex-onig" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
+      - uses: actions-rs/cargo@v1 # run with onig backend once
+        if: matrix.lang == 'en'
+        env:
+            RUST_LOG: WARN
+        with:
+          command: run
+          args: --manifest-path nlprule/Cargo.toml --features "bin regex-fancy" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
@@ -92,9 +107,7 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-      # this can cause errors because it is assumed that there
-      # are only wheels for the current python version in target/wheels
-      # - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v1
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v1
         with:
@@ -116,6 +129,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install maturin==0.8.3 pytest==6.1.2
          
+          # remove potentially cached wheels
+          rm target/wheels/* || true
           bash scripts/maturin.sh build --interpreter python --release --manylinux 1
 
           pip install $(ls target/wheels/* | head -n1)

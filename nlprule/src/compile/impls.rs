@@ -25,7 +25,7 @@ use crate::{
         Tokenizer, TokenizerOptions,
     },
     types::*,
-    utils::{parallelism::MaybeParallelIterator, regex::SerializeRegex},
+    utils::{parallelism::MaybeParallelIterator, regex::Regex},
 };
 
 use super::{parse_structure::BuildInfo, Error};
@@ -343,60 +343,21 @@ impl POSFilter {
     }
 }
 
-impl SerializeRegex {
-    pub fn new(
-        regex_str: &str,
-        must_fully_match: bool,
+impl Regex {
+    pub fn from_java_regex(
+        java_regex_str: &str,
+        full_match: bool,
         case_sensitive: bool,
     ) -> Result<Self, Error> {
-        fn unescape<S: AsRef<str>>(string: S, c: &str) -> String {
-            let placeholder = "###escaped_backslash###";
+        let regex_string =
+            super::utils::from_java_regex(java_regex_str, case_sensitive, full_match)?;
 
-            string
-                .as_ref()
-                .replace(r"\\", placeholder)
-                .replace(&format!(r"\{}", c), c)
-                .replace(placeholder, r"\\")
+        let regex = Regex::new(regex_string);
+        if let Err(error) = regex.try_compile() {
+            return Err(Error::Regex(error));
         }
 
-        // TODO: more exhaustive backslash check
-        let mut fixed = unescape(unescape(unescape(regex_str, "!"), ","), "/");
-        let mut case_sensitive = case_sensitive;
-
-        fixed = fixed
-            .replace("\\\\s", "###backslash_before_s###")
-            .replace("\\$", "###escaped_dollar###")
-            // apparently \s in Java regexes only matches an actual space, not e.g non-breaking space
-            .replace("\\s", " ")
-            .replace("$+", "$")
-            .replace("$?", "$")
-            .replace("$*", "$")
-            .replace("###escaped_dollar###", "\\$")
-            .replace("###backslash_before_s###", "\\\\s");
-
-        for pattern in &["(?iu)", "(?i)"] {
-            if fixed.contains(pattern) {
-                case_sensitive = false;
-                fixed = fixed.replace(pattern, "");
-            }
-        }
-
-        let fixed = if must_fully_match {
-            format!("^({})$", fixed)
-        } else {
-            fixed
-        };
-
-        let fixed = if case_sensitive {
-            fixed
-        } else {
-            format!("(?i){}", fixed)
-        };
-
-        Ok(SerializeRegex {
-            regex: SerializeRegex::compile(&fixed)?,
-            string: fixed,
-        })
+        Ok(regex)
     }
 }
 
@@ -430,7 +391,7 @@ mod composition {
             AndAtom, Atom, Composition, FalseAtom, GraphId, NotAtom, OffsetAtom, OrAtom, Part,
             Quantifier, TrueAtom,
         },
-        utils::regex::SerializeRegex,
+        utils::regex::Regex,
     };
 
     impl Atom {
@@ -476,11 +437,11 @@ mod composition {
     }
 
     impl Matcher {
-        pub fn new_regex(regex: SerializeRegex, negate: bool, empty_always_false: bool) -> Self {
+        pub fn new_regex(regex: Regex, negate: bool, empty_always_false: bool) -> Self {
             Matcher {
                 matcher: either::Right(regex),
                 negate,
-                case_sensitive: true, // handled by regex
+                case_sensitive: true, // handled by regex, should maybe be an option
                 empty_always_false,
             }
         }
@@ -623,7 +584,7 @@ pub mod filters {
     use super::Error;
     use std::collections::HashMap;
 
-    use crate::{filter::*, rule::engine::Engine, utils::regex::SerializeRegex};
+    use crate::{filter::*, rule::engine::Engine, utils::regex::Regex};
 
     trait FromArgs: Sized {
         fn from_args(args: HashMap<String, String>, engine: &Engine) -> Result<Self, Error>;
@@ -645,7 +606,7 @@ pub mod filters {
                         )
                     })?
                     .parse::<usize>()?)?,
-                regexp: SerializeRegex::new(
+                regexp: Regex::from_java_regex(
                     &args.get("regexp").ok_or_else(|| {
                         Error::Unexpected(
                         "NoDisambiguationEnglishPartialPosTagFilter must have `regexp` argument"
@@ -655,7 +616,7 @@ pub mod filters {
                     true,
                     true,
                 )?,
-                postag_regexp: SerializeRegex::new(
+                postag_regexp: Regex::from_java_regex(
                     &args.get("postag_regexp").ok_or_else(|| {
                         Error::Unexpected(
                         "NoDisambiguationEnglishPartialPosTagFilter must have `postag_regexp` argument"

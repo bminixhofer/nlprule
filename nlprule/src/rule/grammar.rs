@@ -2,9 +2,8 @@ use super::engine::composition::{GraphId, MatchGraph, PosMatcher};
 use crate::types::*;
 use crate::{
     tokenizer::Tokenizer,
-    utils::{self, regex::SerializeRegex},
+    utils::{self, regex::Regex},
 };
-use onig::Captures;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -112,7 +111,7 @@ pub struct Match {
     pub(crate) id: GraphId,
     pub(crate) conversion: Conversion,
     pub(crate) pos_replacer: Option<PosReplacer>,
-    pub(crate) regex_replacer: Option<(SerializeRegex, String)>,
+    pub(crate) regex_replacer: Option<(Regex, String)>,
 }
 
 impl Match {
@@ -126,9 +125,7 @@ impl Match {
         };
 
         text = if let Some((regex, replacement)) = &self.regex_replacer {
-            regex.replace_all(&text, |caps: &Captures| {
-                utils::dollar_replace(replacement.to_string(), caps)
-            })
+            regex.replace_all(&text, replacement)
         } else {
             text
         };
@@ -145,7 +142,8 @@ impl Match {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SynthesizerPart {
     Text(String),
-    Match(Match),
+    // Regex with the `fancy_regex` backend is large on the stack
+    Match(Box<Match>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

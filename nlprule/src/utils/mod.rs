@@ -1,8 +1,9 @@
 use lazy_static::lazy_static;
-use onig::{Captures, Regex};
 
 pub mod parallelism;
 pub mod regex;
+
+use regex::Regex;
 
 // see https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust
 pub fn apply_to_first<F>(string: &str, func: F) -> String
@@ -26,21 +27,13 @@ pub fn is_uppercase(string: &str) -> bool {
     !string.chars().any(|x| x.is_lowercase())
 }
 
-// see https://github.com/rust-onig/rust-onig/issues/59#issuecomment-340160520
-pub fn dollar_replace(mut replacement: String, caps: &Captures) -> String {
-    for i in 1..caps.len() {
-        replacement = replacement.replace(&format!("${}", i), caps.at(i).unwrap_or(""));
-    }
-    replacement
-}
-
 // remove duplicate whitespaces
 pub fn normalize_whitespace(string: &str) -> String {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(\s)\s+").unwrap();
+        static ref REGEX: Regex = Regex::new(r"(\s)\s+".into());
     }
 
-    REGEX.replace_all(string, |caps: &Captures| caps.at(1).unwrap().to_string())
+    REGEX.replace_all(string, "$1")
 }
 
 #[inline]

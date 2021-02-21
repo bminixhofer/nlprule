@@ -1,4 +1,4 @@
-use crate::{types::*, utils::regex::SerializeRegex};
+use crate::{types::*, utils::regex::Regex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,7 @@ use unicase::UniCase;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Matcher {
-    pub matcher: either::Either<either::Either<String, GraphId>, SerializeRegex>,
+    pub matcher: either::Either<either::Either<String, GraphId>, Regex>,
     pub negate: bool,
     pub case_sensitive: bool,
     pub empty_always_false: bool,

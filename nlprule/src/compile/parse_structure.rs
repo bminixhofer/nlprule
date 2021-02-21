@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use super::{structure, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
-use crate::{utils, utils::regex::SerializeRegex};
+use crate::{utils, utils::regex::Regex};
 use lazy_static::lazy_static;
-use onig::Regex;
 use serde::{Deserialize, Serialize};
 
 pub use structure::{read_disambiguation_rules, read_rules};
@@ -128,7 +127,7 @@ fn parse_match_attribs(
     if text.is_some() || text_match_idx.is_some() {
         let matcher = if is_regex {
             if let Some(text) = text {
-                let regex = SerializeRegex::new(text.trim(), true, case_sensitive);
+                let regex = Regex::from_java_regex(text.trim(), true, case_sensitive);
                 Matcher::new_regex(regex?, negate, inflected)
             } else {
                 return Err(Error::Unexpected("`text` must be set if regex".into()));
@@ -166,7 +165,7 @@ fn parse_match_attribs(
 
     if let Some(postag) = attribs.postag() {
         let raw_matcher = if is_postag_regexp {
-            let regex = SerializeRegex::new(&postag.trim(), true, true);
+            let regex = Regex::from_java_regex(&postag.trim(), true, true);
             Matcher::new_regex(regex?, negate_pos, true)
         } else {
             Matcher::new_string(
@@ -206,7 +205,7 @@ fn parse_match_attribs(
             atoms.push(chunk_atom.into());
         }
         (None, Some(chunk_re)) => {
-            let regex = SerializeRegex::new(chunk_re.trim(), true, true)?;
+            let regex = Regex::from_java_regex(chunk_re.trim(), true, true)?;
             let chunk_atom = ChunkAtom {
                 matcher: Matcher::new_regex(regex, false, true),
             };
@@ -414,7 +413,7 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
 
         let matcher = match m.postag_regex.as_deref() {
             Some("yes") => {
-                let regex = SerializeRegex::new(&postag, true, false)?;
+                let regex = Regex::from_java_regex(&postag, true, false)?;
                 Matcher::new_regex(regex, false, true)
             }
             None => Matcher::new_string(either::Left(postag), false, false, true),
@@ -429,7 +428,7 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
 
     let regex_replacer = match (m.regexp_match, m.regexp_replace) {
         (Some(regex_match), Some(regex_replace)) => Some((
-            SerializeRegex::new(&regex_match, false, true)?,
+            Regex::from_java_regex(&regex_match, false, true)?,
             regex_replace,
         )),
         _ => None,
@@ -457,32 +456,38 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
 
 fn parse_synthesizer_text(text: &str, engine: &Engine) -> Result<Vec<SynthesizerPart>, Error> {
     lazy_static! {
-        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)").expect("number regex is valid");
+        static ref MATCH_REGEX: Regex = Regex::new(r"\\(\d)".into());
     }
 
     let mut parts = Vec::new();
     let mut end_index = 0;
 
     for capture in MATCH_REGEX.captures_iter(&text) {
-        let (start, end) = capture.pos(0).expect("0th regex group exists");
+        let mat = capture.get(0).expect("0th regex group exists");
 
-        if end_index != start {
-            parts.push(SynthesizerPart::Text((&text[end_index..start]).to_string()))
+        if end_index != mat.start() {
+            parts.push(SynthesizerPart::Text(
+                (&text[end_index..mat.start()]).to_string(),
+            ))
         }
 
         let id = capture
-            .at(1)
+            .get(1)
             .expect("1st regex group exists")
+            .as_str()
             .parse::<usize>()
             .expect("match regex capture must be parsable as usize.");
 
-        parts.push(SynthesizerPart::Match(Match {
-            id: engine.to_graph_id(id)?,
-            conversion: Conversion::Nop,
-            pos_replacer: None,
-            regex_replacer: None,
-        }));
-        end_index = end;
+        parts.push(SynthesizerPart::Match(
+            Match {
+                id: engine.to_graph_id(id)?,
+                conversion: Conversion::Nop,
+                pos_replacer: None,
+                regex_replacer: None,
+            }
+            .into(),
+        ));
+        end_index = mat.end();
     }
 
     if end_index < text.len() {
@@ -503,7 +508,7 @@ fn parse_suggestion(
                 parts.extend(parse_synthesizer_text(text.as_str(), engine)?);
             }
             structure::SuggestionPart::Match(m) => {
-                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?));
+                parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?.into()));
             }
         }
     }
@@ -733,13 +738,13 @@ impl Rule {
                     x => panic!("unknown case_sensitive value {:?}", x),
                 };
                 let mark = regex.mark.map_or(Ok(0), |x| x.parse())?;
-                let regex = SerializeRegex::new(&regex.text, false, case_sensitive)?;
+                let regex = Regex::from_java_regex(&regex.text, false, case_sensitive)?;
                 let id_to_idx: DefaultHashMap<GraphId, usize> = (0..regex.captures_len() + 1)
                     .enumerate()
                     // the IDs in a regex rule are just the same as indices
                     .map(|(key, value)| (GraphId(key), value))
                     .collect();
-                Ok((Engine::Text(regex, id_to_idx), mark, mark))
+                Ok((Engine::Text(regex.into(), id_to_idx), mark, mark))
             }
         }?;
 
@@ -777,7 +782,9 @@ impl Rule {
                     message_parts.extend(parse_synthesizer_text(text.as_str(), &engine)?);
                 }
                 structure::MessagePart::Match(m) => {
-                    message_parts.push(SynthesizerPart::Match(parse_match(m, &engine, info)?));
+                    message_parts.push(SynthesizerPart::Match(
+                        parse_match(m, &engine, info)?.into(),
+                    ));
                 }
             }
         }
@@ -899,14 +906,14 @@ impl Rule {
 
 fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<owned::Word, Error> {
     lazy_static! {
-        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]").expect("tag form regex is valid");
+        static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]".into());
     }
 
     let captures = REGEX
         .captures(form)
         .ok_or_else(|| Error::Unexpected(format!("tag form must match regex, found '{}'", form)))?;
-    let text = captures.at(1).expect("1st regex group exists").to_string();
-    let tags = captures.at(2).expect("2nd regex group exists");
+    let text = captures.get(1).expect("1st regex group exists").as_str();
+    let tags = captures.get(2).expect("2nd regex group exists").as_str();
 
     let tags = tags
         .split(',')
@@ -951,7 +958,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
     match postag_regexp.as_deref() {
         Some("yes") => POSFilter::new(PosMatcher::new(
             Matcher::new_regex(
-                SerializeRegex::new(&postag, true, true).unwrap(),
+                Regex::from_java_regex(&postag, true, true).unwrap(),
                 false,
                 true,
             ),
