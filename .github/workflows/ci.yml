@@ -28,7 +28,8 @@ jobs:
           cd data
           wget https://f000.backblazeb2.com/file/nlprule/${{ matrix.lang }}.zip
           unzip ${{ matrix.lang }}.zip
-      - uses: actions-rs/cargo@v1
+      - name: Build source
+        uses: actions-rs/cargo@v1
         with:
           command: build
           args: --verbose --all-features
@@ -38,38 +39,44 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
-      - uses: actions-rs/cargo@v1
+      - name: Build binaries
+        uses: actions-rs/cargo@v1
         env:
           RUST_LOG: INFO
         with:
           command: run
           args: --all-features --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
-      - uses: actions-rs/cargo@v1
+      - name: Run nlprule tests
+        uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         with:
           command: test
-          args: --verbose --all-features -p nlprule
-      - uses: actions-rs/cargo@v1
+          args: --verbose --all-features
+      - name: Run disambiguation tests
+        uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
         with:
           command: run
           args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - uses: actions-rs/cargo@v1 # run with fancy-regex backend once
+      - name: Run disambiguation tests (with regex-fancy backend)
+        uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         env:
             RUST_LOG: WARN
         with:
           command: run
           args: --manifest-path nlprule/Cargo.toml --features "bin regex-onig" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - uses: actions-rs/cargo@v1 # run with onig backend once
+      - name: Run disambiguation tests (with regex-onig backend)
+        uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         env:
             RUST_LOG: WARN
         with:
           command: run
           args: --manifest-path nlprule/Cargo.toml --features "bin regex-fancy" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - uses: actions-rs/cargo@v1
+      - name: Run grammar rule tests
+        uses: actions-rs/cargo@v1
         env:
             RUST_LOG: WARN
         with:
