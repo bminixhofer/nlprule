@@ -67,11 +67,7 @@ impl PosReplacer {
     fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
         let mut candidates: Vec<_> = tokenizer
             .tagger()
-            .get_tags(
-                text,
-                tokenizer.options().always_add_lower_tags,
-                tokenizer.options().use_compound_split_heuristic,
-            )
+            .get_tags(text)
             .iter()
             .map(|x| {
                 let group_words = tokenizer
@@ -81,11 +77,7 @@ impl PosReplacer {
                 for word in group_words {
                     if let Some(i) = tokenizer
                         .tagger()
-                        .get_tags(
-                            word,
-                            tokenizer.options().always_add_lower_tags,
-                            tokenizer.options().use_compound_split_heuristic,
-                        )
+                        .get_tags(word)
                         .iter()
                         .position(|x| self.matcher.is_match(&x.pos))
                     {

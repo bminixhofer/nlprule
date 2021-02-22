@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::types::*;
-use crate::{rules::RulesOptions, tokenizer::TokenizerOptions};
+use crate::{rules::RulesLangOptions, tokenizer::TokenizerLangOptions};
+use crate::{tokenizer::tag::TaggerLangOptions, types::*};
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref TOKENIZER_CONFIGS: DefaultHashMap<String, Arc<TokenizerOptions>> = {
+    static ref TOKENIZER_LANG_OPTIONS: DefaultHashMap<String, Arc<TokenizerLangOptions>> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -16,7 +16,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref RULES_CONFIGS: DefaultHashMap<String, Arc<RulesOptions>> = {
+    static ref RULES_LANG_OPTIONS: DefaultHashMap<String, Arc<RulesLangOptions>> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -26,14 +26,30 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref TAGGER_LANG_OPTIONS: DefaultHashMap<String, Arc<TaggerLangOptions>> = {
+        serde_json::from_slice(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/",
+            "tagger_configs.json"
+        )))
+        .expect("tagger configs must be valid JSON")
+    };
+}
+
 /// Gets the tokenizer language options for the language code
-pub(crate) fn tokenizer_options(lang_code: &str) -> Option<Arc<TokenizerOptions>> {
-    TOKENIZER_CONFIGS.get(lang_code).cloned()
+pub(crate) fn tokenizer_lang_options(lang_code: &str) -> Option<Arc<TokenizerLangOptions>> {
+    TOKENIZER_LANG_OPTIONS.get(lang_code).cloned()
 }
 
 /// Gets the rules language options for the language code
-pub(crate) fn rules_options(lang_code: &str) -> Option<Arc<RulesOptions>> {
-    RULES_CONFIGS.get(lang_code).cloned()
+pub(crate) fn rules_lang_options(lang_code: &str) -> Option<Arc<RulesLangOptions>> {
+    RULES_LANG_OPTIONS.get(lang_code).cloned()
+}
+
+/// Gets the tagger language options for the language code
+pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<Arc<TaggerLangOptions>> {
+    TAGGER_LANG_OPTIONS.get(lang_code).cloned()
 }
 
 pub use regex::from_java_regex;

@@ -1,7 +1,7 @@
 //! Creates the nlprule binaries from a *build directory*. Usage information in /build/README.md.
 
-use fs_err as fs;
 use fs::File;
+use fs_err as fs;
 
 use std::{
     hash::{Hash, Hasher},
@@ -68,8 +68,8 @@ pub enum Error {
     JSON(#[from] serde_json::Error),
     #[error("error loading SRX")]
     SRX(#[from] srx::Error),
-    #[error("config does not exist for '{lang_code}'")]
-    ConfigDoesNotExist { lang_code: String },
+    #[error("language options do not exist for '{lang_code}'")]
+    LanguageOptionsDoNotExist { lang_code: String },
     #[error("regex syntax error: {0}")]
     RegexSyntax(#[from] regex_syntax::ast::Error),
     #[error("regex compilation error: {0}")]
@@ -102,13 +102,19 @@ pub fn compile(
         .map(|x| x.to_string())
         .collect();
 
-    let tokenizer_options =
-        utils::tokenizer_options(&lang_code).ok_or_else(|| Error::ConfigDoesNotExist {
+    let tokenizer_lang_options = utils::tokenizer_lang_options(&lang_code).ok_or_else(|| {
+        Error::LanguageOptionsDoNotExist {
+            lang_code: lang_code.clone(),
+        }
+    })?;
+
+    let rules_lang_options =
+        utils::rules_lang_options(&lang_code).ok_or_else(|| Error::LanguageOptionsDoNotExist {
             lang_code: lang_code.clone(),
         })?;
 
-    let rules_options =
-        utils::rules_options(&lang_code).ok_or_else(|| Error::ConfigDoesNotExist {
+    let tagger_lang_options =
+        utils::tagger_lang_options(&lang_code).ok_or_else(|| Error::LanguageOptionsDoNotExist {
             lang_code: lang_code.clone(),
         })?;
 
@@ -116,8 +122,8 @@ pub fn compile(
     let tagger = Tagger::from_dumps(
         &paths.tag_paths,
         &paths.tag_remove_paths,
-        &tokenizer_options.extra_tags,
         &common_words,
+        tagger_lang_options,
     )?;
 
     let mut hasher = DefaultHasher::default();
@@ -175,13 +181,13 @@ pub fn compile(
         chunker,
         multiword_tagger,
         srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
-        tokenizer_options,
+        tokenizer_lang_options,
     )?;
 
     bincode::serialize_into(&mut tokenizer_dest, &tokenizer)?;
 
     info!("Creating grammar rules.");
-    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, &rules_options);
+    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_lang_options);
     bincode::serialize_into(&mut rules_dest, &rules)?;
 
     // we need to write the regex cache after building the rules, otherwise it isn't fully populated
