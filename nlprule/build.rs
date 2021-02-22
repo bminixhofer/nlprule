@@ -37,7 +37,7 @@ fn main() {
                     .expect("directory name must be unicode")
                     .to_string();
 
-                let path = entry.path().join("tokenizer.json");
+                let path = entry.path().join(filename);
 
                 println!("cargo:rerun-if-changed={}", path.display());
 

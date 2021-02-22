@@ -62,6 +62,7 @@ impl Regex {
     }
 
     /// Check whether the pattern compiles as a valid regex.
+    #[allow(dead_code)] // used only in compile module
     pub fn try_compile(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         regex_impl::Regex::new(&self.regex_str).map(|_| ())
     }
@@ -90,6 +91,7 @@ impl Regex {
         self.regex().find_iter(text)
     }
 
+    #[allow(dead_code)] // used only in compile module
     pub fn captures_len(&self) -> usize {
         self.regex().captures_len()
     }
