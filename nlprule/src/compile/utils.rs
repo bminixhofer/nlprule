@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use crate::{rules::RulesLangOptions, tokenizer::TokenizerLangOptions};
 use crate::{tokenizer::tag::TaggerLangOptions, types::*};
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref TOKENIZER_LANG_OPTIONS: DefaultHashMap<String, Arc<TokenizerLangOptions>> = {
+    static ref TOKENIZER_LANG_OPTIONS: DefaultHashMap<String, TokenizerLangOptions> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -16,7 +14,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref RULES_LANG_OPTIONS: DefaultHashMap<String, Arc<RulesLangOptions>> = {
+    static ref RULES_LANG_OPTIONS: DefaultHashMap<String, RulesLangOptions> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -27,7 +25,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref TAGGER_LANG_OPTIONS: DefaultHashMap<String, Arc<TaggerLangOptions>> = {
+    static ref TAGGER_LANG_OPTIONS: DefaultHashMap<String, TaggerLangOptions> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -38,21 +36,21 @@ lazy_static! {
 }
 
 /// Gets the tokenizer language options for the language code
-pub(crate) fn tokenizer_lang_options(lang_code: &str) -> Option<Arc<TokenizerLangOptions>> {
+pub(crate) fn tokenizer_lang_options(lang_code: &str) -> Option<TokenizerLangOptions> {
     TOKENIZER_LANG_OPTIONS.get(lang_code).cloned()
 }
 
 /// Gets the rules language options for the language code
-pub(crate) fn rules_lang_options(lang_code: &str) -> Option<Arc<RulesLangOptions>> {
+pub(crate) fn rules_lang_options(lang_code: &str) -> Option<RulesLangOptions> {
     RULES_LANG_OPTIONS.get(lang_code).cloned()
 }
 
 /// Gets the tagger language options for the language code
-pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<Arc<TaggerLangOptions>> {
+pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<TaggerLangOptions> {
     TAGGER_LANG_OPTIONS.get(lang_code).cloned()
 }
 
-pub use regex::from_java_regex;
+pub(crate) use regex::from_java_regex;
 
 mod regex {
     use std::collections::HashMap;

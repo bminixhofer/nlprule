@@ -7,7 +7,6 @@ use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::{borrow::Cow, iter::once};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +34,7 @@ struct TaggerFields {
     tag_fst: Vec<u8>,
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
-    options: Arc<TaggerLangOptions>,
+    lang_options: TaggerLangOptions,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -94,7 +93,7 @@ impl From<Tagger> for TaggerFields {
             tag_fst,
             word_store_fst,
             tag_store: tagger.tag_store,
-            options: tagger.options,
+            lang_options: tagger.lang_options,
         }
     }
 }
@@ -146,7 +145,7 @@ impl From<TaggerFields> for Tagger {
             tag_store: data.tag_store,
             word_store,
             groups,
-            options: data.options,
+            lang_options: data.lang_options,
         }
     }
 }
@@ -159,7 +158,7 @@ pub struct Tagger {
     pub(crate) tag_store: BiMap<String, PosIdInt>,
     pub(crate) word_store: BiMap<String, WordIdInt>,
     pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
-    pub(crate) options: Arc<TaggerLangOptions>,
+    pub(crate) lang_options: TaggerLangOptions,
 }
 
 impl Tagger {
@@ -261,9 +260,9 @@ impl Tagger {
         add_lower: Option<bool>,
         use_compound_split_heuristic: Option<bool>,
     ) -> Vec<WordData> {
-        let add_lower = add_lower.unwrap_or(self.options.always_add_lower_tags);
+        let add_lower = add_lower.unwrap_or(self.lang_options.always_add_lower_tags);
         let use_compound_split_heuristic =
-            use_compound_split_heuristic.unwrap_or(self.options.use_compound_split_heuristic);
+            use_compound_split_heuristic.unwrap_or(self.lang_options.use_compound_split_heuristic);
 
         let mut tags = self.get_strict_tags(word, add_lower, true);
 
