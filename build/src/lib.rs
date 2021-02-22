@@ -38,8 +38,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer binaries.
-pub type TransformDataFn =
-    Box<dyn Fn(Cursor<Vec<u8>>, Cursor<&mut Vec<u8>>) -> result::Result<(), OtherError>>;
+pub type TransformDataFn = Box<dyn Fn(&[u8], &mut Vec<u8>) -> result::Result<(), OtherError>>;
 
 /// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer binaries.
 pub type TransformPathFn = Box<dyn Fn(PathBuf) -> result::Result<PathBuf, OtherError>>;
@@ -144,7 +143,7 @@ fn obtain_binary_cache_or_github(
     // apply the transform if any to an intermediate buffer
     let bytes_transformed = if let Some(transform_data_fn) = transform_data_fn {
         let mut intermediate = Vec::<u8>::new();
-        transform_data_fn(Cursor::new(bytes_binenc), Cursor::new(&mut intermediate))
+        transform_data_fn(bytes_binenc.as_slice(), &mut intermediate)
             .map_err(Error::TransformError)?;
         intermediate
     } else {
@@ -356,13 +355,13 @@ impl BinaryBuilder {
                 let mut transformed_buffer_tokenizer = Vec::new();
 
                 transform_data_fn(
-                    Cursor::new(transfer_buffer_rules),
-                    Cursor::new(&mut transformed_buffer_rules),
+                    transfer_buffer_rules.as_slice(),
+                    &mut transformed_buffer_rules,
                 )
                 .map_err(Error::TransformError)?;
                 transform_data_fn(
-                    Cursor::new(transfer_buffer_tokenizer),
-                    Cursor::new(&mut transformed_buffer_tokenizer),
+                    transfer_buffer_tokenizer.as_slice(),
+                    &mut transformed_buffer_tokenizer,
                 )
                 .map_err(Error::TransformError)?;
             } else {
@@ -498,7 +497,7 @@ impl BinaryBuilder {
     pub fn transform<D, P>(mut self, proc_fn: D, path_fn: P) -> Self
     where
         // these signatures have to match the `TransformDataFn` and `TransformPathFn` types
-        D: Fn(Cursor<Vec<u8>>, Cursor<&mut Vec<u8>>) -> result::Result<(), OtherError> + 'static,
+        D: Fn(&[u8], &mut Vec<u8>) -> result::Result<(), OtherError> + 'static,
         P: Fn(PathBuf) -> result::Result<PathBuf, OtherError> + 'static,
     {
         self.transform_data_fn = Some(Box::new(proc_fn));
@@ -707,16 +706,12 @@ mod tests {
         let builder = BinaryBuilder::new(&["en"], tempdir)
             .version("0.3.0")
             .transform(
-                |buffer, mut writer| {
-                    let data = smush::encode(
-                        buffer.into_inner().as_slice(),
-                        smush::Codec::Zstd,
-                        smush::Quality::Maximum,
-                    )?;
+                |buffer, writer| {
+                    let data = smush::encode(buffer, smush::Codec::Zstd, smush::Quality::Maximum)?;
                     writer.write_all(&data)?;
                     Ok(())
                 },
-                &|p: PathBuf| {
+                |p: PathBuf| {
                     let mut s = p.to_string_lossy().to_string();
                     s.push_str(".zstd");
                     Ok(PathBuf::from(s))
