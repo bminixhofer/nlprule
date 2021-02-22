@@ -3,20 +3,39 @@
 
 use crate::types::*;
 use bimap::BiMap;
-use fs_err::File;
 use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::io::BufRead;
+use std::sync::Arc;
 use std::{borrow::Cow, iter::once};
-use std::{collections::HashSet, path::Path};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TaggerLangOptions {
+    /// Whether to use a heuristic to split potential compound words.
+    pub use_compound_split_heuristic: bool,
+    /// Whether to always add tags for a lowercase version of the word when assigning part-of-speech tags.
+    pub always_add_lower_tags: bool,
+    /// Used part-of-speech tags which are not in the tagger dictionary.
+    pub extra_tags: Vec<String>,
+}
+
+impl Default for TaggerLangOptions {
+    fn default() -> Self {
+        TaggerLangOptions {
+            use_compound_split_heuristic: false,
+            always_add_lower_tags: false,
+            extra_tags: Vec::new(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct TaggerFields {
     tag_fst: Vec<u8>,
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
+    options: Arc<TaggerLangOptions>,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -75,6 +94,7 @@ impl From<Tagger> for TaggerFields {
             tag_fst,
             word_store_fst,
             tag_store: tagger.tag_store,
+            options: tagger.options,
         }
     }
 }
@@ -126,6 +146,7 @@ impl From<TaggerFields> for Tagger {
             tag_store: data.tag_store,
             word_store,
             groups,
+            options: data.options,
         }
     }
 }
@@ -134,148 +155,14 @@ impl From<TaggerFields> for Tagger {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    tags: DefaultHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
-    tag_store: BiMap<String, PosIdInt>,
-    word_store: BiMap<String, WordIdInt>,
-    groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
+    pub(crate) tags: DefaultHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
+    pub(crate) tag_store: BiMap<String, PosIdInt>,
+    pub(crate) word_store: BiMap<String, WordIdInt>,
+    pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
+    pub(crate) options: Arc<TaggerLangOptions>,
 }
 
 impl Tagger {
-    fn get_lines<S1: AsRef<Path>, S2: AsRef<Path>>(
-        paths: &[S1],
-        remove_paths: &[S2],
-    ) -> std::io::Result<Vec<(String, String, String)>> {
-        let mut output = Vec::new();
-        let mut disallowed: Vec<String> = Vec::new();
-
-        for path in remove_paths {
-            let file = File::open(path.as_ref())?;
-            let reader = std::io::BufReader::new(file);
-
-            for line in reader.lines() {
-                let line = line?;
-                if line.starts_with('#') {
-                    continue;
-                }
-
-                disallowed.push(line.to_string());
-            }
-        }
-
-        for path in paths {
-            let file = File::open(path.as_ref())?;
-            let reader = std::io::BufReader::new(file);
-
-            for line in reader.lines() {
-                let line = line?;
-                if line.starts_with('#') {
-                    continue;
-                }
-
-                if disallowed.contains(&line) {
-                    continue;
-                }
-
-                let parts: Vec<_> = line.split('\t').collect();
-
-                let word = parts[0].to_string();
-                let inflection = parts[1].to_string();
-                let tag = parts[2].to_string();
-
-                output.push((word, inflection, tag))
-            }
-        }
-
-        Ok(output)
-    }
-
-    /// Creates a tagger from raw files.
-    ///
-    /// # Arguments
-    /// * `paths`: Paths to files where each line contains the word, lemma and tag, respectively,
-    /// separated by tabs, to be added to the tagger.
-    /// * `remove_paths`: Paths to files where each line contains the word, lemma and tag, respectively,
-    /// separated by tabs, to be removed from the tagger if present in the files from `paths`.
-    pub fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>, S3: AsRef<str>>(
-        paths: &[S1],
-        remove_paths: &[S2],
-        extra_tags: &[S3],
-        common_words: &HashSet<String>,
-    ) -> std::io::Result<Self> {
-        let mut tags = DefaultHashMap::default();
-        let mut groups = DefaultHashMap::default();
-
-        let mut tag_store = HashSet::new();
-        let mut word_store = HashSet::new();
-
-        // hardcoded special tags
-        tag_store.insert("");
-        tag_store.insert("SENT_START");
-        tag_store.insert("SENT_END");
-        tag_store.insert("UNKNOWN");
-
-        // add language specific special tags
-        tag_store.extend(extra_tags.iter().map(|x| x.as_ref()));
-
-        let lines = Tagger::get_lines(paths, remove_paths)?;
-
-        let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
-        for i in 0..punct.len() {
-            word_store.insert(&punct[i..(i + 1)]);
-        }
-
-        word_store.extend(common_words.iter().map(|x| x.as_str()));
-
-        for (word, inflection, tag) in lines.iter() {
-            word_store.insert(word);
-            word_store.insert(inflection);
-            tag_store.insert(tag);
-        }
-
-        // word store ids should be consistent across runs
-        let mut word_store: Vec<_> = word_store.iter().collect();
-        word_store.sort();
-
-        //  tag store ids should be consistent across runs
-        let mut tag_store: Vec<_> = tag_store.iter().collect();
-        tag_store.sort();
-
-        let word_store: BiMap<_, _> = word_store
-            .iter()
-            .enumerate()
-            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
-            .collect();
-        let tag_store: BiMap<_, _> = tag_store
-            .iter()
-            .enumerate()
-            .map(|(i, x)| (x.to_string(), PosIdInt(i as u16)))
-            .collect();
-
-        for (word, inflection, tag) in lines.iter() {
-            let word_id = word_store.get_by_left(word).unwrap();
-            let inflection_id = word_store.get_by_left(inflection).unwrap();
-            let pos_id = tag_store.get_by_left(tag).unwrap();
-
-            let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
-            if !group.contains(word_id) {
-                group.push(*word_id);
-            }
-
-            tags.entry(*word_id)
-                .or_insert_with(IndexMap::new)
-                .entry(*inflection_id)
-                .or_insert_with(Vec::new)
-                .push(*pos_id);
-        }
-
-        Ok(Tagger {
-            tags,
-            groups,
-            word_store,
-            tag_store,
-        })
-    }
-
     fn get_raw(&self, word: &str) -> Vec<WordData> {
         if let Some(map) = self
             .word_store
@@ -363,15 +250,21 @@ impl Tagger {
     /// # Arguments
     /// * `word`: The word to lookup data for.
     /// * `add_lower`: Whether to add data for the lowercase variant of the word.
+    ///     If `None`, will be set according to the language options.
     /// * `use_compound_split_heuristic`: Whether to use a heuristic to split compound words.
+    ///     If `None`, will be set according to the language options.
     /// If true, will attempt to find tags for words which are longer than some cutoff and unknown by looking up tags
     /// for substrings from left to right until tags are found or a minimum length reached.
-    pub fn get_tags(
+    pub fn get_tags_with_options(
         &self,
         word: &str,
-        add_lower: bool,
-        use_compound_split_heuristic: bool,
+        add_lower: Option<bool>,
+        use_compound_split_heuristic: Option<bool>,
     ) -> Vec<WordData> {
+        let add_lower = add_lower.unwrap_or(self.options.always_add_lower_tags);
+        let use_compound_split_heuristic =
+            use_compound_split_heuristic.unwrap_or(self.options.use_compound_split_heuristic);
+
         let mut tags = self.get_strict_tags(word, add_lower, true);
 
         // compound splitting heuristic, seems to work reasonably well
@@ -415,6 +308,15 @@ impl Tagger {
         }
 
         tags
+    }
+
+    /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word
+    /// using the default options of the tagger.
+    ///
+    /// # Arguments
+    /// * `word`: The word to lookup data for.
+    pub fn get_tags(&self, word: &str) -> Vec<WordData> {
+        self.get_tags_with_options(word, None, None)
     }
 
     /// Get the words with the same lemma as the given lemma.

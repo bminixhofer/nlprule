@@ -28,11 +28,9 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
         graph.by_id(self.id).tokens(graph.tokens()).all(|token| {
             if let Some(captures) = self.regexp.captures(&token.word.text.as_ref()) {
-                let tags = tokenizer.tagger().get_tags(
-                    &captures.get(1).unwrap().as_str(),
-                    tokenizer.options().always_add_lower_tags,
-                    tokenizer.options().use_compound_split_heuristic,
-                );
+                let tags = tokenizer
+                    .tagger()
+                    .get_tags(&captures.get(1).unwrap().as_str());
 
                 tags.iter()
                     .any(|x| self.postag_regexp.is_match(x.pos.as_ref()))

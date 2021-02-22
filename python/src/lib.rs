@@ -3,7 +3,7 @@ use nlprule::{
     rule::{Example, Rule},
     rules::{apply_suggestions, Rules},
     tokenizer::tag::Tagger,
-    tokenizer::{Tokenizer, TokenizerOptions},
+    tokenizer::Tokenizer,
     types::*,
 };
 use pyo3::prelude::*;
@@ -98,12 +98,11 @@ where
 #[derive(Default)]
 pub struct PyTagger {
     tagger: Arc<Tagger>,
-    options: Arc<TokenizerOptions>,
 }
 
-impl PyTagger {
-    fn new(tagger: Arc<Tagger>, options: Arc<TokenizerOptions>) -> Self {
-        PyTagger { tagger, options }
+impl From<Arc<Tagger>> for PyTagger {
+    fn from(tagger: Arc<Tagger>) -> Self {
+        PyTagger { tagger }
     }
 }
 
@@ -115,20 +114,23 @@ impl PyTagger {
     ///     word (str): The input word.
     ///     add_lower (Optional[bool]):
     ///         Whether to add data for the lowercase variant of the word.
-    ///         If unset, will be set according to the language config.
-    ///
+    ///         If unset, will be set according to the language options.
+    ///     use_compound_split_heuristic (Optional[bool]):
+    ///         Whether to use a heuristic to split compound words.
+    ///         If unset, will be set according to the language options.
     /// Returns:
     ///     data (List[Tuple[str, str]]):
     ///         A list of tuples of (lemma, POS).
     ///         Not contextualized so it can be thought of as possible lemma / POS of the given word.
-    #[text_signature = "(word, add_lower=None)"]
-    fn get_data(&self, word: &str, add_lower: Option<bool>) -> Vec<(String, String)> {
+    #[text_signature = "(word, add_lower=None, use_compound_split_heuristic=None)"]
+    fn get_data(
+        &self,
+        word: &str,
+        add_lower: Option<bool>,
+        use_compound_split_heuristic: Option<bool>,
+    ) -> Vec<(String, String)> {
         self.tagger
-            .get_tags(
-                word,
-                add_lower.unwrap_or(self.options.always_add_lower_tags),
-                self.options.use_compound_split_heuristic,
-            )
+            .get_tags_with_options(word, add_lower, use_compound_split_heuristic)
             .into_iter()
             .map(|x| (x.lemma.as_ref().to_string(), x.pos.as_ref().to_string()))
             .collect()
@@ -342,10 +344,7 @@ impl PyTokenizer {
     ///     tagger (Tagger): The tagger dictionary.
     #[getter]
     fn tagger(&self) -> PyTagger {
-        PyTagger::new(
-            self.tokenizer.tagger().clone(),
-            (*self.tokenizer.options()).clone(),
-        )
+        self.tokenizer.tagger().clone().into()
     }
 
     /// Applies the full tokenization pipeline to the given text.

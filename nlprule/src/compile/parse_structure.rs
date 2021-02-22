@@ -15,7 +15,8 @@ use crate::rule::engine::*;
 use crate::rule::grammar::*;
 use crate::rule::{DisambiguationRule, Rule, Unification};
 
-// TODO: should be an option in config OR restricted to one sentence
+// this is set arbitrarily at the moment, could be an option
+#[inline]
 fn max_matches() -> usize {
     20
 }

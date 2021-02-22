@@ -1,0 +1,8 @@
+{
+    "use_compound_split_heuristic": true,
+    "always_add_lower_tags": false,
+    "extra_tags": [
+        "PKT",
+        "PRO:IND:DAT:SIN:NEU"
+    ]
+}

@@ -1,15 +1,9 @@
 {
     "allow_errors": false,
     "retain_last": false,
-    "use_compound_split_heuristic": true,
-    "always_add_lower_tags": false,
     "ignore_ids": [
         "SUB_BEAMTE.1",
         "SUB_BEAMTE.2"
-    ],
-    "extra_tags": [
-        "PKT",
-        "PRO:IND:DAT:SIN:NEU"
     ],
     "extra_join_regexes": [
         "(https?:\\/\\/(?:www\\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\\.[^\\s]{2,}|www\\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\\.[^\\s]{2,}|https?:\\/\\/(?:www\\.|(?!www))[a-zA-Z0-9]+\\.[^\\s]{2,}|www\\.[a-zA-Z0-9]+\\.[^\\s]{2,})"

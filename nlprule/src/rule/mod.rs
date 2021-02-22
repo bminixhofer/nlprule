@@ -169,7 +169,7 @@ impl DisambiguationRule {
             }
 
             self.disambiguations
-                .apply(groups, tokenizer.options().retain_last);
+                .apply(groups, tokenizer.lang_options().retain_last);
         }
     }
 
@@ -243,7 +243,7 @@ impl DisambiguationRule {
                 );
 
                 if tokenizer
-                    .options()
+                    .lang_options()
                     .known_failures
                     .contains(&format!("{}:{}", self.id, i))
                 {

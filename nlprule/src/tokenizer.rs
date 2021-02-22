@@ -63,16 +63,12 @@ pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
 
 /// Options for a tokenizer.
 #[derive(Serialize, Deserialize)]
-pub struct TokenizerOptions {
+pub(crate) struct TokenizerLangOptions {
     /// Whether to allow errors while constructing the tokenizer.
     pub allow_errors: bool,
     /// Whether to retain the last tag if disambiguation leads to an empty tag.
     /// Language-specific in LT so it has to be an option.
     pub retain_last: bool,
-    /// Whether to use a heuristic to split potential compound words.
-    pub use_compound_split_heuristic: bool,
-    /// Whether to always add tags for a lowercase version of the word when assigning part-of-speech tags.
-    pub always_add_lower_tags: bool,
     /// Disambiguation Rule IDs to use in this tokenizer.
     #[serde(default)]
     pub ids: Vec<String>,
@@ -82,9 +78,6 @@ pub struct TokenizerOptions {
     /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
     #[serde(default)]
     pub known_failures: Vec<String>,
-    /// Used part-of-speech tags which are not in the tagger dictionary.
-    #[serde(default)]
-    pub extra_tags: Vec<String>,
     /// Extra language-specific characters to split text on.
     #[serde(default)]
     pub extra_split_chars: Vec<char>,
@@ -93,17 +86,14 @@ pub struct TokenizerOptions {
     pub extra_join_regexes: Vec<Regex>,
 }
 
-impl Default for TokenizerOptions {
+impl Default for TokenizerLangOptions {
     fn default() -> Self {
-        TokenizerOptions {
+        TokenizerLangOptions {
             allow_errors: false,
             retain_last: false,
-            use_compound_split_heuristic: false,
-            always_add_lower_tags: false,
             ids: Vec::new(),
             ignore_ids: Vec::new(),
             known_failures: Vec::new(),
-            extra_tags: Vec::new(),
             extra_split_chars: Vec::new(),
             extra_join_regexes: Vec::new(),
         }
@@ -118,7 +108,7 @@ pub struct Tokenizer {
     pub(crate) sentencizer: srx::Rules,
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
-    pub(crate) options: Arc<TokenizerOptions>,
+    pub(crate) lang_options: Arc<TokenizerLangOptions>,
 }
 
 impl Tokenizer {
@@ -149,8 +139,8 @@ impl Tokenizer {
         &self.chunker
     }
 
-    pub fn options(&self) -> &Arc<TokenizerOptions> {
-        &self.options
+    pub(crate) fn lang_options(&self) -> &Arc<TokenizerLangOptions> {
+        &self.lang_options
     }
 
     pub(crate) fn disambiguate_up_to_id<'t>(
@@ -211,7 +201,7 @@ impl Tokenizer {
                 } else {
                     // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
                     tokens.extend(split(pretoken, |c| {
-                        split_char(c) || self.options.extra_split_chars.contains(&c)
+                        split_char(c) || self.lang_options.extra_split_chars.contains(&c)
                     }));
                 }
             }
@@ -221,7 +211,7 @@ impl Tokenizer {
         let mut joined_mask = vec![false; text.len()];
         let mut joins = Vec::new();
 
-        for regex in self.options.extra_join_regexes.iter() {
+        for regex in self.lang_options.extra_join_regexes.iter() {
             for mat in regex.find_iter(text) {
                 if !joined_mask[mat.start()..mat.end()].iter().any(|x| *x) {
                     joins.push(mat.start()..mat.end());
@@ -267,10 +257,10 @@ impl Tokenizer {
                 IncompleteToken {
                     word: Word::new_with_tags(
                         self.tagger.id_word(trimmed.into()),
-                        self.tagger.get_tags(
+                        self.tagger.get_tags_with_options(
                             trimmed,
-                            is_sentence_start || self.options.always_add_lower_tags,
-                            self.options.use_compound_split_heuristic,
+                            if is_sentence_start { Some(true) } else { None },
+                            None,
                         ),
                     ),
                     char_span: (char_start, current_char),

@@ -1,8 +1,10 @@
+use bimap::BiMap;
 use fs_err::File;
+use indexmap::IndexMap;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
@@ -18,11 +20,12 @@ use crate::{
         },
         DisambiguationRule, MatchGraph, Rule,
     },
-    rules::{Rules, RulesOptions},
+    rules::{Rules, RulesLangOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
-        Tokenizer, TokenizerOptions,
+        tag::{Tagger, TaggerLangOptions},
+        Tokenizer, TokenizerLangOptions,
     },
     types::*,
     utils::{parallelism::MaybeParallelIterator, regex::Regex},
@@ -30,8 +33,149 @@ use crate::{
 
 use super::{parse_structure::BuildInfo, Error};
 
+impl Tagger {
+    fn get_lines<S1: AsRef<Path>, S2: AsRef<Path>>(
+        paths: &[S1],
+        remove_paths: &[S2],
+    ) -> std::io::Result<Vec<(String, String, String)>> {
+        let mut output = Vec::new();
+        let mut disallowed: Vec<String> = Vec::new();
+
+        for path in remove_paths {
+            let file = File::open(path.as_ref())?;
+            let reader = std::io::BufReader::new(file);
+
+            for line in reader.lines() {
+                let line = line?;
+                if line.starts_with('#') {
+                    continue;
+                }
+
+                disallowed.push(line.to_string());
+            }
+        }
+
+        for path in paths {
+            let file = File::open(path.as_ref())?;
+            let reader = std::io::BufReader::new(file);
+
+            for line in reader.lines() {
+                let line = line?;
+                if line.starts_with('#') {
+                    continue;
+                }
+
+                if disallowed.contains(&line) {
+                    continue;
+                }
+
+                let parts: Vec<_> = line.split('\t').collect();
+
+                let word = parts[0].to_string();
+                let inflection = parts[1].to_string();
+                let tag = parts[2].to_string();
+
+                output.push((word, inflection, tag))
+            }
+        }
+
+        Ok(output)
+    }
+
+    /// Creates a tagger from raw files.
+    ///
+    /// # Arguments
+    /// * `paths`: Paths to files where each line contains the word, lemma and tag, respectively,
+    /// separated by tabs, to be added to the tagger.
+    /// * `remove_paths`: Paths to files where each line contains the word, lemma and tag, respectively,
+    /// separated by tabs, to be removed from the tagger if present in the files from `paths`.
+    pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
+        paths: &[S1],
+        remove_paths: &[S2],
+        common_words: &HashSet<String>,
+        options: Arc<TaggerLangOptions>,
+    ) -> std::io::Result<Self> {
+        let mut tags = DefaultHashMap::default();
+        let mut groups = DefaultHashMap::default();
+
+        let mut tag_store = HashSet::new();
+        let mut word_store = HashSet::new();
+
+        // hardcoded special tags
+        tag_store.insert("");
+        tag_store.insert("SENT_START");
+        tag_store.insert("SENT_END");
+        tag_store.insert("UNKNOWN");
+
+        // add language specific special tags
+        tag_store.extend(options.extra_tags.iter().map(|x| x.as_str()));
+
+        let lines = Tagger::get_lines(paths, remove_paths)?;
+
+        let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
+        for i in 0..punct.len() {
+            word_store.insert(&punct[i..(i + 1)]);
+        }
+
+        word_store.extend(common_words.iter().map(|x| x.as_str()));
+
+        for (word, inflection, tag) in lines.iter() {
+            word_store.insert(word);
+            word_store.insert(inflection);
+            tag_store.insert(tag);
+        }
+
+        // word store ids should be consistent across runs
+        let mut word_store: Vec<_> = word_store.iter().collect();
+        word_store.sort();
+
+        //  tag store ids should be consistent across runs
+        let mut tag_store: Vec<_> = tag_store.iter().collect();
+        tag_store.sort();
+
+        let word_store: BiMap<_, _> = word_store
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
+            .collect();
+        let tag_store: BiMap<_, _> = tag_store
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (x.to_string(), PosIdInt(i as u16)))
+            .collect();
+
+        for (word, inflection, tag) in lines.iter() {
+            let word_id = word_store.get_by_left(word).unwrap();
+            let inflection_id = word_store.get_by_left(inflection).unwrap();
+            let pos_id = tag_store.get_by_left(tag).unwrap();
+
+            let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
+            if !group.contains(word_id) {
+                group.push(*word_id);
+            }
+
+            tags.entry(*word_id)
+                .or_insert_with(IndexMap::new)
+                .entry(*inflection_id)
+                .or_insert_with(Vec::new)
+                .push(*pos_id);
+        }
+
+        Ok(Tagger {
+            tags,
+            groups,
+            word_store,
+            tag_store,
+            options,
+        })
+    }
+}
+
 impl MultiwordTagger {
-    pub fn from_dump<P: AsRef<Path>>(dump: P, info: &BuildInfo) -> Result<Self, io::Error> {
+    pub(in crate::compile) fn from_dump<P: AsRef<Path>>(
+        dump: P,
+        info: &BuildInfo,
+    ) -> Result<Self, io::Error> {
         let reader = BufReader::new(File::open(dump.as_ref())?);
         let mut multiwords = Vec::new();
 
@@ -58,7 +202,7 @@ impl MultiwordTagger {
 }
 
 impl TextMatcher {
-    pub fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
+    pub(in crate::compile) fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
         let graph = MatchGraph::default();
 
         // can not cache a matcher that depends on the graph
@@ -103,7 +247,7 @@ impl TextMatcher {
 }
 
 impl PosMatcher {
-    pub fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
+    pub(in crate::compile) fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
         let mut mask = vec![false; info.tagger().tag_store().len()];
         let graph = MatchGraph::default();
 
@@ -116,10 +260,10 @@ impl PosMatcher {
 }
 
 impl Rules {
-    pub fn from_xml<P: AsRef<Path>>(
+    pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
-        options: &RulesOptions,
+        options: Arc<RulesLangOptions>,
     ) -> Self {
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
@@ -202,13 +346,13 @@ impl Rules {
 }
 
 impl Tokenizer {
-    pub fn from_xml<P: AsRef<Path>>(
+    pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
         chunker: Option<chunk::Chunker>,
         multiword_tagger: Option<MultiwordTagger>,
         sentencizer: srx::Rules,
-        options: Arc<TokenizerOptions>,
+        options: Arc<TokenizerLangOptions>,
     ) -> Result<Self, Error> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
@@ -272,7 +416,7 @@ impl Tokenizer {
             chunker,
             multiword_tagger,
             rules,
-            options,
+            lang_options: options,
         })
     }
 }
@@ -284,7 +428,7 @@ struct ModelData {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct ContextData {
+pub(in crate::compile) struct ContextData {
     parameters: Vec<f32>,
     outcomes: Vec<usize>,
 }
@@ -312,7 +456,9 @@ impl From<ModelData> for chunk::Model {
 }
 
 impl chunk::Chunker {
-    pub fn from_json<R: std::io::Read>(reader: R) -> Result<chunk::Chunker, serde_json::Error> {
+    pub(in crate::compile) fn from_json<R: std::io::Read>(
+        reader: R,
+    ) -> Result<chunk::Chunker, serde_json::Error> {
         #[derive(Deserialize)]
         struct ChunkData {
             token_model: ModelData,
@@ -338,13 +484,13 @@ impl chunk::Chunker {
 }
 
 impl POSFilter {
-    pub fn new(matcher: PosMatcher) -> Self {
+    pub(in crate::compile) fn new(matcher: PosMatcher) -> Self {
         POSFilter { matcher }
     }
 }
 
 impl Regex {
-    pub fn from_java_regex(
+    pub(in crate::compile) fn from_java_regex(
         java_regex_str: &str,
         full_match: bool,
         case_sensitive: bool,
@@ -362,7 +508,7 @@ impl Regex {
 }
 
 impl Engine {
-    pub fn to_graph_id(&self, id: usize) -> Result<GraphId, Error> {
+    pub(in crate::compile) fn to_graph_id(&self, id: usize) -> Result<GraphId, Error> {
         let mut id = GraphId(id);
 
         let map = match &self {
@@ -410,7 +556,7 @@ mod composition {
             }
         }
 
-        pub fn mut_graph_ids(&mut self) -> Vec<&mut GraphId> {
+        pub(in crate::compile) fn mut_graph_ids(&mut self) -> Vec<&mut GraphId> {
             let mut ids = Vec::new();
 
             for atom in self.iter_mut() {
@@ -437,7 +583,11 @@ mod composition {
     }
 
     impl Matcher {
-        pub fn new_regex(regex: Regex, negate: bool, empty_always_false: bool) -> Self {
+        pub(in crate::compile) fn new_regex(
+            regex: Regex,
+            negate: bool,
+            empty_always_false: bool,
+        ) -> Self {
             Matcher {
                 matcher: either::Right(regex),
                 negate,
@@ -446,7 +596,7 @@ mod composition {
             }
         }
 
-        pub fn new_string(
+        pub(in crate::compile) fn new_string(
             string_or_idx: either::Either<String, GraphId>,
             negate: bool,
             case_sensitive: bool,
@@ -460,7 +610,7 @@ mod composition {
             }
         }
 
-        pub fn graph_id(&self) -> Option<GraphId> {
+        pub(in crate::compile) fn graph_id(&self) -> Option<GraphId> {
             if let either::Left(either::Right(id)) = &self.matcher {
                 Some(*id)
             } else {
@@ -468,7 +618,7 @@ mod composition {
             }
         }
 
-        pub fn mut_graph_id(&mut self) -> Option<&mut GraphId> {
+        pub(in crate::compile) fn mut_graph_id(&mut self) -> Option<&mut GraphId> {
             if let either::Left(either::Right(id)) = &mut self.matcher {
                 Some(id)
             } else {
@@ -478,14 +628,14 @@ mod composition {
     }
 
     impl Quantifier {
-        pub fn new(min: usize, max: usize) -> Self {
+        pub(in crate::compile) fn new(min: usize, max: usize) -> Self {
             assert!(max >= min);
             Quantifier { min, max }
         }
     }
 
     impl AndAtom {
-        pub fn and(atoms: Vec<Atom>) -> Atom {
+        pub(in crate::compile) fn and(atoms: Vec<Atom>) -> Atom {
             let mut atoms: Vec<_> = atoms
                 .into_iter()
                 .filter(|x| !matches!(x, Atom::TrueAtom { .. }))
@@ -502,7 +652,7 @@ mod composition {
     }
 
     impl OrAtom {
-        pub fn or(atoms: Vec<Atom>) -> Atom {
+        pub(in crate::compile) fn or(atoms: Vec<Atom>) -> Atom {
             let mut atoms: Vec<_> = atoms
                 .into_iter()
                 .filter(|x| !matches!(x, Atom::FalseAtom { .. }))
@@ -519,7 +669,7 @@ mod composition {
     }
 
     impl NotAtom {
-        pub fn not(atom: Atom) -> Atom {
+        pub(in crate::compile) fn not(atom: Atom) -> Atom {
             match atom {
                 Atom::TrueAtom { .. } => FalseAtom::default().into(),
                 Atom::FalseAtom { .. } => TrueAtom::default().into(),
@@ -529,7 +679,7 @@ mod composition {
     }
 
     impl OffsetAtom {
-        pub fn new(atom: Atom, offset: isize) -> Self {
+        pub(in crate::compile) fn new(atom: Atom, offset: isize) -> Self {
             OffsetAtom {
                 atom: Box::new(atom),
                 offset,
@@ -538,7 +688,7 @@ mod composition {
     }
 
     impl Composition {
-        pub fn new(mut parts: Vec<Part>) -> Result<Self, Error> {
+        pub(in crate::compile) fn new(mut parts: Vec<Part>) -> Result<Self, Error> {
             let mut id_to_idx = DefaultHashMap::default();
             id_to_idx.insert(GraphId(0), 0);
             let mut current_id = 1;
@@ -580,7 +730,7 @@ mod composition {
     }
 }
 
-pub mod filters {
+pub(in crate::compile) mod filters {
     use super::Error;
     use std::collections::HashMap;
 
@@ -631,7 +781,7 @@ pub mod filters {
         }
     }
 
-    pub fn get_filter(
+    pub(in crate::compile) fn get_filter(
         name: &str,
         args: HashMap<String, String>,
         engine: &Engine,

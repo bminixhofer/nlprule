@@ -14,7 +14,7 @@ use std::{
 
 /// Options for a rule set.
 #[derive(Serialize, Deserialize, Clone)]
-pub struct RulesOptions {
+pub(crate) struct RulesLangOptions {
     /// Whether to allow errors while constructing the rules.
     pub allow_errors: bool,
     /// Grammar Rule IDs to use in this set.
@@ -25,9 +25,9 @@ pub struct RulesOptions {
     pub ignore_ids: Vec<String>,
 }
 
-impl Default for RulesOptions {
+impl Default for RulesLangOptions {
     fn default() -> Self {
-        RulesOptions {
+        RulesLangOptions {
             allow_errors: true,
             ids: Vec::new(),
             ignore_ids: Vec::new(),
