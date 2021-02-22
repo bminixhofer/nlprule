@@ -7,7 +7,7 @@ use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
 use std::fs::Permissions;
 use std::{
-    io::{self, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, BufWriter, Cursor, Read},
     path::{Path, PathBuf},
     result,
 };
@@ -35,23 +35,13 @@ pub enum Error {
     CollationFailed(#[source] nlprule::compile::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
-/// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformDataFn:
-    for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
-{
-}
+/// Definition of the data transformation for the network retrieved, binencoded rules and tokenizer binaries.
+pub type TransformDataFn = Box<dyn Fn(&[u8], &mut Vec<u8>) -> result::Result<(), OtherError>>;
 
-impl<T> TransformDataFn for T where
-    T: for<'w, 'r> Fn(Box<dyn Read + 'r>, Box<dyn Write + 'w>) -> result::Result<(), OtherError>
-{
-}
-
-/// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer datasets.
-pub trait TransformPathFn: Fn(PathBuf) -> result::Result<PathBuf, OtherError> {}
-
-impl<T> TransformPathFn for T where T: Fn(PathBuf) -> result::Result<PathBuf, OtherError> {}
+/// Definition of the path transformation for the network retrieved, binencoded rules and tokenizer binaries.
+pub type TransformPathFn = Box<dyn Fn(PathBuf) -> result::Result<PathBuf, OtherError>>;
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Binary {
@@ -68,7 +58,6 @@ impl Binary {
     }
 }
 
-/// Stores the binaries for the given language and version in out_dir.
 /// Tries downloading the binaries from their distribution source.
 ///
 /// This implicitly unpacks the originally gzip'd sources and returns
@@ -77,7 +66,7 @@ fn obtain_binary_from_github_release(
     version: &str,
     lang_code: &str,
     binary: Binary,
-) -> Result<Cursor<Vec<u8>>> {
+) -> Result<Vec<u8>> {
     let filename = binary.filename(lang_code);
 
     let bytes = reqwest::blocking::get(&format!(
@@ -98,7 +87,7 @@ fn obtain_binary_from_github_release(
     let mut buffer = Vec::new();
     gz.read_to_end(&mut buffer)?;
 
-    Ok(Cursor::new(buffer))
+    Ok(buffer)
 }
 
 fn construct_cache_path(
@@ -106,7 +95,7 @@ fn construct_cache_path(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&dyn TransformPathFn>,
+    transform_path_fn: Option<&TransformPathFn>,
 ) -> Result<Option<PathBuf>> {
     let filename = binary.filename(lang_code);
 
@@ -122,43 +111,43 @@ fn construct_cache_path(
         .transpose()
 }
 
-/// Returns a `dyn Read` type, that is either directly feed
-/// from an in-memory slice or from the on disk cache.
+/// Returns the bytes for a binary which are either obtained
+/// from the on-disk cache or from the distribution source.
 /// If the on-disk cache is disabled or is not present,
 /// it will attempt to download it via [`obtain_binary_from_github_release`].
-/// The data is then written into `dest`.
 /// Also updates the cache.
+///
+/// If `transform_data_fn` is set, the bytes returned from this function are the output
+/// of `transform_data_fn` applied to the binencoded binaries.
 fn obtain_binary_cache_or_github(
     version: &str,
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&dyn TransformPathFn>,
-    transform_data_fn: Option<&dyn TransformDataFn>,
-) -> Result<Box<dyn Read>> {
+    transform_path_fn: Option<&TransformPathFn>,
+    transform_data_fn: Option<&TransformDataFn>,
+) -> Result<Vec<u8>> {
     let cache_path =
         construct_cache_path(version, lang_code, binary, cache_dir, transform_path_fn)?;
 
     // if the file can be read, the data is already cached and the transform was applied before
     if let Some(ref cache_path) = cache_path {
         if let Ok(bytes) = fs::read(cache_path) {
-            return Ok(Box::new(Cursor::new(bytes)));
+            return Ok(bytes);
         }
     }
 
     // the binencoded data from github
-    let reader_binenc = obtain_binary_from_github_release(version, lang_code, binary)?;
+    let bytes_binenc = obtain_binary_from_github_release(version, lang_code, binary)?;
 
     // apply the transform if any to an intermediate buffer
-    let mut reader_transformed = if let Some(transform_data_fn) = transform_data_fn {
-        // TODO this is not optimal, the additional copy is a bit annoying
-        let mut intermediate = Box::new(Cursor::new(Vec::<u8>::new()));
-        transform_data_fn(Box::new(reader_binenc), Box::new(&mut intermediate))
+    let bytes_transformed = if let Some(transform_data_fn) = transform_data_fn {
+        let mut intermediate = Vec::<u8>::new();
+        transform_data_fn(bytes_binenc.as_slice(), &mut intermediate)
             .map_err(Error::TransformError)?;
-        intermediate.seek(SeekFrom::Start(0_u64))?;
         intermediate
     } else {
-        Box::new(reader_binenc)
+        bytes_binenc
     };
 
     // update the cache entry
@@ -169,13 +158,10 @@ fn obtain_binary_cache_or_github(
             .create(true)
             .write(true)
             .open(cache_path)?;
-        io::copy(&mut reader_transformed, &mut cache_file)?;
+        io::copy(&mut bytes_transformed.as_slice(), &mut cache_file)?;
     }
 
-    // move the cursor back to the beginning
-    reader_transformed.seek(SeekFrom::Start(0_u64))?;
-
-    Ok(reader_transformed)
+    Ok(bytes_transformed)
 }
 
 fn assure_binary_availability(
@@ -183,11 +169,11 @@ fn assure_binary_availability(
     lang_code: &str,
     binary: Binary,
     cache_dir: Option<&PathBuf>,
-    transform_path_fn: Option<&dyn TransformPathFn>,
-    transform_data_fn: Option<&dyn TransformDataFn>,
+    transform_path_fn: Option<&TransformPathFn>,
+    transform_data_fn: Option<&TransformDataFn>,
     out: PathBuf,
 ) -> Result<()> {
-    let mut source = obtain_binary_cache_or_github(
+    let source = obtain_binary_cache_or_github(
         version,
         lang_code,
         binary,
@@ -201,7 +187,7 @@ fn assure_binary_availability(
         .create(true)
         .write(true)
         .open(out)?;
-    io::copy(&mut source, &mut out_file)?;
+    io::copy(&mut source.as_slice(), &mut out_file)?;
     Ok(())
 }
 
@@ -269,8 +255,8 @@ pub struct BinaryBuilder {
     fallback_to_build_dir: bool,
     build_dir: Option<PathBuf>,
     outputs: Vec<PathBuf>,
-    transform_path_fn: Option<Box<dyn TransformPathFn>>,
-    transform_data_fn: Option<Box<dyn TransformDataFn>>,
+    transform_path_fn: Option<TransformPathFn>,
+    transform_data_fn: Option<TransformDataFn>,
 }
 
 impl BinaryBuilder {
@@ -278,18 +264,14 @@ impl BinaryBuilder {
     /// github release resource --[fn transform]--> $cache_dir --[fn postprocess]--> $OUT_DIR/
     /// ```
     ///
-    /// ```plain
-    /// github release resource --[fn transform]--> $OUT_DIR --[fn postprocess]--> $OUT_DIR/
-    /// ```
-    ///
     /// Acquires the rule and tokenizer binaries for one language by:
     /// - Trying to download them from their distribution source (or load them local cache).
-    /// - If they are not found (i. e. a dev version of nlprule is used) and `fallback_to_build_dir`is true
-    /// downloads the latest build directory  and builds the binaries from it.
+    /// - If they are not found (i. e. a dev version of nlprule is used) and `fallback_to_build_dir` is true
+    /// downloads the latest build directory and builds the binaries from it.
     /// This can still fail if the dev version is sufficiently outdated for the latest build dir.
     /// In that case, the user is encouraged to update to a release or a newer git sha.
     fn build_language(&mut self, lang_code: &str) -> Result<()> {
-        // adjust the destination path for now
+        // adjust the destination path
         let path_transform = |out: PathBuf| -> Result<PathBuf> {
             Ok(
                 if let Some(ref transform_path_fn) = self.transform_path_fn {
@@ -315,8 +297,8 @@ impl BinaryBuilder {
                 lang_code,
                 *binary,
                 self.cache_dir.as_ref(),
-                self.transform_path_fn.as_ref().map(|x| x.as_ref()),
-                self.transform_data_fn.as_ref().map(|x| x.as_ref()),
+                self.transform_path_fn.as_ref(),
+                self.transform_data_fn.as_ref(),
                 out,
             ) {
                 Err(Error::BinariesNotFound) => {
@@ -369,11 +351,17 @@ impl BinaryBuilder {
                 assert_ne!(transfer_buffer_rules.len(), 0);
                 assert_ne!(transfer_buffer_tokenizer.len(), 0);
 
-                transform_data_fn(Box::new(&mut transfer_buffer_rules.as_slice()), Box::new(rules_sink))
-                    .map_err(Error::TransformError)?;
+                let mut transformed_buffer_rules = Vec::new();
+                let mut transformed_buffer_tokenizer = Vec::new();
+
                 transform_data_fn(
-                    Box::new(&mut transfer_buffer_tokenizer.as_slice()),
-                    Box::new(tokenizer_sink),
+                    transfer_buffer_rules.as_slice(),
+                    &mut transformed_buffer_rules,
+                )
+                .map_err(Error::TransformError)?;
+                transform_data_fn(
+                    transfer_buffer_tokenizer.as_slice(),
+                    &mut transformed_buffer_tokenizer,
                 )
                 .map_err(Error::TransformError)?;
             } else {
@@ -506,11 +494,12 @@ impl BinaryBuilder {
     /// Attention: Any compression applied here, must be undone in the
     /// `fn postprocess` provided closure to retain the original binenc file
     /// to be consumed by the application code.
-    pub fn transform(
-        mut self,
-        proc_fn: &'static (dyn TransformDataFn),
-        path_fn: &'static (dyn TransformPathFn),
-    ) -> Self {
+    pub fn transform<D, P>(mut self, proc_fn: D, path_fn: P) -> Self
+    where
+        // these signatures have to match the `TransformDataFn` and `TransformPathFn` types
+        D: Fn(&[u8], &mut Vec<u8>) -> result::Result<(), OtherError> + 'static,
+        P: Fn(PathBuf) -> result::Result<PathBuf, OtherError> + 'static,
+    {
         self.transform_data_fn = Some(Box::new(proc_fn));
         self.transform_path_fn = Some(Box::new(path_fn));
         self
@@ -521,7 +510,7 @@ impl BinaryBuilder {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```rust
     /// # use nlprule_build::BinaryBuilder;
     /// # use std::io::Write;
     /// # let tempdir = tempdir::TempDir::new("builder_test")?;
@@ -529,14 +518,12 @@ impl BinaryBuilder {
     /// #
     /// # let mut builder = BinaryBuilder::new(&["en"], tempdir).version("0.3.0");
     /// builder
-    ///    .build()
-    ///    .validate()
+    ///    .build()?
     ///    .postprocess(
-    ///        |buffer, writer| {
-    ///            Ok(
-    ///                flate2::write::GzEncoder::new(writer, flate2::Compression::default())
-    ///                    .write_all(&buffer)?,
-    ///            )
+    ///        |reader, mut writer| {
+    ///            let mut encoder = flate2::read::GzEncoder::new(reader, flate2::Compression::default());
+    ///            std::io::copy(&mut encoder, &mut writer)?;
+    ///            Ok(())
     ///        },
     ///        |p| {
     ///            let mut path = p.as_os_str().to_os_string();
@@ -719,21 +706,12 @@ mod tests {
         let builder = BinaryBuilder::new(&["en"], tempdir)
             .version("0.3.0")
             .transform(
-                &|mut buffer, mut writer| {
-                    let mut data = Vec::new();
-                    buffer.read_to_end(&mut data)?;
-                    let data = smush::encode(
-                        data.as_slice(),
-                        smush::Codec::Zstd,
-                        smush::Quality::Maximum,
-                    )?;
+                |buffer, writer| {
+                    let data = smush::encode(buffer, smush::Codec::Zstd, smush::Quality::Maximum)?;
                     writer.write_all(&data)?;
-
-                    // XXX hangs forever, both with `smush` and `brotli` directly
-                    // let _ = brotli::BrotliCompress(&mut buffer, &mut sink, &Default::default())?;
                     Ok(())
                 },
-                &|p: PathBuf| {
+                |p: PathBuf| {
                     let mut s = p.to_string_lossy().to_string();
                     s.push_str(".zstd");
                     Ok(PathBuf::from(s))
@@ -742,14 +720,11 @@ mod tests {
             .build()?
             .postprocess(
                 |mut buffer, mut writer| {
-                    dbg!("postprocessing");
                     let mut tmp = Vec::new();
                     buffer.read_to_end(&mut tmp)?;
                     let data = smush::decode(tmp.as_slice(), smush::Codec::Zstd)?;
                     writer.write_all(data.as_slice())?;
                     Ok(())
-                    // XXX
-                    // Ok(brotli::BrotliDecompress(&mut buffer, &mut writer)?)
                 },
                 |p| {
                     let path = p.to_string_lossy();
