@@ -13,7 +13,7 @@ use std::{
 };
 
 /// Options for a rule set.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RulesLangOptions {
     /// Whether to allow errors while constructing the rules.
     pub allow_errors: bool,

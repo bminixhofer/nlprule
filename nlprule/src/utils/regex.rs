@@ -15,6 +15,15 @@ pub struct Regex {
     regex: AtomicLazyCell<regex_impl::Regex>,
 }
 
+impl Clone for Regex {
+    fn clone(&self) -> Self {
+        Regex {
+            regex_str: self.regex_str.clone(),
+            regex: AtomicLazyCell::new(),
+        }
+    }
+}
+
 impl Serialize for Regex {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

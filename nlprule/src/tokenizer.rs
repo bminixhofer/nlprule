@@ -62,7 +62,7 @@ pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
 }
 
 /// Options for a tokenizer.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TokenizerLangOptions {
     /// Whether to allow errors while constructing the tokenizer.
     pub allow_errors: bool,
@@ -108,7 +108,7 @@ pub struct Tokenizer {
     pub(crate) sentencizer: srx::Rules,
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
-    pub(crate) lang_options: Arc<TokenizerLangOptions>,
+    pub(crate) lang_options: TokenizerLangOptions,
 }
 
 impl Tokenizer {
@@ -139,7 +139,7 @@ impl Tokenizer {
         &self.chunker
     }
 
-    pub(crate) fn lang_options(&self) -> &Arc<TokenizerLangOptions> {
+    pub(crate) fn lang_options(&self) -> &TokenizerLangOptions {
         &self.lang_options
     }
 

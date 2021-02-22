@@ -8,7 +8,6 @@ use std::{
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
-    sync::Arc,
 };
 
 use crate::{
@@ -93,7 +92,7 @@ impl Tagger {
         paths: &[S1],
         remove_paths: &[S2],
         common_words: &HashSet<String>,
-        options: Arc<TaggerLangOptions>,
+        lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
         let mut tags = DefaultHashMap::default();
         let mut groups = DefaultHashMap::default();
@@ -108,7 +107,7 @@ impl Tagger {
         tag_store.insert("UNKNOWN");
 
         // add language specific special tags
-        tag_store.extend(options.extra_tags.iter().map(|x| x.as_str()));
+        tag_store.extend(lang_options.extra_tags.iter().map(|x| x.as_str()));
 
         let lines = Tagger::get_lines(paths, remove_paths)?;
 
@@ -166,7 +165,7 @@ impl Tagger {
             groups,
             word_store,
             tag_store,
-            options,
+            lang_options,
         })
     }
 }
@@ -263,7 +262,7 @@ impl Rules {
     pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
-        options: Arc<RulesLangOptions>,
+        options: RulesLangOptions,
     ) -> Self {
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
@@ -352,7 +351,7 @@ impl Tokenizer {
         chunker: Option<chunk::Chunker>,
         multiword_tagger: Option<MultiwordTagger>,
         sentencizer: srx::Rules,
-        options: Arc<TokenizerLangOptions>,
+        lang_options: TokenizerLangOptions,
     ) -> Result<Self, Error> {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
@@ -372,8 +371,8 @@ impl Tokenizer {
                     match DisambiguationRule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if error.is_none()
-                                && (options.ids.is_empty() || options.ids.contains(&id))
-                                && !options.ignore_ids.contains(&id)
+                                && (lang_options.ids.is_empty() || lang_options.ids.contains(&id))
+                                && !lang_options.ignore_ids.contains(&id)
                             {
                                 rule.id = id;
 
@@ -400,7 +399,7 @@ impl Tokenizer {
             .collect();
 
         if let Some(x) = error {
-            if options.allow_errors {
+            if lang_options.allow_errors {
                 warn!("Error constructing Disambiguator: {}", x)
             } else {
                 return Err(Error::Unexpected(format!(
@@ -416,7 +415,7 @@ impl Tokenizer {
             chunker,
             multiword_tagger,
             rules,
-            lang_options: options,
+            lang_options,
         })
     }
 }
