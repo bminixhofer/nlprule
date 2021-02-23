@@ -1,9 +1,7 @@
 {
     "allow_errors": false,
     "ignore_ids": [
-        "PRP_PAST_PART.0",
-        "INCORRECT_POSSESSIVE_FORM_AFTER_A_NUMBER",
-        "PRP_MD_NN.2",
-        "VERB_APOSTROPHE_S.3"
+        "GRAMMAR/PRP_MD_NN/2",
+        "TYPOS/VERB_APOSTROPHE_S/3"
     ]
 }
