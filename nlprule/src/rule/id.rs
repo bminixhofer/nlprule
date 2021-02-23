@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt, num::ParseIntError};
+use std::{
+    convert::TryFrom,
+    fmt,
+    hash::{Hash, Hasher},
+    num::ParseIntError,
+};
 use unicase::UniCase;
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -10,7 +15,7 @@ pub enum Error {
     ParseStringError(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Default, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialOrd, Ord)]
 pub struct Category(String);
 
 impl Eq for Category {}
@@ -20,7 +25,13 @@ impl PartialEq<Category> for Category {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Default, PartialOrd, Ord)]
+impl Hash for Category {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        UniCase::new(&self.0).hash(state)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialOrd, Ord)]
 pub struct Group {
     parent: Category,
     inner: String,
@@ -29,7 +40,14 @@ pub struct Group {
 impl Eq for Group {}
 impl PartialEq<Group> for Group {
     fn eq(&self, other: &Group) -> bool {
-        UniCase::new(&self.inner) == UniCase::new(&other.inner)
+        self.parent.eq(&other.parent) && UniCase::new(&self.inner) == UniCase::new(&other.inner)
+    }
+}
+
+impl Hash for Group {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.parent.hash(state);
+        UniCase::new(&self.inner).hash(state);
     }
 }
 
@@ -125,7 +143,7 @@ impl TryFrom<String> for Selector {
             [category, group, index] => {
                 Selector::Index(Category::new(*category).join(*group).join(index.parse()?))
             }
-            _ => return Err(Error::ParseStringError(value.into())),
+            _ => return Err(Error::ParseStringError(value)),
         })
     }
 }
