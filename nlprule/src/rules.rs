@@ -18,10 +18,10 @@ use std::{
 pub(crate) struct RulesLangOptions {
     /// Whether to allow errors while constructing the rules.
     pub allow_errors: bool,
-    /// Grammar Rule IDs to use in this set.
+    /// Grammar Rule selectors to use in this set.
     #[serde(default)]
     pub ids: Vec<Selector>,
-    /// Grammar Rule IDs to ignore in this set.
+    /// Grammar Rule selectors to ignore in this set.
     #[serde(default)]
     pub ignore_ids: Vec<Selector>,
 }

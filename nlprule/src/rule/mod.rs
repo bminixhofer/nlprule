@@ -15,7 +15,7 @@ use std::fmt;
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
 pub(crate) mod grammar;
-pub(crate) mod id;
+pub mod id;
 
 use engine::Engine;
 
@@ -83,7 +83,7 @@ impl Unification {
 /// ```
 #[derive(Serialize, Deserialize)]
 pub struct DisambiguationRule {
-    pub(crate) id: String,
+    pub(crate) id: Index,
     pub(crate) engine: Engine,
     pub(crate) disambiguations: disambiguation::Disambiguation,
     pub(crate) filter: Option<Filter>,
@@ -104,8 +104,8 @@ impl Changes {
 
 impl DisambiguationRule {
     /// Get a unique identifier of this rule.
-    pub fn id(&self) -> &str {
-        self.id.as_str()
+    pub fn id(&self) -> &Index {
+        &self.id
     }
 
     pub(crate) fn apply<'t>(&'t self, tokens: &[Token<'t>], tokenizer: &Tokenizer) -> Changes {
