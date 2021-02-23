@@ -26,7 +26,7 @@ def test_correct(tokenizer_and_rules):
     )
 
     # there is a rule for this but it is turned off
-    assert rules.correct("He is friend.") == "He is friend."
+    assert rules.correct("I can not go.") == "I can not go."
 
     assert rules.correct("I can due his homework.") == "I can do his homework."
 
@@ -66,17 +66,16 @@ def test_rules_inspectable(tokenizer_and_rules):
 
     suggestion = rules.suggest("He was taken back by my response.")[0]
 
-    rule = rules.rule(suggestion.source)
+    rule = rules.select(suggestion.source)[0]
     assert rule.id == suggestion.source
 
     # metadata of the rule itself
     assert rule.short == "Commonly confused word"
     assert rule.url == "https://www.merriam-webster.com/dictionary/take%20aback"
-    assert rule.id == "BACK_ABACK"
+    assert rule.id == "CONFUSED_WORDS/BACK_ABACK/0"
     assert rule.name == "taken back (aback) by"
 
     # category related metadata
-    assert rule.category_id == "CONFUSED_WORDS"
     assert rule.category_name == "Commonly Confused Words"
     assert rule.category_type == "misspelling"
 
@@ -106,3 +105,14 @@ def test_pickle_roundtrip_works(tokenizer_and_rules):
     (tokenizer, rules) = pickle.loads(dump)
 
     assert len(rules.rules) > 0
+
+
+def test_invalid_selector_fails(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    with pytest.raises(ValueError):
+        rule = rules.select("GRAMMAR///")
+
+    with pytest.raises(ValueError):
+        # index has to be integer
+        rule = rules.select("x/y/z")

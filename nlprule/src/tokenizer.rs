@@ -5,6 +5,7 @@
 //! [DisambiguationRule][crate::rule::DisambiguationRule]s.
 
 use crate::{
+    rule::id::{Index, Selector},
     types::*,
     utils::{parallelism::MaybeParallelRefIterator, regex::Regex},
     Error,
@@ -69,12 +70,12 @@ pub(crate) struct TokenizerLangOptions {
     /// Whether to retain the last tag if disambiguation leads to an empty tag.
     /// Language-specific in LT so it has to be an option.
     pub retain_last: bool,
-    /// Disambiguation Rule IDs to use in this tokenizer.
+    /// Disambiguation Rule selectors to use in this tokenizer.
     #[serde(default)]
-    pub ids: Vec<String>,
-    /// Disambiguation Rule IDs to ignore in this tokenizer.
+    pub ids: Vec<Selector>,
+    /// Disambiguation Rule selectors to ignore in this tokenizer.
     #[serde(default)]
-    pub ignore_ids: Vec<String>,
+    pub ignore_ids: Vec<Selector>,
     /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
     #[serde(default)]
     pub known_failures: Vec<String>,
@@ -146,10 +147,10 @@ impl Tokenizer {
     pub(crate) fn disambiguate_up_to_id<'t>(
         &'t self,
         mut tokens: Vec<IncompleteToken<'t>>,
-        id: Option<&str>,
+        id: Option<&Index>,
     ) -> Vec<DisambiguatedToken<'t>> {
         let n = id.map_or(self.rules.len(), |id| {
-            self.rules.iter().position(|x| x.id == id).unwrap()
+            self.rules.iter().position(|x| x.id == *id).unwrap()
         });
         let mut i = 0;
 

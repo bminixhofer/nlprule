@@ -1,6 +1,6 @@
 use flate2::read::GzDecoder;
 use nlprule::{
-    rule::{Example, Rule},
+    rule::{id::Selector, Example, Rule},
     rules::{apply_suggestions, Rules},
     tokenizer::tag::Tagger,
     tokenizer::Tokenizer,
@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyString;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{
+    convert::TryFrom,
     fs,
     io::{Cursor, Read},
     path::PathBuf,
@@ -452,7 +453,6 @@ impl PyExample {
 /// * short (Option[str]): A short description of this rule e. g. "Possible typo".
 /// * examples (List[Example]): Examples associated with this rule. Always at least one.
 /// * name (str): A human-readable name for this rule.
-/// * category_id (str): ID of the category this rule is in.
 /// * category_name (str): A human-readable name of the category this rule is in.
 /// * category_type (Option[str]): The type of the category this rule is in e. g. "style" or "grammar".
 #[pyclass(name = "Rule", module = "nlprule")]
@@ -462,7 +462,6 @@ struct PyRule {
     short: Option<String>,
     examples: Vec<Py<PyExample>>,
     name: String,
-    category_id: String,
     category_name: String,
     category_type: Option<String>,
 }
@@ -470,7 +469,7 @@ struct PyRule {
 impl PyRule {
     fn from_rule(py: Python, rule: &Rule) -> PyResult<Self> {
         Ok(PyRule {
-            id: rule.id().to_owned(),
+            id: rule.id().to_string(),
             url: rule.url().map(String::from),
             short: rule.short().map(String::from),
             examples: rule
@@ -479,7 +478,6 @@ impl PyRule {
                 .map(|x| PyExample::from_example(py, x).and_then(|x| Py::new(py, x)))
                 .collect::<PyResult<Vec<_>>>()?,
             name: rule.name().to_owned(),
-            category_id: rule.category_id().to_owned(),
             category_name: rule.category_name().to_owned(),
             category_type: rule.category_type().map(String::from),
         })
@@ -511,11 +509,6 @@ impl PyRule {
     #[getter]
     fn name(&self) -> &str {
         &self.name
-    }
-
-    #[getter]
-    fn category_id(&self) -> &str {
-        &self.category_id
     }
 
     #[getter]
@@ -586,13 +579,15 @@ impl PyRules {
             .collect::<PyResult<Vec<_>>>()
     }
 
-    /// Finds a rule by ID.
-    fn rule(&self, py: Python, id: &str) -> PyResult<Option<PyRule>> {
-        if let Some(rule) = self.rules.rule(id) {
-            Ok(Some(PyRule::from_rule(py, rule)?))
-        } else {
-            Ok(None)
-        }
+    /// Finds a rule by selector.
+    fn select(&self, py: Python, id: &str) -> PyResult<Vec<PyRule>> {
+        let selector = Selector::try_from(id.to_owned())
+            .map_err(|err| PyValueError::new_err(format!("error creating selector: {}", err)))?;
+
+        self.rules
+            .select(&selector)
+            .map(|rule| PyRule::from_rule(py, rule))
+            .collect()
     }
 
     /// Get suggestions for the given text.

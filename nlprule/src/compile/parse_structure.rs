@@ -1291,7 +1291,7 @@ impl DisambiguationRule {
             filter,
             disambiguations,
             examples,
-            id: String::new(),
+            id: Index::default(),
         })
     }
 }

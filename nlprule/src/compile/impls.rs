@@ -362,9 +362,17 @@ impl Rules {
             );
         }
 
+        let mut default_selectors: Vec<_> = to_disable
+            .into_iter()
+            .map(|selector| (selector, false))
+            .collect();
+        // created from a hash set so there are no two equal elements
+        default_selectors.sort_unstable();
+
         Rules {
             rules,
-            ..Default::default()
+            default_selectors,
+            enabled_mask: Default::default(),
         }
     }
 }
@@ -385,19 +393,26 @@ impl Tokenizer {
             .into_iter()
             .filter_map(|x| match x {
                 Ok((rule_structure, group, _)) => {
-                    let id = rule_structure.id.as_ref().map_or_else(
-                        || {
-                            let group = group.expect("must have group if ID not set");
-                            format!("{}.{}", group.id, group.n)
-                        },
-                        |x| x.clone(),
-                    );
+                    let id = Category::new("DISAMBIGUATION");
+
+                    let id = if let Some(group) = &group {
+                        id.join(group.id.as_str()).join(group.n)
+                    } else {
+                        id.join(
+                            rule_structure
+                                .id
+                                .as_ref()
+                                .expect("ID must be set if not in group."),
+                        )
+                        .join(0)
+                    };
 
                     match DisambiguationRule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if error.is_none()
-                                && (lang_options.ids.is_empty() || lang_options.ids.contains(&id))
-                                && !lang_options.ignore_ids.contains(&id)
+                                && (lang_options.ids.is_empty()
+                                    || lang_options.ids.iter().any(|x| x.is_match(&id)))
+                                && !lang_options.ignore_ids.iter().any(|x| x.is_match(&id))
                             {
                                 rule.id = id;
 
