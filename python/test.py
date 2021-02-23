@@ -116,3 +116,14 @@ def test_invalid_selector_fails(tokenizer_and_rules):
     with pytest.raises(ValueError):
         # index has to be integer
         rule = rules.select("x/y/z")
+
+
+def test_selector_case_insensitive(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    assert (
+        [x.id for x in rules.select("grammar")]
+        == [x.id for x in rules.select("Grammar")]
+        == [x.id for x in rules.select("GRAMMAR")]
+        == [x.id for x in rules.select("GRaMmAr")]
+    )

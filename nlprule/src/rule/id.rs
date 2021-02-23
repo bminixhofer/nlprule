@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt, num::ParseIntError};
+use unicase::UniCase;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
@@ -9,13 +10,27 @@ pub enum Error {
     ParseStringError(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, Default, PartialOrd, Ord)]
 pub struct Category(String);
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+impl Eq for Category {}
+impl PartialEq<Category> for Category {
+    fn eq(&self, other: &Category) -> bool {
+        UniCase::new(&self.0) == UniCase::new(&other.0)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, Default, PartialOrd, Ord)]
 pub struct Group {
     parent: Category,
     inner: String,
+}
+
+impl Eq for Group {}
+impl PartialEq<Group> for Group {
+    fn eq(&self, other: &Group) -> bool {
+        UniCase::new(&self.inner) == UniCase::new(&other.inner)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
