@@ -1,14 +1,15 @@
 //! Sets of grammatical error correction rules.
 
-use crate::tokenizer::Tokenizer;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
+use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
 use fs_err::File;
+use lazycell::AtomicLazyCell;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
-    iter::{FromIterator, IntoIterator, Iterator},
+    iter::{IntoIterator, Iterator},
     path::Path,
 };
 
@@ -19,10 +20,10 @@ pub(crate) struct RulesLangOptions {
     pub allow_errors: bool,
     /// Grammar Rule IDs to use in this set.
     #[serde(default)]
-    pub ids: Vec<String>,
+    pub ids: Vec<Selector>,
     /// Grammar Rule IDs to ignore in this set.
     #[serde(default)]
-    pub ignore_ids: Vec<String>,
+    pub ignore_ids: Vec<Selector>,
 }
 
 impl Default for RulesLangOptions {
@@ -39,6 +40,9 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
+    pub(crate) default_selectors: Vec<(Selector, bool)>,
+    #[serde(skip)]
+    pub(crate) enabled_mask: AtomicLazyCell<Vec<bool>>,
 }
 
 impl Rules {
@@ -62,9 +66,12 @@ impl Rules {
         &self.rules
     }
 
-    /// Finds a rule by ID.
-    pub fn rule(&self, id: &str) -> Option<&Rule> {
-        self.rules.iter().find(|x| x.id() == id)
+    /// Returns an iterator over all rules matching the selector.
+    pub fn select<'a>(&'a self, selector: &'a Selector) -> RulesIter<'a> {
+        RulesIter {
+            inner: self.rules.iter(),
+            selector: Some(selector),
+        }
     }
 
     /// Compute the suggestions for the given tokens by checking all rules.
@@ -73,11 +80,35 @@ impl Rules {
             return Vec::new();
         }
 
+        let mask = if let Some(mask) = self.enabled_mask.borrow() {
+            mask
+        } else {
+            let mask = self
+                .rules
+                .iter()
+                .map(|rule| {
+                    self.default_selectors
+                        .iter()
+                        .rev()
+                        .find_map(|(selector, enabled)| {
+                            if selector.is_match(rule.id()) {
+                                Some(*enabled)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(true)
+                })
+                .collect();
+            self.enabled_mask.fill(mask).ok();
+            self.enabled_mask.borrow().unwrap()
+        };
+
         let mut output: Vec<(usize, Suggestion)> = self
             .rules
             .maybe_par_iter()
             .enumerate()
-            .filter(|(_, x)| x.on())
+            .filter(|(i, _)| mask[*i])
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
@@ -143,7 +174,10 @@ impl Rules {
 
     /// A referential iterator.
     pub fn iter(&self) -> RulesIter {
-        RulesIter::new(self)
+        RulesIter {
+            inner: self.rules.iter(),
+            selector: None,
+        }
     }
 }
 
@@ -168,21 +202,17 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
 
 /// A wrapping helper iterator.
 pub struct RulesIter<'a> {
+    selector: Option<&'a Selector>,
     inner: std::slice::Iter<'a, Rule>,
-}
-
-impl<'a> RulesIter<'a> {
-    fn new(owner: &'a Rules) -> Self {
-        Self {
-            inner: owner.rules.iter(),
-        }
-    }
 }
 
 impl<'a> Iterator for RulesIter<'a> {
     type Item = &'a Rule;
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+        let selector = self.selector.as_ref();
+
+        self.inner
+            .find(|rule| selector.map_or(true, |s| s.is_match(rule.id())))
     }
 }
 
@@ -204,15 +234,5 @@ impl IntoIterator for Rules {
         RulesIntoIter {
             inner: self.rules.into_iter(),
         }
-    }
-}
-
-impl<R> FromIterator<R> for Rules
-where
-    R: Into<Rule>,
-{
-    fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
-        let rules = iter.into_iter().map(|x| x.into()).collect::<Vec<Rule>>();
-        Self { rules }
     }
 }

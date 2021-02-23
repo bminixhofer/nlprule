@@ -13,7 +13,7 @@ use crate::rule::engine::composition::concrete::*;
 use crate::rule::engine::composition::*;
 use crate::rule::engine::*;
 use crate::rule::grammar::*;
-use crate::rule::{DisambiguationRule, Rule, Unification};
+use crate::rule::{id::Index, DisambiguationRule, Rule, Unification};
 
 // this is set arbitrarily at the moment, could be an option
 #[inline]
@@ -895,10 +895,8 @@ impl Rule {
             url: data.url.map(|x| x.to_string()),
             short: data.short.map(|x| x.to_string()),
             // attributes below need information from rule group / category, so are set later
-            id: String::new(),
+            id: Index::default(),
             name: String::new(),
-            on: true,
-            category_id: String::new(),
             category_name: String::new(),
             category_type: None,
         })

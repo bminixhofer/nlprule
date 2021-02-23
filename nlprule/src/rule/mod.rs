@@ -15,6 +15,7 @@ use std::fmt;
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
 pub(crate) mod grammar;
+pub(crate) mod id;
 
 use engine::Engine;
 
@@ -24,6 +25,7 @@ pub use grammar::Example;
 use self::{
     disambiguation::POSFilter,
     engine::{composition::GraphId, EngineMatches},
+    id::Index,
 };
 
 /// A *Unification* makes an otherwise matching pattern invalid if no combination of its filters
@@ -370,18 +372,16 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
 /// ```
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Rule {
-    pub(crate) id: String,
+    pub(crate) id: Index,
     pub(crate) engine: Engine,
     pub(crate) examples: Vec<Example>,
     pub(crate) suggesters: Vec<grammar::Synthesizer>,
     pub(crate) message: grammar::Synthesizer,
     pub(crate) start: GraphId,
     pub(crate) end: GraphId,
-    pub(crate) on: bool,
     pub(crate) url: Option<String>,
     pub(crate) short: Option<String>,
     pub(crate) name: String,
-    pub(crate) category_id: String,
     pub(crate) category_name: String,
     pub(crate) category_type: Option<String>,
     pub(crate) unification: Option<Unification>,
@@ -389,19 +389,14 @@ pub struct Rule {
 
 impl fmt::Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.id.as_str(), self.name.as_str())
+        write!(f, "{}", self.id)
     }
 }
 
 impl Rule {
     /// Get a unique identifier of this rule.
-    pub fn id(&self) -> &str {
-        self.id.as_str()
-    }
-
-    /// Get whether this rule is "turned on" i. e. whether it should be used by the rule set.
-    pub fn on(&self) -> bool {
-        self.on
+    pub fn id(&self) -> &Index {
+        &self.id
     }
 
     /// Gets a short text describing this rule e.g. "Possible typo" if there is one.
@@ -419,19 +414,9 @@ impl Rule {
         &self.examples
     }
 
-    /// Turn this rule on.
-    pub fn set_on(&mut self, on: bool) {
-        self.on = on;
-    }
-
     /// Gets a human-readable name of this rule.
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    /// Gets the ID of the category this rule is in.
-    pub fn category_id(&self) -> &str {
-        &self.category_id
     }
 
     /// Gets a human-readable name of the category this rule is in.

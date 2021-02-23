@@ -17,6 +17,7 @@ use crate::{
             composition::{GraphId, Matcher, PosMatcher, TextMatcher},
             Engine,
         },
+        id::{Category, Selector},
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesLangOptions},
@@ -267,29 +268,51 @@ impl Rules {
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
 
+        let mut to_disable: HashSet<Selector> = HashSet::new();
+
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
                 Ok((rule_structure, group, category)) => {
-                    let id = rule_structure.id.as_ref().map_or_else(
-                        || {
-                            let group = group.as_ref().expect("must have group if ID not set");
-                            format!("{}.{}", group.id, group.n)
-                        },
-                        |x| x.clone(),
-                    );
                     let category = category.expect("grammar rules must have category");
-                    let off = rule_structure
-                        .default
-                        .as_ref()
-                        .map(|x| x == "off")
-                        .or_else(|| {
-                            group
+                    let id = Category::new(category.id.as_str());
+
+                    let id = if let Some(group) = &group {
+                        id.join(group.id.as_str()).join(group.n)
+                    } else {
+                        id.join(
+                            rule_structure
+                                .id
                                 .as_ref()
-                                .and_then(|x| x.default.as_ref().map(|x| x == "off"))
-                        })
-                        .or_else(|| category.default.as_ref().map(|x| x == "off"))
-                        .unwrap_or(false);
+                                .expect("ID must be set if not in group."),
+                        )
+                        .join(0)
+                    };
+
+                    match rule_structure.default.as_deref() {
+                        Some("off") | Some("temp_off") => {
+                            to_disable.insert(id.clone().into());
+                        }
+                        Some("on") | None => {}
+                        Some(x) => panic!("unknown `default` value: {}", x),
+                    }
+
+                    match group.as_ref().and_then(|x| x.default.as_deref()) {
+                        Some("off") | Some("temp_off") => {
+                            to_disable.insert(id.parent().clone().into());
+                        }
+                        Some("on") | None => {}
+                        Some(x) => panic!("unknown `default` value: {}", x),
+                    }
+
+                    match category.default.as_deref() {
+                        Some("off") | Some("temp_off") => {
+                            to_disable.insert(id.parent().parent().clone().into());
+                        }
+                        Some("on") | None => {}
+                        Some(x) => panic!("unknown `default` value: {}", x),
+                    }
+
                     let name = rule_structure.name.as_ref().map_or_else(
                         || {
                             let group = group.as_ref().expect("must have group if name not set");
@@ -300,13 +323,12 @@ impl Rules {
 
                     match Rule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
-                            if (options.ids.is_empty() || options.ids.contains(&id))
-                                && !options.ignore_ids.contains(&id)
+                            if (options.ids.is_empty()
+                                || options.ids.iter().any(|x| x.is_match(&id)))
+                                && !options.ignore_ids.iter().any(|x| x.is_match(&id))
                             {
                                 rule.id = id;
                                 rule.name = name;
-                                rule.on = !off;
-                                rule.category_id = category.id;
                                 rule.category_name = category.name;
                                 rule.category_type = category.kind;
                                 Some(rule)
@@ -340,7 +362,10 @@ impl Rules {
             );
         }
 
-        Rules { rules }
+        Rules {
+            rules,
+            ..Default::default()
+        }
     }
 }
 
