@@ -372,7 +372,7 @@ impl Rules {
         Rules {
             rules,
             default_selectors,
-            enabled_mask: Default::default(),
+            ..Default::default()
         }
     }
 }

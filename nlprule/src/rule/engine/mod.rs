@@ -143,6 +143,8 @@ impl Engine {
         start: GraphId,
         end: GraphId,
     ) -> EngineMatches<'a, 't> {
+        assert!(!tokens.is_empty()); // this has to be checked before calling `get_matches`
+
         EngineMatches {
             tokens,
             start,

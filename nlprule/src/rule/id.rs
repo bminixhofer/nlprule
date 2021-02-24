@@ -133,18 +133,26 @@ impl From<Index> for Selector {
     }
 }
 
-impl TryFrom<String> for Selector {
+impl TryFrom<&str> for Selector {
     type Error = Error;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         Ok(match value.split('/').collect::<Vec<_>>().as_slice() {
             [category] => Selector::Category(Category::new(*category)),
             [category, group] => Selector::Group(Category::new(*category).join(*group)),
             [category, group, index] => {
                 Selector::Index(Category::new(*category).join(*group).join(index.parse()?))
             }
-            _ => return Err(Error::ParseStringError(value)),
+            _ => return Err(Error::ParseStringError(value.to_owned())),
         })
+    }
+}
+
+impl TryFrom<String> for Selector {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Selector::try_from(value.as_str())
     }
 }
 
