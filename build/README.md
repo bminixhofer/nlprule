@@ -4,69 +4,17 @@ This crate provides a builder to make it easier to use the correct binaries for 
 1. Utility functions to download the binaries from their distribution source.
 2. Scripts to create the nlprule build directories.
 
-Recommended setup:
-
-`build.rs`
-```rust
-fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-
-    nlprule_build::BinaryBuilder::new(
-        Some(&["en"]),
-        std::env::var("OUT_DIR").expect("OUT_DIR is set when build.rs is running"),
-    )
-    .build()
-    .validate();
-}
-```
-
-`main.rs`
-```rust
-use nlprule::{Rules, Tokenizer, tokenizer_filename, rules_filename};
-
-fn main() {
-    let mut tokenizer_bytes: &'static [u8] = include_bytes!(concat!(
-        env!("OUT_DIR"),
-        "/",
-        tokenizer_filename!("en")
-    ));
-    let mut rules_bytes: &'static [u8] = include_bytes!(concat!(
-        env!("OUT_DIR"),
-        "/",
-        rules_filename!("en")
-    ));
-
-    let tokenizer = Tokenizer::from_reader(&mut tokenizer_bytes).expect("tokenizer binary is valid");
-    let rules = Rules::from_reader(&mut rules_bytes).expect("rules binary is valid");
-
-    assert_eq!(
-        rules.correct("She was not been here since Monday.", &tokenizer),
-        String::from("She was not here since Monday.")
-    );
-}
-```
-
-`Cargo.toml`
-```toml
-[dependencies]
-nlprule = "<version>"
-
-[build-dependencies]
-nlprule-build = "<version>" # must be the same as the nlprule version!
-```
-
-`nlprule` and `nlprule-build` versions are kept in sync.
-
 ## Development
 
 If you are using a development version of nlprule, the builder can build the binaries itself (instead of just fetching them):
 
 ```rust
 let nlprule_builder = nlprule_build::BinaryBuilder::new(
-    Some(&["en"]),
+    &["en"],
     std::env::var("OUT_DIR").expect("OUT_DIR is set when build.rs is running"),
 )
-.fallback_to_build_dir(true) // this specifies that the binaries should be built if they are not found
+// this specifies that the binaries should be built if they are not found
+.fallback_to_build_dir(true)
 .build()
 .validate();
 ```

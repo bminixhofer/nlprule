@@ -51,7 +51,7 @@ jobs:
         if: matrix.lang == 'en'
         with:
           command: test
-          args: --verbose --all-features
+          args: --verbose --all-features --release
       - name: Run disambiguation tests
         uses: actions-rs/cargo@v1
         env:

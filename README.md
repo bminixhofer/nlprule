@@ -22,6 +22,12 @@
 
 A fast, low-resource Natural Language Processing and Error Correction library written in Rust. nlprule implements a rule- and lookup-based approach to NLP using resources from [LanguageTool](github.com/languagetool-org/languagetool).
 
+<details>
+  <summary>Python Usage</summary>
+
+Install: `pip install nlprule`
+
+Use:
 ```python
 from nlprule import Tokenizer, Rules
 
@@ -59,30 +65,81 @@ for sentence in tokenizer.pipe("A brief example is shown."):
 
 # and every call here takes less than 1ms! (on an i5 8600k)
 ```
+</details>
+
+<details>
+  <summary>Rust Usage</summary>
+
+Recommended setup:
+
+`Cargo.toml`
+```toml
+[dependencies]
+nlprule = "<version>"
+
+[build-dependencies]
+nlprule-build = "<version>" # must be the same as the nlprule version!
+```
+
+`build.rs`
+```rust
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
+    nlprule_build::BinaryBuilder::new(
+        &["en"],
+        std::env::var("OUT_DIR").expect("OUT_DIR is set when build.rs is running"),
+    )
+    .build()
+    .validate();
+}
+```
+
+`src/main.rs`
+```rust
+use nlprule::{Rules, Tokenizer, tokenizer_filename, rules_filename};
+
+fn main() {
+    let mut tokenizer_bytes: &'static [u8] = include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/",
+        tokenizer_filename!("en")
+    ));
+    let mut rules_bytes: &'static [u8] = include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/",
+        rules_filename!("en")
+    ));
+
+    let tokenizer = Tokenizer::from_reader(&mut tokenizer_bytes).expect("tokenizer binary is valid");
+    let rules = Rules::from_reader(&mut rules_bytes).expect("rules binary is valid");
+
+    assert_eq!(
+        rules.correct("She was not been here since Monday.", &tokenizer),
+        String::from("She was not here since Monday.")
+    );
+}
+```
+
+`nlprule` and `nlprule-build` versions are kept in sync.
+
+</details>
 
 ## Main features
 
 - Rule-based Grammatical Error Correction through multiple thousand rules.
-- A text processing pipeline doing sentencization, part-of-speech tagging, lemmatization, chunking and disambiguation.
+- A text processing pipeline doing sentence segmentation, part-of-speech tagging, lemmatization, chunking and disambiguation.
 - Support for English, German and Spanish.
 - Spellchecking. (*in progress*)
 
-## Rust usage
-
-The [nlprule-build](build/) crate makes it easy to use the correct nlprule binaries in your Rust project.
-
 ## Goals
 
+- A single place to apply spellchecking and grammatical error correction for a downstream task.
 - Fast, low-resource NLP suited for running:
     1. as a pre- / postprocessing step for more sophisticated (i. e. ML) approaches.
     2. in the background of another application with low overhead.
-    3. client-side in the browser via WebAssembly. (*in progress*)
-- 100% Rust code and dependencies. (*in progress*)
-
-## non-Goals
-
-- Being user-centric. nlprule is a library. It is not a correction tool on its own and does not aim to be.
-- Creating and maintaining NLP resources. nlprule is a parser and executor of external resources mainly from [LanguageTool](github.com/languagetool-org/languagetool). nlprule does not aim to create and maintain such resources.
+    3. client-side in the browser via WebAssembly.
+- 100% Rust code and dependencies.
 
 ## Comparison to LanguageTool
 
