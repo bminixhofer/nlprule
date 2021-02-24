@@ -59,6 +59,7 @@ impl BuildFilePaths {
 }
 
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum Error {
     #[error("input/output error")]
     Io(#[from] std::io::Error),
@@ -84,6 +85,7 @@ pub enum Error {
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
+/// Compiles the binaries from a build directory.
 pub fn compile(
     build_dir: impl AsRef<Path>,
     mut rules_dest: impl io::Write,

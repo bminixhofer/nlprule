@@ -22,7 +22,7 @@ fn max_matches() -> usize {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct RegexCache {
+pub(crate) struct RegexCache {
     cache: DefaultHashMap<u64, Option<DefaultHashSet<WordIdInt>>>,
     // this is compared with the hash of the word store of the tagger
     word_hash: u64,
@@ -40,10 +40,6 @@ impl RegexCache {
         &self.word_hash
     }
 
-    pub fn set_word_hash(&self) -> &u64 {
-        &self.word_hash
-    }
-
     pub(crate) fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<WordIdInt>>> {
         self.cache.get(key)
     }
@@ -53,7 +49,7 @@ impl RegexCache {
     }
 }
 
-pub struct BuildInfo {
+pub(crate) struct BuildInfo {
     tagger: Arc<Tagger>,
     regex_cache: RegexCache,
 }
@@ -689,7 +685,10 @@ fn parse_features(
 }
 
 impl Rule {
-    pub fn from_rule_structure(data: structure::Rule, info: &mut BuildInfo) -> Result<Rule, Error> {
+    pub(crate) fn from_rule_structure(
+        data: structure::Rule,
+        info: &mut BuildInfo,
+    ) -> Result<Rule, Error> {
         if data.filter.is_some() {
             return Err(Error::Unimplemented(
                 "rules with filter are not implemented.".into(),
@@ -972,7 +971,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
 }
 
 impl DisambiguationRule {
-    pub fn from_rule_structure(
+    pub(crate) fn from_rule_structure(
         data: structure::DisambiguationRule,
         info: &mut BuildInfo,
     ) -> Result<DisambiguationRule, Error> {

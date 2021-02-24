@@ -1,3 +1,17 @@
+//! Provides structures to identify nodes at various levels of the rule tree and a [Selector] to match on these structs.
+//!
+//! Rules are nested in up to three layers in the original XML:
+//! ```xml
+//! <category ...>
+//!    <rulegroup ...> <!-- can be omitted, there's also <rule>s at this level -->
+//!       <rule ...>
+//!       </rule>
+//!    </rulegroup>
+//! </category>
+//! ```
+//!
+//! The [Category], [Group] and [Index] structs provide a way to identify these layers.
+
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -8,6 +22,7 @@ use std::{
 use unicase::UniCase;
 
 #[derive(Debug, Clone, thiserror::Error)]
+#[allow(missing_docs)]
 pub enum Error {
     #[error(transparent)]
     ParseIntError(#[from] ParseIntError),
@@ -15,6 +30,7 @@ pub enum Error {
     ParseStringError(String),
 }
 
+/// Identifies a category.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialOrd, Ord)]
 pub struct Category(String);
 
@@ -31,6 +47,7 @@ impl Hash for Category {
     }
 }
 
+/// Identifies a rule group.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialOrd, Ord)]
 pub struct Group {
     parent: Category,
@@ -51,6 +68,8 @@ impl Hash for Group {
     }
 }
 
+/// Identifies the children of a rule group.
+/// Rules without a group in the original XML are treated as a rule group with one child.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct Index {
     parent: Group,
@@ -76,10 +95,12 @@ impl fmt::Display for Index {
 }
 
 impl Category {
+    /// Creates a new category identifier.
     pub fn new<S: Into<String>>(category: S) -> Self {
         Category(category.into())
     }
 
+    /// Creates a group identifier by joining the category with a string.
     pub fn join<S: Into<String>>(&self, group: S) -> Group {
         Group {
             inner: group.into(),
@@ -89,6 +110,7 @@ impl Category {
 }
 
 impl Group {
+    /// Creates an index identifier by joining the group with an index.
     pub fn join(&self, index: usize) -> Index {
         Index {
             inner: index,
@@ -96,22 +118,29 @@ impl Group {
         }
     }
 
+    /// Gets the parent category of this group.
     pub fn parent(&self) -> &Category {
         &self.parent
     }
 }
 
 impl Index {
+    /// Gets the parent group of this index.
     pub fn parent(&self) -> &Group {
         &self.parent
     }
 }
 
+/// A *selector* to filter rules by checking if an [Index] matches the selector.
+/// Can be created from a [Category], [Group], or [Index] by casting with `.into()`.
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(try_from = "String", into = "String")]
 pub enum Selector {
+    /// A category-level selector.
     Category(Category),
+    /// A group-level selector.
     Group(Group),
+    /// An index-level selector.
     Index(Index),
 }
 
@@ -167,6 +196,10 @@ impl From<Selector> for String {
 }
 
 impl Selector {
+    /// Determines whether an [Index] matches this selector. It maches iff:
+    /// 1. the category is the same (if this selector is at category-level)
+    /// 2. the group and the category are the same (if this selector is at group-level)
+    /// 3. the group and category and index are the same (if this selector is at index-level)
     pub fn is_match(&self, id: &Index) -> bool {
         match &self {
             Selector::Category(category) => id.parent().parent() == category,

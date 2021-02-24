@@ -53,7 +53,7 @@
 //! # The 't lifetime
 //! By convention the lifetime `'t` in this crate is the lifetime of the input text.
 //! Almost all structures with a lifetime are bound to this lifetime.
-
+#![warn(missing_docs)]
 use std::io;
 
 use thiserror::Error;
@@ -71,6 +71,7 @@ pub use rules::Rules;
 pub use tokenizer::Tokenizer;
 
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum Error {
     #[error("i/o error: {0}")]
     Io(#[from] io::Error),

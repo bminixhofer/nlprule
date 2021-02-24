@@ -26,7 +26,11 @@ impl From<MultiwordTaggerFields> for MultiwordTagger {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+/// A tagger which tags consecutive tokens depending on if they are contained in a list of phrases.
+///
+/// They key difference to the [Tagger][crate::tokenizer::tag::Tagger] is that this tagger looks at sequences of tokens
+/// instead of at one token at a time.
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(from = "MultiwordTaggerFields")]
 pub struct MultiwordTagger {
     #[serde(skip)]
@@ -35,6 +39,7 @@ pub struct MultiwordTagger {
 }
 
 impl MultiwordTagger {
+    /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
     pub fn apply<'t>(&'t self, tokens: &mut Vec<IncompleteToken<'t>>, tagger: &'t Tagger) {
         let mut start_indices = DefaultHashMap::new();
         let mut end_indices = DefaultHashMap::new();

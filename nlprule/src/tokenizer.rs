@@ -128,14 +128,17 @@ impl Tokenizer {
         Ok(bincode::deserialize_from(reader)?)
     }
 
-    pub fn rules(&self) -> &Vec<DisambiguationRule> {
+    /// Gets all disambigation rules in the order they are applied.
+    pub fn rules(&self) -> &[DisambiguationRule] {
         &self.rules
     }
 
+    /// Gets the lexical tagger.
     pub fn tagger(&self) -> &Arc<Tagger> {
         &self.tagger
     }
 
+    /// Gets the chunker if one exists.
     pub fn chunker(&self) -> &Option<Chunker> {
         &self.chunker
     }

@@ -262,6 +262,7 @@ impl DisambiguationRule {
     }
 }
 
+/// An iterator over [Suggestion][crate::types::Suggestion]s.
 pub struct Suggestions<'a, 't> {
     rule: &'a Rule,
     tokenizer: &'a Tokenizer,
@@ -399,14 +400,17 @@ impl fmt::Display for Rule {
 }
 
 impl Rule {
+    /// Hints that this rule should be enabled.
     pub fn enable(&mut self) {
         self.enabled = true;
     }
 
+    /// Hints that this rule should be disabled.
     pub fn disable(&mut self) {
         self.enabled = false;
     }
 
+    /// Hints whether the rule should be enabled in a rule set.
     pub fn enabled(&self) -> bool {
         self.enabled
     }

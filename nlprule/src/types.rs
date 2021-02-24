@@ -26,9 +26,11 @@ pub mod owned {
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+    /// See [super::WordId].
     pub struct WordId(pub(crate) String, pub(crate) Option<WordIdInt>);
 
     impl WordId {
+        /// Gets this ID as a reference ID.
         pub fn as_ref_id(&self) -> super::WordId {
             super::WordId(self.0.as_str().into(), self.1)
         }
@@ -40,10 +42,12 @@ pub mod owned {
         }
     }
 
+    /// See [super::PosId].
     #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
     pub struct PosId(pub(crate) String, pub(crate) PosIdInt);
 
     impl PosId {
+        /// Gets this ID as a reference ID.
         pub fn as_ref_id(&self) -> super::PosId {
             super::PosId(self.0.as_str(), self.1)
         }
@@ -55,25 +59,32 @@ pub mod owned {
         }
     }
 
+    /// See [super::WordData].
     #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+    #[allow(missing_docs)]
     pub struct WordData {
         pub lemma: WordId,
         pub pos: PosId,
     }
 
     impl WordData {
+        /// Creates a new owned Word ID.
         pub fn new(lemma: WordId, pos_id: PosId) -> Self {
             WordData { lemma, pos: pos_id }
         }
     }
 
+    /// See [super::Word].
     #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
     pub struct Word {
         pub text: WordId,
         pub tags: Vec<WordData>,
     }
 
+    /// See [super::Token].
     #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
     pub struct Token {
         pub word: Word,
         pub char_span: (usize, usize),
@@ -108,6 +119,7 @@ impl<'t> AsRef<str> for WordId<'t> {
 pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
 
 impl<'t> PosId<'t> {
+    /// Converts this ID to an owned ID.
     pub fn to_owned_id(&self) -> owned::PosId {
         owned::PosId(self.0.to_string(), self.1)
     }
@@ -126,15 +138,19 @@ impl<'t> AsRef<str> for PosId<'t> {
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
+    /// The lemma word ID.
     pub lemma: WordId<'t>,
+    /// The part-of-speech ID.
     pub pos: PosId<'t>,
 }
 
 impl<'t> WordData<'t> {
+    /// Creates a new referential word data.
     pub fn new(lemma: WordId<'t>, pos: PosId<'t>) -> Self {
         WordData { lemma, pos }
     }
 
+    /// Converts to owned word data.
     pub fn to_owned_word_data(&self) -> owned::WordData {
         owned::WordData {
             lemma: self.lemma.to_owned_id(),
@@ -147,15 +163,20 @@ impl<'t> WordData<'t> {
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word<'t> {
+    /// The text ID of this token.
     pub text: WordId<'t>,
+    /// Multiple pairs of (lemma, part-of-speech) associated with this token.
+    /// Order is generally not significant.
     pub tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Word<'t> {
+    /// Creates a new Word with tags.
     pub fn new_with_tags(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
         Word { text, tags }
     }
 
+    /// Converts to an owned word.
     pub fn to_owned_word(&self) -> owned::Word {
         owned::Word {
             text: self.text.to_owned_id(),
@@ -169,14 +190,23 @@ impl<'t> Word<'t> {
 #[derivative(Debug, PartialEq)]
 #[derive(Clone)]
 pub struct IncompleteToken<'t> {
+    /// The word of this token. Contains information about the actual text and part-of-speech tags + lemmas.
     pub word: Word<'t>,
+    /// Byte start (inclusive) and end (exclusive) of this token in the sentence.
     pub byte_span: (usize, usize),
+    /// Char start (inclusive) and end (exclusive) of this token in the sentence.
     pub char_span: (usize, usize),
+    /// Whether this token is the last token in the sentence-
     pub is_sentence_end: bool,
+    /// Whether this token has one or more whitespace characters before.
     pub has_space_before: bool,
+    /// Chunks associated with this token.
     pub chunks: Vec<String>,
+    /// A *multiword* lemma and part-of-speech tag. Set if the token was found in a list of phrases.
     pub multiword_data: Option<WordData<'t>>,
+    /// The sentence this token is in.
     pub sentence: &'t str,
+    /// The tagger used for lookup related to this token.
     #[derivative(PartialEq = "ignore", Debug = "ignore")]
     pub tagger: &'t Tagger,
 }
@@ -187,9 +217,10 @@ pub struct IncompleteToken<'t> {
 #[derive(Clone)]
 pub struct DisambiguatedToken<'t>(pub IncompleteToken<'t>);
 
-/// A finished token with all information set.
+/// A finished token with all information set. See [IncompleteToken].
 #[derive(Derivative)]
 #[derivative(Debug)]
+#[allow(missing_docs)]
 pub struct Token<'t> {
     pub word: Word<'t>,
     pub char_span: (usize, usize),
@@ -223,6 +254,7 @@ impl<'t> Token<'t> {
         }
     }
 
+    /// Converts this token to an owned equivalent.
     pub fn to_owned_token(&self) -> owned::Token {
         owned::Token {
             word: self.word.to_owned_word(),
