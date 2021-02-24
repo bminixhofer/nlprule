@@ -49,7 +49,7 @@ fn rules_can_be_disabled_enabled() {
     assert!(rules.suggest("I can not go", &*TOKENIZER).is_empty());
 
     rules
-        .select_mut(&"confused_words/confusion_due_do".try_into().unwrap())
+        .select_mut(&"typos/can_not".try_into().unwrap())
         .for_each(|x| x.enable());
 
     // enabled now
