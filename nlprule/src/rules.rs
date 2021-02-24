@@ -8,7 +8,6 @@ use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
-    iter::{IntoIterator, Iterator},
     path::Path,
 };
 
@@ -98,7 +97,7 @@ impl Rules {
         }
     }
 
-    /// Returns a mutable iterator over all rules matching the selector.
+    /// Returns an iterator over all rules matching the selector (mutable).
     pub fn select_mut<'a>(&'a mut self, selector: &'a Selector) -> RulesIterMut<'a> {
         RulesIterMut {
             inner: self.rules.iter_mut(),
