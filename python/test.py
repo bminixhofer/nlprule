@@ -127,3 +127,14 @@ def test_selector_case_insensitive(tokenizer_and_rules):
         == [x.id for x in rules.select("GRAMMAR")]
         == [x.id for x in rules.select("GRaMmAr")]
     )
+
+
+def test_rules_can_be_disabled(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    assert len(rules.suggest("I can due his homework")) > 0
+
+    for rule in rules.select("confused_words/confusion_due_do"):
+        rule.disable()
+
+    assert len(rules.suggest("I can due his homework")) == 0
