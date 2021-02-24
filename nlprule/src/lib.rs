@@ -1,7 +1,7 @@
 //! Rule-based grammatical error correction through parsing LanguageTool rules.
 //! # Overview
 //!
-//! NLPRule has the following core abstractions:
+//! nlprule has the following core abstractions:
 //! - A [Tokenizer][tokenizer::Tokenizer] to split a text into tokens and analyze it by chunking, lemmatizing and part-of-speech tagging. Can also be used independently of the grammatical rules.
 //! - A [Rules][rules::Rules] structure containing a set of grammatical error correction rules.
 //!

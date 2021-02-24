@@ -22,7 +22,7 @@ class Suggestion:
     # message: str
 
 
-# The ids in NLPRule have e.g ".4" to indicate the index in a rule group so we have to strip that
+# The ids in nlprule have e.g ".4" to indicate the index in a rule group so we have to strip that
 def strip_index(identifier):
     return identifier if "." not in identifier else identifier.split(".")[0]
 
@@ -190,8 +190,8 @@ if __name__ == "__main__":
             nlprule_time += nlprule_end - lt_end
 
     print(f"LanguageTool time: {lt_time:.3f}s")
-    print(f"NLPRule time: {nlprule_time:.3f}s")
+    print(f"nlprule time: {nlprule_time:.3f}s")
     print()
     print(f"n LanguageTool suggestions: {total_lt_suggestions}")
-    print(f"n NLPRule suggestions: {total_nlprule_suggestions}")
+    print(f"n nlprule suggestions: {total_nlprule_suggestions}")
     print(f"n same suggestions: {same_suggestions}")

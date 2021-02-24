@@ -1,8 +1,8 @@
-Example uses of NLPRule.
+Example uses of nlprule.
 
 ## Postprocessing for Natural Language Generation
 
-NLPRule can be used as postprocessing for e. g. GPT2. `correct_nlg.py` generates a fixed number of tokens with the first sentence of a wikipedia article as prompt and checks how many suggestions NLPRule finds in the generated text. Sample output:
+nlprule can be used as postprocessing for e. g. GPT2. `correct_nlg.py` generates a fixed number of tokens with the first sentence of a wikipedia article as prompt and checks how many suggestions nlprule finds in the generated text. Sample output:
 
 ```
 [...]
@@ -67,4 +67,4 @@ none:           3 suggestions   (0.02 per 1000 tokens)
 inconsistency:  2 suggestions   (0.01 per 1000 tokens)
 ```
 
-Which shows that NLPRule finds a significant amount of suggestions for current NLG models! Note that not all of these are errors, some are just suggestions for improvement.
+Which shows that nlprule finds a significant amount of suggestions for current NLG models! Note that not all of these are errors, some are just suggestions for improvement.
