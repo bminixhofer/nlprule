@@ -33,7 +33,8 @@ from nlprule import Tokenizer, Rules
 
 tokenizer = Tokenizer.load("en")
 rules = Rules.load("en", tokenizer)
-
+```
+```python
 rules.correct("He wants that you send him an email.")
 # returns: 'He wants you to send him an email.'
 
@@ -44,7 +45,8 @@ for s in rules.suggest("She was not been here since Monday."):
     print(s.start, s.end, s.replacements, s.source, s.message)
 # prints:
 # 4 16 ['was not', 'has not been'] WAS_BEEN.1 Did you mean was not or has not been?
-
+```
+```python
 for sentence in tokenizer.pipe("A brief example is shown."):
     for token in sentence:
         print(
@@ -62,8 +64,6 @@ for sentence in tokenizer.pipe("A brief example is shown."):
 # 'is'       (16, 18)   ['VBZ']                  ['be', 'is']             ['B-VP']                
 # 'shown'    (19, 24)   ['VBN']                  ['show', 'shown']        ['I-VP']                
 # '.'        (24, 25)   ['.', 'PCT', 'SENT_END'] ['.']                    ['O']
-
-# and every call here takes less than 1ms! (on an i5 8600k)
 ```
 </details>
 

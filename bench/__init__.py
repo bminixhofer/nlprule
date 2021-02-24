@@ -22,9 +22,9 @@ class Suggestion:
     # message: str
 
 
-# The ids in nlprule have e.g ".4" to indicate the index in a rule group so we have to strip that
+# group is the second component of the id in nlprule, only use that
 def strip_index(identifier):
-    return identifier if "." not in identifier else identifier.split(".")[0]
+    return identifier.split("/")[1]
 
 
 class LanguageTool:
