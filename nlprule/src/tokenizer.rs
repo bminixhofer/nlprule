@@ -149,6 +149,10 @@ impl Tokenizer {
         mut tokens: Vec<IncompleteToken<'t>>,
         id: Option<&Index>,
     ) -> Vec<DisambiguatedToken<'t>> {
+        if tokens.is_empty() {
+            return Vec::new();
+        }
+
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == *id).unwrap()
         });
@@ -308,23 +312,5 @@ impl Tokenizer {
             .into_iter()
             .map(|tokens| finalize(self.disambiguate(tokens)))
             .collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Tokenizer;
-    use lazy_static::lazy_static;
-    use quickcheck_macros::quickcheck;
-
-    #[quickcheck]
-    fn can_tokenize_anything(text: String) -> bool {
-        lazy_static! {
-            static ref TOKENIZER: Tokenizer =
-                Tokenizer::new("../storage/en_tokenizer.bin").unwrap();
-        }
-
-        TOKENIZER.tokenize(&text);
-        true
     }
 }

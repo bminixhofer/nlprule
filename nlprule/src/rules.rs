@@ -5,8 +5,8 @@ use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
 use fs_err::File;
-use lazycell::AtomicLazyCell;
 use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
 use std::{
     io::{BufReader, Read},
     iter::{IntoIterator, Iterator},
@@ -14,6 +14,36 @@ use std::{
 };
 
 /// Options for a rule set.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RulesOptions {
+    pub selectors: Vec<(Selector, bool)>,
+}
+
+pub struct RulesOptionsGuard<'a> {
+    rules: &'a mut Rules,
+}
+
+impl<'a> Deref for RulesOptionsGuard<'a> {
+    type Target = RulesOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rules.options
+    }
+}
+
+impl<'a> DerefMut for RulesOptionsGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rules.options
+    }
+}
+
+impl<'a> Drop for RulesOptionsGuard<'a> {
+    fn drop(&mut self) {
+        self.rules.update_options();
+    }
+}
+
+/// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RulesLangOptions {
     /// Whether to allow errors while constructing the rules.
@@ -41,19 +71,60 @@ impl Default for RulesLangOptions {
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
     pub(crate) default_selectors: Vec<(Selector, bool)>,
+    pub(crate) options: RulesOptions,
     #[serde(skip)]
-    pub(crate) enabled_mask: AtomicLazyCell<Vec<bool>>,
+    pub(crate) enabled_mask: Vec<bool>,
 }
 
 impl Rules {
+    fn update_options(&mut self) {
+        self.enabled_mask = self
+            .rules
+            .iter()
+            .map(|rule| {
+                self.default_selectors
+                    .iter()
+                    .chain(self.options.selectors.iter()) // at this point we have all selectors in order
+                    .rev()
+                    // find the first matching selector from the end since the last selector has highest priority
+                    .find_map(|(selector, enabled)| {
+                        if selector.is_match(rule.id()) {
+                            Some(*enabled)
+                        } else {
+                            None
+                        }
+                    })
+                    // if no selector is matching, the rule is enabled
+                    .unwrap_or(true)
+            })
+            .collect();
+    }
+
     /// Creates a new rules set from a path to a binary.
     ///
     /// # Errors
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
+        Rules::new_with_options(p, RulesOptions::default())
+    }
+
+    /// Creates a new rules set with options. See [new].
+    pub fn new_with_options<P: AsRef<Path>>(p: P, options: RulesOptions) -> Result<Self, Error> {
         let reader = BufReader::new(File::open(p.as_ref())?);
-        Ok(bincode::deserialize_from(reader)?)
+        let mut rules: Rules = bincode::deserialize_from(reader)?;
+
+        rules.options = options;
+        rules.update_options();
+        Ok(rules)
+    }
+
+    pub fn options(&self) -> &RulesOptions {
+        &self.options
+    }
+
+    pub fn mut_options(&mut self) -> RulesOptionsGuard {
+        RulesOptionsGuard { rules: self }
     }
 
     /// Creates a new rules set from a reader.
@@ -80,35 +151,11 @@ impl Rules {
             return Vec::new();
         }
 
-        let mask = if let Some(mask) = self.enabled_mask.borrow() {
-            mask
-        } else {
-            let mask = self
-                .rules
-                .iter()
-                .map(|rule| {
-                    self.default_selectors
-                        .iter()
-                        .rev()
-                        .find_map(|(selector, enabled)| {
-                            if selector.is_match(rule.id()) {
-                                Some(*enabled)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(true)
-                })
-                .collect();
-            self.enabled_mask.fill(mask).ok();
-            self.enabled_mask.borrow().unwrap()
-        };
-
         let mut output: Vec<(usize, Suggestion)> = self
             .rules
             .maybe_par_iter()
             .enumerate()
-            .filter(|(i, _)| mask[*i])
+            .filter(|(i, _)| self.enabled_mask[*i])
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
