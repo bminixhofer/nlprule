@@ -474,8 +474,8 @@ impl PyRule {
         RwLockWriteGuard::map(self.rules.write(), |x| &mut x.rules_mut()[self.index])
     }
 
-    fn from_rule(index: usize, rules: Arc<RwLock<Rules>>) -> PyResult<Self> {
-        Ok(PyRule { rules, index })
+    fn from_rule(index: usize, rules: Arc<RwLock<Rules>>) -> Self {
+        PyRule { rules, index }
     }
 }
 
@@ -591,14 +591,14 @@ impl PyRules {
     }
 
     #[getter]
-    fn rules(&self) -> PyResult<Vec<PyRule>> {
+    fn rules(&self) -> Vec<PyRule> {
         self.rules
             .read()
             .rules()
             .iter()
             .enumerate()
             .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
-            .collect::<PyResult<Vec<_>>>()
+            .collect()
     }
 
     /// Finds a rule by selector.
@@ -606,14 +606,15 @@ impl PyRules {
         let selector = Selector::try_from(id.to_owned())
             .map_err(|err| PyValueError::new_err(format!("error creating selector: {}", err)))?;
 
-        self.rules
+        Ok(self
+            .rules
             .read()
             .rules()
             .iter()
             .enumerate()
             .filter(|(_, rule)| selector.is_match(rule.id()))
             .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
-            .collect()
+            .collect())
     }
 
     /// Get suggestions for the given text.
