@@ -594,7 +594,7 @@ mod tests {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
-        BinaryBuilder::new(&[], tempdir)
+        BinaryBuilder::new(&["en"], tempdir)
             .fallback_to_build_dir(true)
             .build()?
             .validate()?;
