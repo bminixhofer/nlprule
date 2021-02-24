@@ -1,5 +1,5 @@
 //!
-//! This module defines helpers to allow optional Rayon usage.
+//! Defines helpers to allow optional Rayon usage.
 //! Copied from huggingface/tokenizers v0.1.1. Only change is "TOKENIZERS_PARALLELISM" to "NLPRULE_PARALLELISM"
 //!
 

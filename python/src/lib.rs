@@ -525,10 +525,12 @@ impl PyRule {
         self.rule().enabled()
     }
 
+    /// Hints that this rule should be enabled.
     fn enable(&self) {
         self.rule_mut().enable();
     }
 
+    /// Hints that this rule should be disabled.
     fn disable(&self) {
         self.rule_mut().disable();
     }

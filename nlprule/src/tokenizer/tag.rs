@@ -226,6 +226,8 @@ impl Tagger {
             .expect("only valid pos ids are created")
     }
 
+    /// Tags the given string representation of a part-of-speech tag.
+    /// Part-of-speech tags are treated as a closed set so each valid part-of-speech tag will get a numerical id.
     pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
         PosId(
             tag,
@@ -239,6 +241,8 @@ impl Tagger {
         )
     }
 
+    /// Tags the given text.
+    /// Unknown words will not get a numerical id.
     pub fn id_word<'t>(&'t self, text: Cow<'t, str>) -> WordId<'t> {
         let id = self.word_store.get_by_left(text.as_ref()).copied();
         WordId(text, id)

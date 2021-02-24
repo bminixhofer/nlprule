@@ -47,7 +47,7 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// Creates a new rules set from a path to a binary.
+    /// Creates a new rule set from a path to a binary.
     ///
     /// # Errors
     /// - If the file can not be opened.
@@ -56,7 +56,7 @@ impl Rules {
         Rules::new_with_options(p, RulesOptions::default())
     }
 
-    /// Creates a new rules set with options. See [new].
+    /// Creates a new rule set with options. See [new][Rules::new].
     pub fn new_with_options<P: AsRef<Path>>(p: P, options: RulesOptions) -> Result<Self, Error> {
         let reader = BufReader::new(File::open(p.as_ref())?);
         let mut rules: Rules = bincode::deserialize_from(reader)?;
@@ -65,10 +65,12 @@ impl Rules {
         Ok(rules)
     }
 
+    /// Gets the options of this rule set.
     pub fn options(&self) -> &RulesOptions {
         &self.options
     }
 
+    /// Gets the options of this rule set (mutable).
     pub fn options_mut(&mut self) -> &mut RulesOptions {
         &mut self.options
     }
