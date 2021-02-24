@@ -89,7 +89,7 @@ def dump_dictionary(out_path, lt_dir, tag_dict_path, tag_info_path):
 if __name__ == "__main__":
     parser = ArgumentParser(
         description="""
-Script to generate the build files for NLPRule binaries.
+Script to generate the build files for nlprule binaries.
 See the accompanying README.md for example usages.
 
 Requirements:

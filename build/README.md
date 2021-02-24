@@ -82,9 +82,9 @@ in your `Cargo.toml`. Building can be slow otherwise.
 
 The following has information how to acquire the nlpruile build directories and how to build and test the nlprule binaries. As a user you will typically not need to do this.
 
-### Building and testing the NLPRule binaries
+### Building and testing the nlprule binaries
 
-Building the NLPRule binaries requires the *build directory* for the corresponding language. The latest build directories are stored on Backblaze B2. Download them from https://f000.backblazeb2.com/file/nlprule/en.zip (adjusting the two-letter language code accordingly for other languages).
+Building the nlprule binaries requires the *build directory* for the corresponding language. The latest build directories are stored on Backblaze B2. Download them from https://f000.backblazeb2.com/file/nlprule/en.zip (adjusting the two-letter language code accordingly for other languages).
 
 See [Making the build directory](#making-the-build-directory) for information on how to create a 
 build directory yourself.
@@ -114,11 +114,11 @@ RUST_LOG=WARN cargo run --all-features --bin test -- --tokenizer storage/en_toke
 
 ### Making the build directory
 
-NLPRule needs *build files* to build the rule and tokenizer binaries. These build files contain e. g. the XML files for grammar and disambiguation rules, a dictionary with words and their associated part-of-speech tags / lemmas and some data used for optimizations. Collectively, they form the *build directory*. Each language has a separate build directory.
+nlprule needs *build files* to build the rule and tokenizer binaries. These build files contain e. g. the XML files for grammar and disambiguation rules, a dictionary with words and their associated part-of-speech tags / lemmas and some data used for optimizations. Collectively, they form the *build directory*. Each language has a separate build directory.
 
 The build directory for a language can be generated with `make_build_dir.py`. Run `python make_build_dir.py --help` (or take a look at the source code) for more information. 
 
-Below are the commands used to make the build directories for NLPRule's supported languages (of course, the paths need to be adjusted depending on your setup):
+Below are the commands used to make the build directories for nlprule's supported languages (of course, the paths need to be adjusted depending on your setup):
 
 #### English
 
