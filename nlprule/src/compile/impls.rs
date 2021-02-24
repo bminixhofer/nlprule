@@ -17,10 +17,10 @@ use crate::{
             composition::{GraphId, Matcher, PosMatcher, TextMatcher},
             Engine,
         },
-        id::{Category, Selector},
+        id::Category,
         DisambiguationRule, MatchGraph, Rule,
     },
-    rules::{Rules, RulesLangOptions},
+    rules::{Rules, RulesLangOptions, RulesOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -268,8 +268,6 @@ impl Rules {
         let rules = super::parse_structure::read_rules(path);
         let mut errors: HashMap<String, usize> = HashMap::new();
 
-        let mut to_disable: HashSet<Selector> = HashSet::new();
-
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
@@ -289,29 +287,23 @@ impl Rules {
                         .join(0)
                     };
 
-                    match rule_structure.default.as_deref() {
-                        Some("off") | Some("temp_off") => {
-                            to_disable.insert(id.clone().into());
-                        }
-                        Some("on") | None => {}
+                    let rule_on = match rule_structure.default.as_deref() {
+                        Some("off") | Some("temp_off") => false,
+                        Some("on") | None => true,
                         Some(x) => panic!("unknown `default` value: {}", x),
-                    }
+                    };
 
-                    match group.as_ref().and_then(|x| x.default.as_deref()) {
-                        Some("off") | Some("temp_off") => {
-                            to_disable.insert(id.parent().clone().into());
-                        }
-                        Some("on") | None => {}
+                    let group_on = match group.as_ref().and_then(|x| x.default.as_deref()) {
+                        Some("off") | Some("temp_off") => false,
+                        Some("on") | None => true,
                         Some(x) => panic!("unknown `default` value: {}", x),
-                    }
+                    };
 
-                    match category.default.as_deref() {
-                        Some("off") | Some("temp_off") => {
-                            to_disable.insert(id.parent().parent().clone().into());
-                        }
-                        Some("on") | None => {}
+                    let category_on = match category.default.as_deref() {
+                        Some("off") | Some("temp_off") => false,
+                        Some("on") | None => true,
                         Some(x) => panic!("unknown `default` value: {}", x),
-                    }
+                    };
 
                     let name = rule_structure.name.as_ref().map_or_else(
                         || {
@@ -331,6 +323,7 @@ impl Rules {
                                 rule.name = name;
                                 rule.category_name = category.name;
                                 rule.category_type = category.kind;
+                                rule.enabled = category_on && group_on && rule_on;
                                 Some(rule)
                             } else {
                                 None
@@ -362,17 +355,9 @@ impl Rules {
             );
         }
 
-        let mut default_selectors: Vec<_> = to_disable
-            .into_iter()
-            .map(|selector| (selector, false))
-            .collect();
-        // created from a hash set so there are no two equal elements
-        default_selectors.sort_unstable();
-
         Rules {
             rules,
-            default_selectors,
-            ..Default::default()
+            options: RulesOptions::default(),
         }
     }
 }

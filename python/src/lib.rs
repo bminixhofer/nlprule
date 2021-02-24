@@ -6,6 +6,9 @@ use nlprule::{
     tokenizer::Tokenizer,
     types::*,
 };
+use parking_lot::{
+    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyString;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
@@ -455,70 +458,79 @@ impl PyExample {
 /// * name (str): A human-readable name for this rule.
 /// * category_name (str): A human-readable name of the category this rule is in.
 /// * category_type (Option[str]): The type of the category this rule is in e. g. "style" or "grammar".
+/// * enabled (bool): Whether the rule is enabled.
 #[pyclass(name = "Rule", module = "nlprule")]
 struct PyRule {
-    id: String,
-    url: Option<String>,
-    short: Option<String>,
-    examples: Vec<Py<PyExample>>,
-    name: String,
-    category_name: String,
-    category_type: Option<String>,
+    rules: Arc<RwLock<Rules>>,
+    index: usize,
 }
 
 impl PyRule {
-    fn from_rule(py: Python, rule: &Rule) -> PyResult<Self> {
-        Ok(PyRule {
-            id: rule.id().to_string(),
-            url: rule.url().map(String::from),
-            short: rule.short().map(String::from),
-            examples: rule
-                .examples()
-                .iter()
-                .map(|x| PyExample::from_example(py, x).and_then(|x| Py::new(py, x)))
-                .collect::<PyResult<Vec<_>>>()?,
-            name: rule.name().to_owned(),
-            category_name: rule.category_name().to_owned(),
-            category_type: rule.category_type().map(String::from),
-        })
+    fn rule(&self) -> MappedRwLockReadGuard<'_, Rule> {
+        RwLockReadGuard::map(self.rules.read(), |x| &x.rules()[self.index])
+    }
+
+    fn rule_mut(&self) -> MappedRwLockWriteGuard<'_, Rule> {
+        RwLockWriteGuard::map(self.rules.write(), |x| &mut x.rules_mut()[self.index])
+    }
+
+    fn from_rule(index: usize, rules: Arc<RwLock<Rules>>) -> PyResult<Self> {
+        Ok(PyRule { rules, index })
     }
 }
 
 #[pymethods]
 impl PyRule {
     #[getter]
-    fn id(&self) -> &str {
-        &self.id
+    fn id(&self) -> String {
+        self.rule().id().to_string()
     }
 
     #[getter]
-    fn url(&self) -> Option<&str> {
-        self.url.as_deref()
+    fn url(&self) -> Option<String> {
+        self.rule().url().map(ToOwned::to_owned)
     }
 
     #[getter]
-    fn short(&self) -> Option<&str> {
-        self.short.as_deref()
+    fn short(&self) -> Option<String> {
+        self.rule().short().map(ToOwned::to_owned)
     }
 
     #[getter]
-    fn examples<'py>(&'py self, py: Python<'py>) -> Vec<PyRef<'py, PyExample>> {
-        self.examples.iter().map(|x| x.borrow(py)).collect()
+    fn examples(&self, py: Python) -> PyResult<Vec<PyExample>> {
+        self.rule()
+            .examples()
+            .iter()
+            .map(|x| PyExample::from_example(py, x))
+            .collect()
     }
 
     #[getter]
-    fn name(&self) -> &str {
-        &self.name
+    fn name(&self) -> String {
+        self.rule().name().to_owned()
     }
 
     #[getter]
-    fn category_name(&self) -> &str {
-        &self.category_name
+    fn category_name(&self) -> String {
+        self.rule().category_name().to_owned()
     }
 
     #[getter]
-    fn category_type(&self) -> Option<&str> {
-        self.category_type.as_deref()
+    fn category_type(&self) -> Option<String> {
+        self.rule().category_type().map(ToOwned::to_owned)
+    }
+
+    #[getter]
+    fn enabled(&self) -> bool {
+        self.rule().enabled()
+    }
+
+    fn enable(&self) {
+        self.rule_mut().enable();
+    }
+
+    fn disable(&self) {
+        self.rule_mut().disable();
     }
 }
 
@@ -537,7 +549,7 @@ impl PyRule {
 #[pyclass(name = "Rules", module = "nlprule")]
 #[text_signature = "(path, tokenizer, sentence_splitter=None)"]
 struct PyRules {
-    rules: Rules,
+    rules: Arc<RwLock<Rules>>,
     tokenizer: Py<PyTokenizer>,
 }
 
@@ -550,7 +562,10 @@ impl PyRules {
 
         let rules: Rules = bincode::deserialize_from(bytes)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
-        Ok(PyRules { rules, tokenizer })
+        Ok(PyRules {
+            rules: Arc::from(RwLock::from(rules)),
+            tokenizer,
+        })
     }
 
     #[new]
@@ -567,26 +582,35 @@ impl PyRules {
             Py::new(py, PyTokenizer::default())?
         };
 
-        Ok(PyRules { rules, tokenizer })
+        Ok(PyRules {
+            rules: Arc::from(RwLock::from(rules)),
+            tokenizer,
+        })
     }
 
     #[getter]
-    fn rules(&self, py: Python) -> PyResult<Vec<PyRule>> {
+    fn rules(&self) -> PyResult<Vec<PyRule>> {
         self.rules
+            .read()
             .rules()
             .iter()
-            .map(|x| PyRule::from_rule(py, x))
+            .enumerate()
+            .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
             .collect::<PyResult<Vec<_>>>()
     }
 
     /// Finds a rule by selector.
-    fn select(&self, py: Python, id: &str) -> PyResult<Vec<PyRule>> {
+    fn select(&self, id: &str) -> PyResult<Vec<PyRule>> {
         let selector = Selector::try_from(id.to_owned())
             .map_err(|err| PyValueError::new_err(format!("error creating selector: {}", err)))?;
 
         self.rules
-            .select(&selector)
-            .map(|rule| PyRule::from_rule(py, rule))
+            .read()
+            .rules()
+            .iter()
+            .enumerate()
+            .filter(|(_, rule)| selector.is_match(rule.id()))
+            .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
             .collect()
     }
 
@@ -605,6 +629,7 @@ impl PyRules {
             let tokenizer = tokenizer.tokenizer();
 
             self.rules
+                .read()
                 .suggest(&sentence, &tokenizer)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
@@ -626,7 +651,7 @@ impl PyRules {
             let tokenizer = self.tokenizer.borrow(py);
             let tokenizer = tokenizer.tokenizer();
 
-            Ok(self.rules.correct(&text, tokenizer))
+            Ok(self.rules.read().correct(&text, tokenizer))
         })
     }
 
@@ -667,7 +692,8 @@ impl PyRules {
                     bincode::deserialize(s.as_bytes()).map_err(|_| {
                         PyValueError::new_err("deserializing state with `bincode` failed")
                     })?;
-                self.rules = state.0;
+                // a roundtrip through pickle can not preserve references so we need to create a new Arc<RwLock<..>>
+                self.rules = Arc::from(RwLock::from(state.0));
                 self.tokenizer = Py::new(py, PyTokenizer::from(state.1))?;
                 Ok(())
             }
@@ -677,6 +703,7 @@ impl PyRules {
 
     pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
         let tokenizer = self.tokenizer.borrow(py);
+        // rwlock is serialized the same way as the inner type
         let state = (&self.rules, tokenizer.tokenizer());
 
         Ok(PyBytes::new(

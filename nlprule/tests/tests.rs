@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use lazy_static::lazy_static;
-use nlprule::{Rules, Tokenizer};
+use nlprule::{rule::id::Category, Rules, Tokenizer};
 use quickcheck_macros::quickcheck;
 
 const TOKENIZER_PATH: &str = "../storage/en_tokenizer.bin";
@@ -24,7 +24,7 @@ fn can_tokenize_anything(text: String) -> bool {
 }
 
 #[test]
-fn rules_selectors_can_be_changed() {
+fn rules_can_be_disabled_enabled() {
     let mut rules = Rules::new(RULES_PATH).unwrap();
 
     // enabled by default
@@ -33,9 +33,12 @@ fn rules_selectors_can_be_changed() {
         .is_empty());
 
     rules
-        .mut_options()
-        .selectors
-        .push(("confused_words/confusion_due_do".try_into().unwrap(), false));
+        .select_mut(
+            &Category::new("confused_words")
+                .join("confusion_due_do")
+                .into(),
+        )
+        .for_each(|x| x.disable());
 
     // disabled now
     assert!(rules
@@ -46,12 +49,9 @@ fn rules_selectors_can_be_changed() {
     assert!(rules.suggest("I can not go", &*TOKENIZER).is_empty());
 
     rules
-        .mut_options()
-        .selectors
-        .push(("typos/can_not".try_into().unwrap(), true));
+        .select_mut(&"confused_words/confusion_due_do".try_into().unwrap())
+        .for_each(|x| x.enable());
 
     // enabled now
     assert!(!rules.suggest("I can not go", &*TOKENIZER).is_empty());
-
-    rules.suggest("hello!", &*TOKENIZER);
 }

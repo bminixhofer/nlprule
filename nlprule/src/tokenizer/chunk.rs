@@ -712,6 +712,10 @@ pub struct Chunker {
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
     pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
+        if tokens.is_empty() {
+            return;
+        }
+
         // replacements must not change char indices
         let text = tokens[0].sentence.replace('’', "\'");
 

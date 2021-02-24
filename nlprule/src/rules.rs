@@ -6,7 +6,6 @@ use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
-use std::ops::{Deref, DerefMut};
 use std::{
     io::{BufReader, Read},
     iter::{IntoIterator, Iterator},
@@ -15,33 +14,7 @@ use std::{
 
 /// Options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RulesOptions {
-    pub selectors: Vec<(Selector, bool)>,
-}
-
-pub struct RulesOptionsGuard<'a> {
-    rules: &'a mut Rules,
-}
-
-impl<'a> Deref for RulesOptionsGuard<'a> {
-    type Target = RulesOptions;
-
-    fn deref(&self) -> &Self::Target {
-        &self.rules.options
-    }
-}
-
-impl<'a> DerefMut for RulesOptionsGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.rules.options
-    }
-}
-
-impl<'a> Drop for RulesOptionsGuard<'a> {
-    fn drop(&mut self) {
-        self.rules.update_options();
-    }
-}
+pub struct RulesOptions {}
 
 /// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,36 +43,10 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) default_selectors: Vec<(Selector, bool)>,
     pub(crate) options: RulesOptions,
-    #[serde(skip)]
-    pub(crate) enabled_mask: Vec<bool>,
 }
 
 impl Rules {
-    fn update_options(&mut self) {
-        self.enabled_mask = self
-            .rules
-            .iter()
-            .map(|rule| {
-                self.default_selectors
-                    .iter()
-                    .chain(self.options.selectors.iter()) // at this point we have all selectors in order
-                    .rev()
-                    // find the first matching selector from the end since the last selector has highest priority
-                    .find_map(|(selector, enabled)| {
-                        if selector.is_match(rule.id()) {
-                            Some(*enabled)
-                        } else {
-                            None
-                        }
-                    })
-                    // if no selector is matching, the rule is enabled
-                    .unwrap_or(true)
-            })
-            .collect();
-    }
-
     /// Creates a new rules set from a path to a binary.
     ///
     /// # Errors
@@ -115,7 +62,6 @@ impl Rules {
         let mut rules: Rules = bincode::deserialize_from(reader)?;
 
         rules.options = options;
-        rules.update_options();
         Ok(rules)
     }
 
@@ -123,8 +69,8 @@ impl Rules {
         &self.options
     }
 
-    pub fn mut_options(&mut self) -> RulesOptionsGuard {
-        RulesOptionsGuard { rules: self }
+    pub fn options_mut(&mut self) -> &mut RulesOptions {
+        &mut self.options
     }
 
     /// Creates a new rules set from a reader.
@@ -137,10 +83,23 @@ impl Rules {
         &self.rules
     }
 
+    /// All rules ordered by priority (mutable).
+    pub fn rules_mut(&mut self) -> &mut [Rule] {
+        &mut self.rules
+    }
+
     /// Returns an iterator over all rules matching the selector.
     pub fn select<'a>(&'a self, selector: &'a Selector) -> RulesIter<'a> {
         RulesIter {
             inner: self.rules.iter(),
+            selector: Some(selector),
+        }
+    }
+
+    /// Returns a mutable iterator over all rules matching the selector.
+    pub fn select_mut<'a>(&'a mut self, selector: &'a Selector) -> RulesIterMut<'a> {
+        RulesIterMut {
+            inner: self.rules.iter_mut(),
             selector: Some(selector),
         }
     }
@@ -155,7 +114,7 @@ impl Rules {
             .rules
             .maybe_par_iter()
             .enumerate()
-            .filter(|(i, _)| self.enabled_mask[*i])
+            .filter(|(_, rule)| rule.enabled())
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
@@ -198,6 +157,10 @@ impl Rules {
 
         // get suggestions sentence by sentence
         for tokens in tokenizer.pipe(text) {
+            if tokens.is_empty() {
+                continue;
+            }
+
             suggestions.extend(
                 self.apply(&tokens, tokenizer)
                     .into_iter()
@@ -217,14 +180,6 @@ impl Rules {
     pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> String {
         let suggestions = self.suggest(text, tokenizer);
         apply_suggestions(text, &suggestions)
-    }
-
-    /// A referential iterator.
-    pub fn iter(&self) -> RulesIter {
-        RulesIter {
-            inner: self.rules.iter(),
-            selector: None,
-        }
     }
 }
 
@@ -247,7 +202,7 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     chars.into_iter().collect()
 }
 
-/// A wrapping helper iterator.
+/// An iterator over references to rules.
 pub struct RulesIter<'a> {
     selector: Option<&'a Selector>,
     inner: std::slice::Iter<'a, Rule>,
@@ -263,23 +218,18 @@ impl<'a> Iterator for RulesIter<'a> {
     }
 }
 
-pub struct RulesIntoIter {
-    inner: std::vec::IntoIter<Rule>,
+/// An iterator over mutable references to rules.
+pub struct RulesIterMut<'a> {
+    selector: Option<&'a Selector>,
+    inner: std::slice::IterMut<'a, Rule>,
 }
 
-impl<'a> Iterator for RulesIntoIter {
-    type Item = Rule;
+impl<'a> Iterator for RulesIterMut<'a> {
+    type Item = &'a mut Rule;
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
+        let selector = self.selector.as_ref();
 
-impl IntoIterator for Rules {
-    type Item = Rule;
-    type IntoIter = RulesIntoIter;
-    fn into_iter(self) -> Self::IntoIter {
-        RulesIntoIter {
-            inner: self.rules.into_iter(),
-        }
+        self.inner
+            .find(|rule| selector.map_or(true, |s| s.is_match(rule.id())))
     }
 }

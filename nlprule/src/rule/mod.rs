@@ -273,6 +273,10 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
     type Item = Suggestion;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.tokens.is_empty() {
+            return None;
+        }
+
         let rule = self.rule;
         let tokenizer = self.tokenizer;
         let tokens = self.tokens;
@@ -385,6 +389,7 @@ pub struct Rule {
     pub(crate) category_name: String,
     pub(crate) category_type: Option<String>,
     pub(crate) unification: Option<Unification>,
+    pub(crate) enabled: bool,
 }
 
 impl fmt::Display for Rule {
@@ -394,6 +399,18 @@ impl fmt::Display for Rule {
 }
 
 impl Rule {
+    pub fn enable(&mut self) {
+        self.enabled = true;
+    }
+
+    pub fn disable(&mut self) {
+        self.enabled = false;
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &Index {
         &self.id

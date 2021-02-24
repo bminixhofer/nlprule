@@ -894,11 +894,12 @@ impl Rule {
             },
             url: data.url.map(|x| x.to_string()),
             short: data.short.map(|x| x.to_string()),
-            // attributes below need information from rule group / category, so are set later
+            // fields below need information from rule group / category, so are set later
             id: Index::default(),
             name: String::new(),
             category_name: String::new(),
             category_type: None,
+            enabled: true,
         })
     }
 }

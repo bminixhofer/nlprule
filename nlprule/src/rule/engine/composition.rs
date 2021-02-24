@@ -402,6 +402,10 @@ impl<'t> MatchGraph<'t> {
     }
 
     pub fn fill_empty(&mut self) {
+        if self.tokens.is_empty() {
+            return;
+        }
+
         let mut start = self
             .groups
             .iter()
