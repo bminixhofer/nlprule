@@ -21,6 +21,7 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesLangOptions, RulesOptions},
+    spellcheck,
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -359,6 +360,7 @@ impl Rules {
         Rules {
             rules,
             options: RulesOptions::default(),
+            spellchecker: None,
         }
     }
 }

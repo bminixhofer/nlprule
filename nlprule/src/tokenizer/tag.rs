@@ -209,18 +209,17 @@ impl Tagger {
         &self.tag_store
     }
 
-    #[allow(dead_code)] // used by compile module
     pub(crate) fn word_store(&self) -> &BiMap<String, WordIdInt> {
         &self.word_store
     }
 
-    fn str_for_word_id(&self, id: &WordIdInt) -> &str {
+    pub(crate) fn str_for_word_id(&self, id: &WordIdInt) -> &str {
         self.word_store
             .get_by_right(id)
             .expect("only valid word ids are created")
     }
 
-    fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
+    pub(crate) fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
         self.tag_store
             .get_by_right(id)
             .expect("only valid pos ids are created")

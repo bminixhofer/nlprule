@@ -1,19 +1,47 @@
 //! Sets of grammatical error correction rules.
 
-use crate::types::*;
-use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
+use crate::{spellcheck::SpellcheckOptions, utils::parallelism::MaybeParallelRefIterator};
+use crate::{spellcheck::Spellchecker, types::*};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
+    ops::{Deref, DerefMut},
     path::Path,
 };
 
 /// Options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RulesOptions {}
+pub struct RulesOptions {
+    spellcheck: bool,
+    spellcheck_options: SpellcheckOptions,
+}
+
+pub struct RulesOptionsGuard<'a> {
+    rules: &'a mut Rules,
+}
+
+impl<'a> Deref for RulesOptionsGuard<'a> {
+    type Target = RulesOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rules.options
+    }
+}
+
+impl<'a> DerefMut for RulesOptionsGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rules.options
+    }
+}
+
+impl<'a> Drop for RulesOptionsGuard<'a> {
+    fn drop(&mut self) {
+        self.rules.ingest_options()
+    }
+}
 
 /// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,9 +71,19 @@ impl Default for RulesLangOptions {
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
     pub(crate) options: RulesOptions,
+    pub(crate) spellchecker: Option<Spellchecker>,
 }
 
 impl Rules {
+    fn ingest_options(&mut self) {
+        if self.options.spellcheck && self.spellchecker.is_none() {
+            self.spellchecker = Some(Spellchecker::new(
+                &self.tagger,
+                self.options.spellcheck_options.clone(),
+            ));
+        }
+    }
+
     /// Creates a new rule set from a path to a binary.
     ///
     /// # Errors

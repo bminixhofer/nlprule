@@ -63,6 +63,7 @@ pub mod compile;
 mod filter;
 pub mod rule;
 pub mod rules;
+mod spellcheck;
 pub mod tokenizer;
 pub mod types;
 pub(crate) mod utils;

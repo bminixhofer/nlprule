@@ -13,7 +13,9 @@ pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd, Default,
+)]
 #[serde(transparent)]
 pub(crate) struct WordIdInt(u32);
 
