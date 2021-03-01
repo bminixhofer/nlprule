@@ -74,7 +74,7 @@ compile = ["regex-syntax", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", 
 
 [[bin]]
 name = "compile"
-required-features = ["compile"]
+required-features = ["compile", "bin"]
 
 [[bin]]
 name = "test"
