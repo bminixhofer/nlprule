@@ -59,7 +59,7 @@ def copy_lt_files(out_dir, lt_dir, lang_code):
         canonicalize(out_dir / xmlfile)
 
 
-def dump_dictionary(out_path, lt_dir, tag_dict_path, tag_info_path):
+def dump_dict(out_path, lt_dir, tag_dict_path, tag_info_path):
     # dump dictionary, see https://dev.languagetool.org/developing-a-tagger-dictionary
     os.system(
         f"java -cp {lt_dir / 'languagetool.jar'} org.languagetool.tools.DictionaryExporter "
@@ -120,6 +120,16 @@ Requirements:
         help="Path to the accompanying tagger dictionary .info file.",
     )
     parser.add_argument(
+        "--spell_dict_path",
+        type=lambda p: Path(p).absolute(),
+        help="Path to a spell dictionary .dict file.",
+    )
+    parser.add_argument(
+        "--spell_info_path",
+        type=lambda p: Path(p).absolute(),
+        help="Path to the accompanying spell dictionary .info file.",
+    )
+    parser.add_argument(
         "--chunker_token_model",
         default=None,
         help="""
@@ -149,12 +159,23 @@ Only needed if the language requires a chunker (e. g. English).
 
     write_freqlist(open(args.out_dir / "common.txt", "w"), args.lang_code)
     copy_lt_files(args.out_dir, args.lt_dir, args.lang_code)
-    dump_dictionary(
+
+    # tagger dictionary
+    dump_dict(
         args.out_dir / "tags" / "output.dump",
         args.lt_dir,
         args.tag_dict_path,
         args.tag_info_path,
     )
+
+    # spell dictionary
+    dump_dict(
+        args.out_dir / "spell.dump",
+        args.lt_dir,
+        args.spell_dict_path,
+        args.spell_info_path,
+    )
+
     if (
         args.chunker_token_model is not None
         and args.chunker_pos_model is not None

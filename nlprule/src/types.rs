@@ -15,7 +15,30 @@ pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
-pub(crate) struct WordIdInt(pub u32);
+pub(crate) struct WordIdInt(u32);
+
+impl WordIdInt {
+    pub fn new(index: u32, freq: u8) -> Self {
+        assert!(index < 2u32.pow(24));
+
+        let mut id = index << 8;
+        id |= freq as u32;
+        WordIdInt(id)
+    }
+
+    pub fn freq(&self) -> u8 {
+        (self.0 & 255) as u8
+    }
+
+    pub fn raw_value(&self) -> u32 {
+        self.0
+    }
+
+    pub fn from_raw_value(id: u32) -> Self {
+        WordIdInt(id)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
 pub(crate) struct PosIdInt(pub u16);

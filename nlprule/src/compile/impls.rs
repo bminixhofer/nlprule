@@ -92,14 +92,14 @@ impl Tagger {
     pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
         paths: &[S1],
         remove_paths: &[S2],
-        common_words: &HashSet<String>,
+        freq_words: HashMap<String, u8>,
         lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
         let mut tags = DefaultHashMap::default();
         let mut groups = DefaultHashMap::default();
 
         let mut tag_store = HashSet::new();
-        let mut word_store = HashSet::new();
+        let mut word_store = HashMap::new();
 
         // hardcoded special tags
         tag_store.insert("");
@@ -114,29 +114,30 @@ impl Tagger {
 
         let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
         for i in 0..punct.len() {
-            word_store.insert(&punct[i..(i + 1)]);
+            word_store.insert(&punct[i..(i + 1)], 0);
         }
 
-        word_store.extend(common_words.iter().map(|x| x.as_str()));
-
         for (word, inflection, tag) in lines.iter() {
-            word_store.insert(word);
-            word_store.insert(inflection);
+            word_store.insert(word, 0);
+            word_store.insert(inflection, 0);
             tag_store.insert(tag);
         }
 
-        // word store ids should be consistent across runs
-        let mut word_store: Vec<_> = word_store.iter().collect();
-        word_store.sort();
+        // extend with freq words at the end to make sure we overwrite words which existed but have 0 frequency
+        word_store.extend(freq_words.iter().map(|(word, freq)| (word.as_str(), *freq)));
 
-        //  tag store ids should be consistent across runs
-        let mut tag_store: Vec<_> = tag_store.iter().collect();
-        tag_store.sort();
+        // word store ids should be consistent across runs
+        let mut word_store: Vec<_> = word_store.into_iter().collect();
+        word_store.sort_unstable();
+
+        // tag store ids should be consistent across runs
+        let mut tag_store: Vec<_> = tag_store.into_iter().collect();
+        tag_store.sort_unstable();
 
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
+            .map(|(i, (word, freq))| ((*word).to_owned(), WordIdInt::new(i as u32, *freq)))
             .collect();
         let tag_store: BiMap<_, _> = tag_store
             .iter()

@@ -5,7 +5,7 @@ use fs_err as fs;
 
 use std::{
     hash::{Hash, Hasher},
-    io::{self, BufReader, BufWriter},
+    io::{self, BufRead, BufReader, BufWriter},
     num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
@@ -15,7 +15,7 @@ use std::{
 use crate::{
     rules::Rules,
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
-    types::DefaultHasher,
+    types::*,
 };
 use log::info;
 
@@ -35,12 +35,13 @@ struct BuildFilePaths {
     disambiguation_path: PathBuf,
     grammar_path: PathBuf,
     multiword_tag_path: PathBuf,
-    common_words_path: PathBuf,
     regex_cache_path: PathBuf,
     srx_path: PathBuf,
+    spell_path: PathBuf,
 }
 
 impl BuildFilePaths {
+    // this has to be kept in sync with the paths the builder in build/make_build_dir.py stores the resources at
     fn new<P: AsRef<Path>>(build_dir: P) -> Self {
         let p = build_dir.as_ref();
         BuildFilePaths {
@@ -51,9 +52,9 @@ impl BuildFilePaths {
             disambiguation_path: p.join("disambiguation.xml"),
             grammar_path: p.join("grammar.xml"),
             multiword_tag_path: p.join("tags/multiwords.txt"),
-            common_words_path: p.join("common.txt"),
             regex_cache_path: p.join("regex_cache.bin"),
             srx_path: p.join("segment.srx"),
+            spell_path: p.join("spell.dump"),
         }
     }
 }
@@ -96,13 +97,29 @@ pub fn compile(
     let lang_code = fs::read_to_string(paths.lang_code_path)?;
 
     info!(
-        "Reading common words from {}.",
-        paths.common_words_path.display()
+        "Reading spelling words with frequency from {}.",
+        paths.spell_path.display()
     );
-    let common_words = fs::read_to_string(paths.common_words_path)?
-        .lines()
-        .map(|x| x.to_string())
-        .collect();
+    let mut freq_words = DefaultHashMap::new();
+    let reader = BufReader::new(File::open(paths.spell_path)?);
+
+    for line in reader.lines() {
+        match line?
+            .trim()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            [freq, word] => {
+                // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
+                // we start from 1 because 0 is reserved for words we do not know the frequency of
+                let freq = 1 + freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
+                assert!(freq < u8::MAX as usize);
+                freq_words.insert(word.to_string(), freq as u8);
+            }
+            _ => continue,
+        }
+    }
 
     let tokenizer_lang_options = utils::tokenizer_lang_options(&lang_code).ok_or_else(|| {
         Error::LanguageOptionsDoNotExist {
@@ -124,7 +141,7 @@ pub fn compile(
     let tagger = Tagger::from_dumps(
         &paths.tag_paths,
         &paths.tag_remove_paths,
-        &common_words,
+        freq_words,
         tagger_lang_options,
     )?;
 

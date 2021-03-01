@@ -52,7 +52,7 @@ impl From<Tagger> for TaggerFields {
 
                     let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
                     let pos_bytes = pos_id.0.to_be_bytes();
-                    let inflect_bytes = inflect_id.0.to_be_bytes();
+                    let inflect_bytes = inflect_id.raw_value().to_be_bytes();
 
                     let value = u64::from_be_bytes([
                         inflect_bytes[0],
@@ -74,7 +74,7 @@ impl From<Tagger> for TaggerFields {
         let mut word_store_items: Vec<_> = tagger
             .word_store
             .iter()
-            .map(|(key, value)| (key.clone(), value.0 as u64))
+            .map(|(key, value)| (key.clone(), value.raw_value() as u64))
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -106,7 +106,7 @@ impl From<TaggerFields> for Tagger {
             .into_str_vec()
             .unwrap()
             .into_iter()
-            .map(|(key, value)| (key, WordIdInt(value as u32)))
+            .map(|(key, value)| (key, WordIdInt::from_raw_value(value as u32)))
             .collect();
 
         let mut tags = DefaultHashMap::new();
@@ -120,7 +120,7 @@ impl From<TaggerFields> for Tagger {
             let word_id = *word_store.get_by_left(word).unwrap();
 
             let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt(u32::from_be_bytes([
+            let inflection_id = WordIdInt::from_raw_value(u32::from_be_bytes([
                 value_bytes[0],
                 value_bytes[1],
                 value_bytes[2],
