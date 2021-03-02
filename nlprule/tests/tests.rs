@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, sync::Arc};
 
 use lazy_static::lazy_static;
 use nlprule::{rule::id::Category, Rules, Tokenizer};
@@ -8,8 +8,8 @@ const TOKENIZER_PATH: &str = "../storage/en_tokenizer.bin";
 const RULES_PATH: &str = "../storage/en_rules.bin";
 
 lazy_static! {
-    static ref TOKENIZER: Tokenizer = Tokenizer::new(TOKENIZER_PATH).unwrap();
-    static ref RULES: Rules = Rules::new(RULES_PATH).unwrap();
+    static ref TOKENIZER: Arc<Tokenizer> = Arc::new(Tokenizer::new(TOKENIZER_PATH).unwrap());
+    static ref RULES: Rules = Rules::new(RULES_PATH, TOKENIZER.clone()).unwrap();
 }
 
 #[test]
@@ -25,12 +25,10 @@ fn can_tokenize_anything(text: String) -> bool {
 
 #[test]
 fn rules_can_be_disabled_enabled() {
-    let mut rules = Rules::new(RULES_PATH).unwrap();
+    let mut rules = Rules::new(RULES_PATH, TOKENIZER.clone()).unwrap();
 
     // enabled by default
-    assert!(!rules
-        .suggest("I can due his homework", &*TOKENIZER)
-        .is_empty());
+    assert!(!rules.suggest("I can due his homework").is_empty());
 
     rules
         .select_mut(
@@ -41,17 +39,15 @@ fn rules_can_be_disabled_enabled() {
         .for_each(|x| x.disable());
 
     // disabled now
-    assert!(rules
-        .suggest("I can due his homework", &*TOKENIZER)
-        .is_empty());
+    assert!(rules.suggest("I can due his homework").is_empty());
 
     // disabled by default
-    assert!(rules.suggest("I can not go", &*TOKENIZER).is_empty());
+    assert!(rules.suggest("I can not go").is_empty());
 
     rules
         .select_mut(&"typos/can_not".try_into().unwrap())
         .for_each(|x| x.enable());
 
     // enabled now
-    assert!(!rules.suggest("I can not go", &*TOKENIZER).is_empty());
+    assert!(!rules.suggest("I can not go").is_empty());
 }

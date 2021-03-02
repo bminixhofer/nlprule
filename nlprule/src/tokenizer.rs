@@ -13,7 +13,7 @@ use crate::{
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
     path::Path,
     sync::Arc,
 };
@@ -126,6 +126,11 @@ impl Tokenizer {
     /// Creates a new tokenizer from a reader.
     pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// TODO
+    pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        Ok(bincode::serialize_into(writer, &self)?)
     }
 
     /// Gets all disambigation rules in the order they are applied.

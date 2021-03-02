@@ -9,7 +9,7 @@ use composition::{Composition, Group, MatchGraph};
 
 use self::composition::GraphId;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenEngine {
     pub(crate) composition: Composition,
     pub(crate) antipatterns: Vec<Composition>,
@@ -53,7 +53,7 @@ impl TokenEngine {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Engine {
     Token(TokenEngine),
     // regex with the `fancy_regex` backend is large on the stack

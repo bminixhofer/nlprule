@@ -82,6 +82,8 @@ pub enum Error {
     Unimplemented(String),
     #[error("error parsing to integer: {0}")]
     ParseError(#[from] ParseIntError),
+    #[error("nlprule error: {0}")]
+    NLPRuleError(#[from] crate::Error),
     #[error("unknown error")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
@@ -202,12 +204,16 @@ pub fn compile(
         srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
         tokenizer_lang_options,
     )?;
-
-    bincode::serialize_into(&mut tokenizer_dest, &tokenizer)?;
+    tokenizer.to_writer(&mut tokenizer_dest)?;
 
     info!("Creating grammar rules.");
-    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_lang_options);
-    bincode::serialize_into(&mut rules_dest, &rules)?;
+    let rules = Rules::from_xml(
+        &paths.grammar_path,
+        &mut build_info,
+        Arc::new(tokenizer),
+        rules_lang_options,
+    );
+    rules.to_writer(&mut rules_dest)?;
 
     // we need to write the regex cache after building the rules, otherwise it isn't fully populated
     let f = BufWriter::new(File::create(&paths.regex_cache_path)?);

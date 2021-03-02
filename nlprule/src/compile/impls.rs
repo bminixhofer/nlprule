@@ -8,6 +8,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
+    sync::Arc,
 };
 
 use crate::{
@@ -21,7 +22,6 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesLangOptions, RulesOptions},
-    spellcheck,
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -265,6 +265,7 @@ impl Rules {
     pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
+        tokenizer: Arc<Tokenizer>,
         options: RulesLangOptions,
     ) -> Self {
         let rules = super::parse_structure::read_rules(path);
@@ -361,6 +362,7 @@ impl Rules {
             rules,
             options: RulesOptions::default(),
             spellchecker: None,
+            tokenizer,
         }
     }
 }

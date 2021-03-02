@@ -309,11 +309,11 @@ impl From<Suggestion> for PySuggestion {
 #[text_signature = "(path, sentence_splitter=None)"]
 #[derive(Default)]
 pub struct PyTokenizer {
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Tokenizer>,
 }
 
 impl PyTokenizer {
-    fn tokenizer(&self) -> &Tokenizer {
+    fn tokenizer(&self) -> &Arc<Tokenizer> {
         &self.tokenizer
     }
 }
@@ -327,7 +327,9 @@ impl PyTokenizer {
 
         let tokenizer: Tokenizer = bincode::deserialize_from(bytes)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
-        Ok(PyTokenizer { tokenizer })
+        Ok(PyTokenizer {
+            tokenizer: Arc::new(tokenizer),
+        })
     }
 
     #[new]
@@ -339,7 +341,9 @@ impl PyTokenizer {
             Tokenizer::default()
         };
 
-        Ok(PyTokenizer { tokenizer })
+        Ok(PyTokenizer {
+            tokenizer: Arc::new(tokenizer),
+        })
     }
 
     /// Get the tagger dictionary of this tokenizer.
@@ -402,8 +406,8 @@ impl PyTokenizer {
     }
 }
 
-impl From<Tokenizer> for PyTokenizer {
-    fn from(tokenizer: Tokenizer) -> Self {
+impl From<Arc<Tokenizer>> for PyTokenizer {
+    fn from(tokenizer: Arc<Tokenizer>) -> Self {
         PyTokenizer { tokenizer }
     }
 }
@@ -552,41 +556,39 @@ impl PyRule {
 #[text_signature = "(path, tokenizer, sentence_splitter=None)"]
 struct PyRules {
     rules: Arc<RwLock<Rules>>,
-    tokenizer: Py<PyTokenizer>,
 }
 
 #[pymethods]
 impl PyRules {
     #[text_signature = "(code, tokenizer, sentence_splitter=None)"]
     #[staticmethod]
-    fn load(lang_code: &str, tokenizer: Py<PyTokenizer>) -> PyResult<Self> {
+    fn load(lang_code: &str, tokenizer: &PyTokenizer) -> PyResult<Self> {
         let bytes = get_resource(lang_code, "rules.bin.gz")?;
 
-        let rules: Rules = bincode::deserialize_from(bytes)
+        let rules = Rules::from_reader(bytes, tokenizer.tokenizer().clone())
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
         Ok(PyRules {
             rules: Arc::from(RwLock::from(rules)),
-            tokenizer,
         })
     }
 
     #[new]
-    fn new(py: Python, path: Option<&str>, tokenizer: Option<Py<PyTokenizer>>) -> PyResult<Self> {
+    fn new(path: Option<&str>, tokenizer: Option<&PyTokenizer>) -> PyResult<Self> {
+        let tokenizer = if let Some(tokenizer) = tokenizer {
+            tokenizer.tokenizer().clone()
+        } else {
+            PyTokenizer::default().tokenizer().clone()
+        };
+
         let rules = if let Some(path) = path {
-            Rules::new(path)
+            Rules::new(path, tokenizer)
                 .map_err(|x| PyValueError::new_err(format!("error creating Rules: {}", x)))?
         } else {
             Rules::default()
         };
-        let tokenizer = if let Some(tokenizer) = tokenizer {
-            tokenizer
-        } else {
-            Py::new(py, PyTokenizer::default())?
-        };
 
         Ok(PyRules {
             rules: Arc::from(RwLock::from(rules)),
-            tokenizer,
         })
     }
 
@@ -628,12 +630,9 @@ impl PyRules {
     #[text_signature = "(sentence_or_sentences)"]
     fn suggest(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
         text_guard(py, sentence_or_sentences, |sentence| {
-            let tokenizer = self.tokenizer.borrow(py);
-            let tokenizer = tokenizer.tokenizer();
-
             self.rules
                 .read()
-                .suggest(&sentence, &tokenizer)
+                .suggest(&sentence)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -651,10 +650,7 @@ impl PyRules {
     #[text_signature = "(text_or_texts)"]
     fn correct(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
         text_guard(py, text_or_texts, |text| {
-            let tokenizer = self.tokenizer.borrow(py);
-            let tokenizer = tokenizer.tokenizer();
-
-            Ok(self.rules.read().correct(&text, tokenizer))
+            Ok(self.rules.read().correct(&text))
         })
     }
 
@@ -691,13 +687,11 @@ impl PyRules {
     pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
-                let state: (Rules, Tokenizer) =
-                    bincode::deserialize(s.as_bytes()).map_err(|_| {
-                        PyValueError::new_err("deserializing state with `bincode` failed")
-                    })?;
+                let rules: Rules = bincode::deserialize(s.as_bytes()).map_err(|_| {
+                    PyValueError::new_err("deserializing state with `bincode` failed")
+                })?;
                 // a roundtrip through pickle can not preserve references so we need to create a new Arc<RwLock<..>>
-                self.rules = Arc::from(RwLock::from(state.0));
-                self.tokenizer = Py::new(py, PyTokenizer::from(state.1))?;
+                self.rules = Arc::new(RwLock::new(rules));
                 Ok(())
             }
             Err(e) => Err(e),
@@ -705,13 +699,10 @@ impl PyRules {
     }
 
     pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        let tokenizer = self.tokenizer.borrow(py);
         // rwlock is serialized the same way as the inner type
-        let state = (&self.rules, tokenizer.tokenizer());
-
         Ok(PyBytes::new(
             py,
-            &bincode::serialize(&state)
+            &bincode::serialize(&self.rules)
                 .map_err(|_| PyValueError::new_err("serializing state with `bincode` failed"))?,
         )
         .to_object(py))

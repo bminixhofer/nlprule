@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use clap::Clap;
 use nlprule::{rules::Rules, tokenizer::Tokenizer};
 
@@ -19,8 +21,8 @@ fn main() {
     env_logger::init();
     let opts = Opts::parse();
 
-    let tokenizer = Tokenizer::new(opts.tokenizer).unwrap();
-    let rules_container = Rules::new(opts.rules).unwrap();
+    let tokenizer = Arc::new(Tokenizer::new(opts.tokenizer).unwrap());
+    let rules_container = Rules::new(opts.rules, tokenizer.clone()).unwrap();
     let rules = rules_container.rules();
 
     println!("Runnable rules: {}", rules.len());

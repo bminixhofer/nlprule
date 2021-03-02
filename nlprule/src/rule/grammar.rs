@@ -16,7 +16,7 @@ impl std::cmp::PartialEq for Suggestion {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Conversion {
     Nop,
     AllLower,
@@ -38,7 +38,7 @@ impl Conversion {
 }
 
 /// An example associated with a [Rule][crate::rule::Rule].
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Example {
     pub(crate) text: String,
     pub(crate) suggestion: Option<Suggestion>,
@@ -58,7 +58,7 @@ impl Example {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PosReplacer {
     pub(crate) matcher: PosMatcher,
 }
@@ -98,7 +98,7 @@ impl PosReplacer {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     pub(crate) id: GraphId,
     pub(crate) conversion: Conversion,
@@ -131,14 +131,14 @@ impl Match {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SynthesizerPart {
     Text(String),
     // Regex with the `fancy_regex` backend is large on the stack
     Match(Box<Match>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Synthesizer {
     pub(crate) use_titlecase_adjust: bool,
     pub(crate) parts: Vec<SynthesizerPart>,
