@@ -47,7 +47,14 @@ pub(crate) fn rules_lang_options(lang_code: &str) -> Option<RulesLangOptions> {
 
 /// Gets the tagger language options for the language code
 pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<TaggerLangOptions> {
-    TAGGER_LANG_OPTIONS.get(lang_code).cloned()
+    TAGGER_LANG_OPTIONS
+        .get(lang_code)
+        .cloned()
+        .map(|mut options| {
+            // lang_code on the tagger is special; populated automatically
+            options.lang_code = lang_code.to_owned();
+            options
+        })
 }
 
 pub(crate) use regex::from_java_regex;

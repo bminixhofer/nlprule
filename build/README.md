@@ -79,8 +79,6 @@ python build/make_build_dir.py \
     --chunker_token_model=$HOME/Downloads/nlprule/en-token.bin \
     --chunker_pos_model=$HOME/Downloads/nlprule/en-pos-maxent.bin \
     --chunker_chunk_model=$HOME/Downloads/nlprule/en-chunker.bin \
-    --spell_dict_path=$LT_PATH/org/languagetool/resource/en/hunspell/en_GB.dict \
-    --spell_info_path=$LT_PATH/org/languagetool/resource/en/hunspell/en_GB.info \
     --out_dir=data/en
 ```
 
@@ -94,8 +92,6 @@ python build/make_build_dir.py \
     --lang_code=de \
     --tag_dict_path=$HOME/Downloads/nlprule/german-pos-dict/src/main/resources/org/languagetool/resource/de/german.dict \
     --tag_info_path=$HOME/Downloads/nlprule/german-pos-dict/src/main/resources/org/languagetool/resource/de/german.info \
-    --spell_dict_path=$LT_PATH/org/languagetool/resource/de/hunspell/de_DE.dict \
-    --spell_info_path=$LT_PATH/org/languagetool/resource/de/hunspell/de_DE.info \
     --out_dir=data/de
 ```
 

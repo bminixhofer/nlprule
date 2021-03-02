@@ -9,7 +9,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, iter::once};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct TaggerLangOptions {
     /// Whether to use a heuristic to split potential compound words.
     pub use_compound_split_heuristic: bool,
@@ -17,16 +17,11 @@ pub(crate) struct TaggerLangOptions {
     pub always_add_lower_tags: bool,
     /// Used part-of-speech tags which are not in the tagger dictionary.
     pub extra_tags: Vec<String>,
-}
-
-impl Default for TaggerLangOptions {
-    fn default() -> Self {
-        TaggerLangOptions {
-            use_compound_split_heuristic: false,
-            always_add_lower_tags: false,
-            extra_tags: Vec::new(),
-        }
-    }
+    /// Variants of the language (e.g. "en_US", "en_GB") to consider for spellchecking.
+    pub variants: Vec<String>,
+    /// The language code in two-letter format. Set automatically by the compile module.
+    #[serde(skip)]
+    pub lang_code: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,15 +47,15 @@ impl From<Tagger> for TaggerFields {
 
                     let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
                     let pos_bytes = pos_id.0.to_be_bytes();
-                    let inflect_bytes = inflect_id.raw_value().to_be_bytes();
+                    let inflect_bytes = inflect_id.to_bytes();
 
                     let value = u64::from_be_bytes([
                         inflect_bytes[0],
                         inflect_bytes[1],
                         inflect_bytes[2],
                         inflect_bytes[3],
-                        0,
-                        0,
+                        inflect_bytes[4],
+                        inflect_bytes[5],
                         pos_bytes[0],
                         pos_bytes[1],
                     ]);
@@ -74,7 +69,7 @@ impl From<Tagger> for TaggerFields {
         let mut word_store_items: Vec<_> = tagger
             .word_store
             .iter()
-            .map(|(key, value)| (key.clone(), value.raw_value() as u64))
+            .map(|(key, value)| (key.clone(), value.to_u64()))
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -106,7 +101,7 @@ impl From<TaggerFields> for Tagger {
             .into_str_vec()
             .unwrap()
             .into_iter()
-            .map(|(key, value)| (key, WordIdInt::from_raw_value(value as u32)))
+            .map(|(key, value)| (key, WordIdInt::from_u64(value)))
             .collect();
 
         let mut tags = DefaultHashMap::new();
@@ -120,12 +115,14 @@ impl From<TaggerFields> for Tagger {
             let word_id = *word_store.get_by_left(word).unwrap();
 
             let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt::from_raw_value(u32::from_be_bytes([
+            let inflection_id = WordIdInt::from_bytes([
                 value_bytes[0],
                 value_bytes[1],
                 value_bytes[2],
                 value_bytes[3],
-            ]));
+                value_bytes[4],
+                value_bytes[5],
+            ]);
             let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
 
             let group = groups.entry(inflection_id).or_insert_with(Vec::new);

@@ -37,7 +37,7 @@ struct BuildFilePaths {
     multiword_tag_path: PathBuf,
     regex_cache_path: PathBuf,
     srx_path: PathBuf,
-    spell_path: PathBuf,
+    spell_dir_path: PathBuf,
 }
 
 impl BuildFilePaths {
@@ -54,7 +54,7 @@ impl BuildFilePaths {
             multiword_tag_path: p.join("tags/multiwords.txt"),
             regex_cache_path: p.join("regex_cache.bin"),
             srx_path: p.join("segment.srx"),
-            spell_path: p.join("spell.dump"),
+            spell_dir_path: p.join("spell"),
         }
     }
 }
@@ -88,6 +88,40 @@ pub enum Error {
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
+fn parse_spell_dumps<P: AsRef<Path>>(
+    spell_dir_path: P,
+    variants: &[String],
+) -> Result<DefaultHashMap<String, (u8, u8)>, Error> {
+    let mut words = DefaultHashMap::new();
+
+    for (i, variant) in variants.iter().enumerate() {
+        let spell_path = spell_dir_path.as_ref().join(variant).with_extension("dump");
+        info!("Reading spelling dictionary from {}.", spell_path.display());
+
+        let reader = BufReader::new(File::open(spell_path)?);
+        for line in reader.lines() {
+            match line?
+                .trim()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .as_slice()
+            {
+                [freq, word] => {
+                    // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
+                    // we start from 1 because 0 is reserved for words we do not know the frequency of
+                    let freq = 1 + freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
+                    assert!(freq < u8::MAX as usize);
+                    assert!(i < 8);
+                    words.insert(word.to_string(), (1u8 << i, freq as u8));
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    Ok(words)
+}
+
 /// Compiles the binaries from a build directory.
 pub fn compile(
     build_dir: impl AsRef<Path>,
@@ -97,31 +131,6 @@ pub fn compile(
     let paths = BuildFilePaths::new(&build_dir);
 
     let lang_code = fs::read_to_string(paths.lang_code_path)?;
-
-    info!(
-        "Reading spelling words with frequency from {}.",
-        paths.spell_path.display()
-    );
-    let mut freq_words = DefaultHashMap::new();
-    let reader = BufReader::new(File::open(paths.spell_path)?);
-
-    for line in reader.lines() {
-        match line?
-            .trim()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .as_slice()
-        {
-            [freq, word] => {
-                // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
-                // we start from 1 because 0 is reserved for words we do not know the frequency of
-                let freq = 1 + freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
-                assert!(freq < u8::MAX as usize);
-                freq_words.insert(word.to_string(), freq as u8);
-            }
-            _ => continue,
-        }
-    }
 
     let tokenizer_lang_options = utils::tokenizer_lang_options(&lang_code).ok_or_else(|| {
         Error::LanguageOptionsDoNotExist {
@@ -139,11 +148,13 @@ pub fn compile(
             lang_code: lang_code.clone(),
         })?;
 
+    let words = parse_spell_dumps(&paths.spell_dir_path, &tagger_lang_options.variants)?;
+
     info!("Creating tagger.");
     let tagger = Tagger::from_dumps(
         &paths.tag_paths,
         &paths.tag_remove_paths,
-        freq_words,
+        words,
         tagger_lang_options,
     )?;
 

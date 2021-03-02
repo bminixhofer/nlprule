@@ -4,5 +4,10 @@
     "extra_tags": [
         "PKT",
         "PRO:IND:DAT:SIN:NEU"
+    ],
+    "variants": [
+        "de_AT",
+        "de_DE",
+        "de_CH"
     ]
 }

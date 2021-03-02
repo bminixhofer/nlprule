@@ -6,6 +6,7 @@ import logging
 from zipfile import ZipFile
 import lxml.etree as ET
 import wordfreq
+from glob import glob
 from chardet.universaldetector import UniversalDetector
 
 from chunker import write_chunker  # type: ignore
@@ -83,7 +84,7 @@ def dump_dict(out_path, lt_dir, tag_dict_path, tag_info_path):
     dump_bytes = open(out_path, "rb").read()
 
     with open(out_path, "w") as f:
-        f.write(dump_bytes.decode(result["encoding"]))
+        f.write(dump_bytes.decode(result["encoding"] or "utf-8"))
 
 
 if __name__ == "__main__":
@@ -118,16 +119,6 @@ Requirements:
         "--tag_info_path",
         type=lambda p: Path(p).absolute(),
         help="Path to the accompanying tagger dictionary .info file.",
-    )
-    parser.add_argument(
-        "--spell_dict_path",
-        type=lambda p: Path(p).absolute(),
-        help="Path to a spell dictionary .dict file.",
-    )
-    parser.add_argument(
-        "--spell_info_path",
-        type=lambda p: Path(p).absolute(),
-        help="Path to the accompanying spell dictionary .info file.",
     )
     parser.add_argument(
         "--chunker_token_model",
@@ -168,13 +159,27 @@ Only needed if the language requires a chunker (e. g. English).
         args.tag_info_path,
     )
 
-    # spell dictionary
-    dump_dict(
-        args.out_dir / "spell.dump",
-        args.lt_dir,
-        args.spell_dict_path,
-        args.spell_info_path,
-    )
+    # spell dictionaries
+    (args.out_dir / "spell").mkdir()
+    for dic in glob(
+        str(
+            args.lt_dir
+            / "org"
+            / "languagetool"
+            / "resource"
+            / args.lang_code
+            / "hunspell"
+            / "*.dict"
+        )
+    ):
+        dic = Path(dic)
+        info = Path(dic).with_suffix(".info")
+
+        variant_name = dic.stem
+
+        dump_dict(
+            args.out_dir / "spell" / f"{variant_name}.dump", args.lt_dir, dic, info,
+        )
 
     if (
         args.chunker_token_model is not None

@@ -93,7 +93,7 @@ impl Tagger {
     pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
         paths: &[S1],
         remove_paths: &[S2],
-        freq_words: HashMap<String, u8>,
+        spell_words: HashMap<String, (u8, u8)>,
         lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
         let mut tags = DefaultHashMap::default();
@@ -115,17 +115,21 @@ impl Tagger {
 
         let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
         for i in 0..punct.len() {
-            word_store.insert(&punct[i..(i + 1)], 0);
+            word_store.insert(&punct[i..(i + 1)], (0, 0));
         }
 
         for (word, inflection, tag) in lines.iter() {
-            word_store.insert(word, 0);
-            word_store.insert(inflection, 0);
+            word_store.insert(word, (0, 0));
+            word_store.insert(inflection, (0, 0));
             tag_store.insert(tag);
         }
 
-        // extend with freq words at the end to make sure we overwrite words which existed but have 0 frequency
-        word_store.extend(freq_words.iter().map(|(word, freq)| (word.as_str(), *freq)));
+        // extend with spelling words at the end to make sure we overwrite words which existed but have 0 frequency
+        word_store.extend(
+            spell_words
+                .iter()
+                .map(|(word, freq)| (word.as_str(), *freq)),
+        );
 
         // word store ids should be consistent across runs
         let mut word_store: Vec<_> = word_store.into_iter().collect();
@@ -138,7 +142,12 @@ impl Tagger {
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()
-            .map(|(i, (word, freq))| ((*word).to_owned(), WordIdInt::new(i as u32, *freq)))
+            .map(|(i, (word, (freq, variants)))| {
+                (
+                    (*word).to_owned(),
+                    WordIdInt::new(i as u32, *freq, *variants),
+                )
+            })
             .collect();
         let tag_store: BiMap<_, _> = tag_store
             .iter()
