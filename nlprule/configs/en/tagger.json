@@ -6,13 +6,5 @@
         "ORD",
         "SYM",
         "RB_SENT"
-    ],
-    "variants": [
-        "en_GB",
-        "en_US",
-        "en_ZA",
-        "en_NZ",
-        "en_CA",
-        "en_AU"
     ]
 }

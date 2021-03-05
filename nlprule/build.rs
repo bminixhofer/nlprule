@@ -20,6 +20,7 @@ fn main() {
         ("tokenizer.json", "tokenizer_configs.json"),
         ("rules.json", "rules_configs.json"),
         ("tagger.json", "tagger_configs.json"),
+        ("spellchecker.json", "spellchecker_configs.json"),
     ] {
         let mut config_map: HashMap<String, serde_json::Value> = HashMap::new();
 

@@ -16,39 +16,7 @@ pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 #[derive(
     Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd, Default,
 )]
-pub(crate) struct WordIdInt(u32, u8, u8);
-
-impl WordIdInt {
-    pub fn new(index: u32, freq: u8, variants: u8) -> Self {
-        WordIdInt(index, freq, variants)
-    }
-
-    pub fn freq(&self) -> u8 {
-        (self.0 & 255) as u8
-    }
-
-    pub fn to_u64(&self) -> u64 {
-        let b = self.to_bytes();
-        u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], self.1, self.2])
-    }
-
-    pub fn from_u64(value: u64) -> Self {
-        let b = value.to_be_bytes();
-        Self::from_bytes([b[0], b[1], b[2], b[3], b[4], b[5]])
-    }
-
-    pub fn to_bytes(&self) -> [u8; 6] {
-        let b = self.0.to_be_bytes();
-        [b[0], b[1], b[2], b[3], self.1, self.2]
-    }
-
-    pub fn from_bytes(value: [u8; 6]) -> Self {
-        let index = u32::from_be_bytes([value[0], value[1], value[2], value[3]]);
-        let freq = value[4];
-        let variants = value[5];
-        WordIdInt(index, freq, variants)
-    }
-}
+pub(crate) struct WordIdInt(pub u32);
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]

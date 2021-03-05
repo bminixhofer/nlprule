@@ -1,4 +1,6 @@
-use crate::{rules::RulesLangOptions, tokenizer::TokenizerLangOptions};
+use crate::{
+    rules::RulesLangOptions, spellcheck::SpellcheckerLangOptions, tokenizer::TokenizerLangOptions,
+};
 use crate::{tokenizer::tag::TaggerLangOptions, types::*};
 use lazy_static::lazy_static;
 
@@ -35,6 +37,17 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref SPELLCHECKER_LANG_OPTIONS: DefaultHashMap<String, SpellcheckerLangOptions> = {
+        serde_json::from_slice(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/",
+            "spellchecker_configs.json"
+        )))
+        .expect("tagger configs must be valid JSON")
+    };
+}
+
 /// Gets the tokenizer language options for the language code
 pub(crate) fn tokenizer_lang_options(lang_code: &str) -> Option<TokenizerLangOptions> {
     TOKENIZER_LANG_OPTIONS.get(lang_code).cloned()
@@ -47,14 +60,12 @@ pub(crate) fn rules_lang_options(lang_code: &str) -> Option<RulesLangOptions> {
 
 /// Gets the tagger language options for the language code
 pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<TaggerLangOptions> {
-    TAGGER_LANG_OPTIONS
-        .get(lang_code)
-        .cloned()
-        .map(|mut options| {
-            // lang_code on the tagger is special; populated automatically
-            options.lang_code = lang_code.to_owned();
-            options
-        })
+    TAGGER_LANG_OPTIONS.get(lang_code).cloned()
+}
+
+/// Gets the spellchecker language options for the language code
+pub(crate) fn spellchecker_lang_options(lang_code: &str) -> Option<SpellcheckerLangOptions> {
+    SPELLCHECKER_LANG_OPTIONS.get(lang_code).cloned()
 }
 
 pub(crate) use regex::from_java_regex;

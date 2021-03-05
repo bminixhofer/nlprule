@@ -3,48 +3,22 @@
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
 use crate::{
-    spellcheck::SpellcheckOptions, spellcheck::Spellchecker, types::*,
+    spellcheck::Spellchecker, spellcheck::SpellcheckerOptions, types::*,
     utils::parallelism::MaybeParallelRefIterator,
 };
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read, Write},
-    ops::{Deref, DerefMut},
     path::Path,
     sync::Arc,
 };
 
 /// Options for a rule set.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RulesOptions {
-    spellcheck: bool,
-    spellcheck_options: SpellcheckOptions,
-}
-
-/// TODO
-pub struct RulesOptionsGuard<'a> {
-    rules: &'a mut Rules,
-}
-
-impl<'a> Deref for RulesOptionsGuard<'a> {
-    type Target = RulesOptions;
-
-    fn deref(&self) -> &Self::Target {
-        &self.rules.options
-    }
-}
-
-impl<'a> DerefMut for RulesOptionsGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.rules.options
-    }
-}
-
-impl<'a> Drop for RulesOptionsGuard<'a> {
-    fn drop(&mut self) {
-        self.rules.ingest_options()
-    }
+    /// TODO
+    pub spellchecker_options: SpellcheckerOptions,
 }
 
 /// Language-dependent options for a rule set.
@@ -73,11 +47,15 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 struct RulesFields {
     pub(crate) rules: Vec<Rule>,
+    pub(crate) spellchecker: Spellchecker,
 }
 
 impl From<Rules> for RulesFields {
     fn from(rules: Rules) -> Self {
-        RulesFields { rules: rules.rules }
+        RulesFields {
+            rules: rules.rules,
+            spellchecker: rules.spellchecker,
+        }
     }
 }
 
@@ -85,21 +63,12 @@ impl From<Rules> for RulesFields {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) options: RulesOptions,
-    pub(crate) spellchecker: Option<Spellchecker>,
+    pub(crate) spellchecker: Spellchecker,
     pub(crate) tokenizer: Arc<Tokenizer>,
+    pub(crate) options: RulesOptions,
 }
 
 impl Rules {
-    fn ingest_options(&mut self) {
-        if self.options.spellcheck && self.spellchecker.is_none() {
-            self.spellchecker = Some(Spellchecker::new(
-                &self.tokenizer.tagger(),
-                self.options.spellcheck_options.clone(),
-            ));
-        }
-    }
-
     /// TODO
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         // TODO: the .clone() here could be avoided
@@ -115,13 +84,12 @@ impl Rules {
         options: RulesOptions,
     ) -> Result<Self, Error> {
         let fields: RulesFields = bincode::deserialize_from(reader)?;
-        let mut rules = Rules {
+        let rules = Rules {
             rules: fields.rules,
             options,
-            spellchecker: None,
+            spellchecker: fields.spellchecker,
             tokenizer,
         };
-        rules.ingest_options();
         Ok(rules)
     }
 
@@ -155,8 +123,8 @@ impl Rules {
         &self.options
     }
 
-    /// Gets the options of this rule set (mutable).
-    pub fn options_mut(&mut self) -> &mut RulesOptions {
+    /// Sets the options of this rule set.
+    pub fn mut_options(&mut self) -> &mut RulesOptions {
         &mut self.options
     }
 
@@ -208,6 +176,13 @@ impl Rules {
             })
             .flatten()
             .collect();
+
+        output.extend(
+            self.spellchecker
+                .suggest(tokens, &self.options.spellchecker_options)
+                .into_iter()
+                .map(|x| (0, x)),
+        );
 
         output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 

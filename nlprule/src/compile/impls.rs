@@ -4,11 +4,12 @@ use indexmap::IndexMap;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp,
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
-    sync::Arc,
+    sync::{atomic::AtomicUsize, Arc},
 };
 
 use crate::{
@@ -22,6 +23,7 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesLangOptions, RulesOptions},
+    spellcheck::{SpellInt, Spellchecker, SpellcheckerLangOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -33,6 +35,58 @@ use crate::{
 };
 
 use super::{parse_structure::BuildInfo, Error};
+
+impl Spellchecker {
+    pub(in crate::compile) fn from_dumps<S: AsRef<Path>>(
+        spell_dir_path: S,
+        lang_options: SpellcheckerLangOptions,
+    ) -> io::Result<Self> {
+        let mut words: HashMap<String, SpellInt> = DefaultHashMap::new();
+        let mut max_freq = 0;
+
+        for (i, variant) in lang_options.variants.iter().enumerate() {
+            let spell_path = spell_dir_path.as_ref().join(variant).with_extension("dump");
+
+            let reader = BufReader::new(File::open(spell_path)?);
+            for line in reader.lines() {
+                match line?
+                    .trim()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .as_slice()
+                {
+                    [freq, word] => {
+                        // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
+                        let freq = freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
+                        let value = words.entry(word.to_string()).or_default();
+
+                        max_freq = cmp::max(max_freq, freq);
+
+                        value.update_freq(freq);
+                        value.add_variant(i);
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        let mut words: Vec<_> = words
+            .into_iter()
+            .map(|(key, value)| (key, value.as_u64()))
+            .collect();
+        words.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let map =
+            fst::Map::from_iter(words.into_iter()).expect("words are lexicographically sorted.");
+
+        Ok(Spellchecker {
+            fst: map.into_fst().to_vec(),
+            max_freq,
+            lang_options,
+            used_variant: Arc::new(AtomicUsize::new(usize::MAX)),
+            used_fst: Arc::new(Vec::new().into()),
+        })
+    }
+}
 
 impl Tagger {
     fn get_lines<S1: AsRef<Path>, S2: AsRef<Path>>(
@@ -93,14 +147,14 @@ impl Tagger {
     pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
         paths: &[S1],
         remove_paths: &[S2],
-        spell_words: HashMap<String, (u8, u8)>,
+        common_words: &HashSet<String>,
         lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
         let mut tags = DefaultHashMap::default();
         let mut groups = DefaultHashMap::default();
 
         let mut tag_store = HashSet::new();
-        let mut word_store = HashMap::new();
+        let mut word_store = HashSet::new();
 
         // hardcoded special tags
         tag_store.insert("");
@@ -115,39 +169,29 @@ impl Tagger {
 
         let punct = "!\"#$%&\\'()*+,-./:;<=>?@[\\]^_`{|}~";
         for i in 0..punct.len() {
-            word_store.insert(&punct[i..(i + 1)], (0, 0));
+            word_store.insert(&punct[i..(i + 1)]);
         }
 
+        word_store.extend(common_words.iter().map(|x| x.as_str()));
+
         for (word, inflection, tag) in lines.iter() {
-            word_store.insert(word, (0, 0));
-            word_store.insert(inflection, (0, 0));
+            word_store.insert(word);
+            word_store.insert(inflection);
             tag_store.insert(tag);
         }
 
-        // extend with spelling words at the end to make sure we overwrite words which existed but have 0 frequency
-        word_store.extend(
-            spell_words
-                .iter()
-                .map(|(word, freq)| (word.as_str(), *freq)),
-        );
-
         // word store ids should be consistent across runs
-        let mut word_store: Vec<_> = word_store.into_iter().collect();
-        word_store.sort_unstable();
+        let mut word_store: Vec<_> = word_store.iter().collect();
+        word_store.sort();
 
-        // tag store ids should be consistent across runs
-        let mut tag_store: Vec<_> = tag_store.into_iter().collect();
-        tag_store.sort_unstable();
+        //  tag store ids should be consistent across runs
+        let mut tag_store: Vec<_> = tag_store.iter().collect();
+        tag_store.sort();
 
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()
-            .map(|(i, (word, (freq, variants)))| {
-                (
-                    (*word).to_owned(),
-                    WordIdInt::new(i as u32, *freq, *variants),
-                )
-            })
+            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
             .collect();
         let tag_store: BiMap<_, _> = tag_store
             .iter()
@@ -274,6 +318,7 @@ impl Rules {
     pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
+        spellchecker: Spellchecker,
         tokenizer: Arc<Tokenizer>,
         options: RulesLangOptions,
     ) -> Self {
@@ -369,9 +414,9 @@ impl Rules {
 
         Rules {
             rules,
-            options: RulesOptions::default(),
-            spellchecker: None,
+            spellchecker,
             tokenizer,
+            options: RulesOptions::default(),
         }
     }
 }

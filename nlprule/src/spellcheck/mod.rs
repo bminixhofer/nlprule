@@ -1,198 +1,189 @@
 use std::{
-    cmp,
-    hash::{Hash, Hasher},
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, RwLock, RwLockReadGuard,
+    },
 };
 
-use appendlist::AppendList;
-use lazy_static::lazy_static;
+use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use serde::{Deserialize, Serialize};
-use triple_accel::levenshtein;
 
-use crate::{tokenizer::tag::Tagger, types::*};
+use crate::types::*;
 
-fn hash<H: Hash>(string: H) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    string.hash(&mut hasher);
-    hasher.finish()
-}
+mod levenshtein;
 
-fn distance(a: usize, b: usize) -> usize {
-    if a > b {
-        a - b
-    } else {
-        b - a
+#[derive(Debug, Clone, Default, Copy)]
+pub(crate) struct SpellInt(u64);
+
+impl SpellInt {
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    pub fn update_freq(&mut self, freq: usize) {
+        assert!(freq < u32::MAX as usize);
+
+        // erase previous frequency
+        self.0 = self.0 & (u64::MAX - u32::MAX as u64);
+        // set new frequency
+        self.0 |= freq as u64;
+    }
+
+    pub fn add_variant(&mut self, index: usize) {
+        assert!(index < 32);
+        self.0 |= 1 << (32 + index);
+    }
+
+    pub fn contains_variant(&self, index: usize) -> bool {
+        (self.0 >> (32 + index)) & 1 == 1
+    }
+
+    pub fn freq(&self) -> usize {
+        (self.0 & u32::MAX as u64) as usize
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd, Ord, Eq)]
-pub struct Candidate<'a> {
-    pub distance: usize,
-    pub freq: u8,
-    pub term: &'a str,
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+struct Candidate {
+    pub score: f32,
+    pub term: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpellcheckOptions {
-    max_dictionary_distance: usize,
-    prefix_length: usize,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// TODO
+pub struct SpellcheckerOptions {
+    pub variant: Option<String>,
+    pub max_distance: usize,
+    pub prefix: usize,
+    pub frequency_weight: f32,
+    pub n_suggestions: usize,
 }
 
-impl Default for SpellcheckOptions {
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub(crate) struct SpellcheckerLangOptions {
+    /// Variants of the language (e. g. "en_US", "en_GB") to consider for spellchecking.
+    pub variants: Vec<String>,
+}
+
+impl Default for SpellcheckerOptions {
     fn default() -> Self {
-        SpellcheckOptions {
-            max_dictionary_distance: 2,
-            prefix_length: 7,
+        SpellcheckerOptions {
+            variant: None,
+            max_distance: 2,
+            prefix: 2,
+            frequency_weight: 2.,
+            n_suggestions: 10,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Spellchecker {
-    deletes: DefaultHashMap<u64, Vec<WordIdInt>>,
-    max_length: usize,
-    options: SpellcheckOptions,
-}
-
-lazy_static! {
-    static ref EMPTY_HASH: u64 = {
-        let empty: &[u8] = &[];
-        hash(empty)
-    };
+pub(crate) struct Spellchecker {
+    pub(crate) fst: Vec<u8>,
+    pub(crate) max_freq: usize,
+    pub(crate) lang_options: SpellcheckerLangOptions,
+    pub(crate) used_variant: Arc<AtomicUsize>,
+    pub(crate) used_fst: Arc<RwLock<Vec<u8>>>,
 }
 
 impl Spellchecker {
-    fn deletes_prefix(key: &[u8], options: &SpellcheckOptions) -> DefaultHashSet<u64> {
-        let mut out = DefaultHashSet::new();
+    fn update_used_fst(
+        &self,
+        options: &SpellcheckerOptions,
+    ) -> Option<RwLockReadGuard<'_, Vec<u8>>> {
+        let variant = if let Some(variant) = options.variant.as_ref() {
+            variant.as_str()
+        } else {
+            return None;
+        };
+        let variant_index = self
+            .lang_options
+            .variants
+            .iter()
+            .position(|x| x == variant)?;
 
-        if key.len() <= options.max_dictionary_distance {
-            out.insert(*EMPTY_HASH);
-        }
+        if self.used_variant.swap(variant_index, Ordering::Relaxed) != variant_index {
+            let mut used_fst_builder = MapBuilder::memory();
 
-        Self::deletes_recurse(&key[..options.prefix_length], 0, &mut out, options);
-        out.insert(hash(key));
+            let fst = Map::new(&self.fst).expect("serialized fst must be valid.");
+            let mut stream = fst.into_stream();
 
-        out
-    }
-
-    fn deletes_recurse(
-        bytes: &[u8],
-        distance: usize,
-        out: &mut DefaultHashSet<u64>,
-        options: &SpellcheckOptions,
-    ) {
-        if bytes.len() > 1 {
-            for i in 0..bytes.len() {
-                let mut delete = bytes.to_vec();
-                delete.remove(i);
-
-                if distance + 1 < options.max_dictionary_distance {
-                    Self::deletes_recurse(&delete, distance + 1, out, options);
+            while let Some((k, v)) = stream.next() {
+                if SpellInt(v).contains_variant(variant_index) {
+                    used_fst_builder
+                        .insert(k, v)
+                        .expect("fst stream returns values in lexicographic order.");
                 }
-
-                out.insert(hash(delete));
             }
+
+            let mut guard = self.used_fst.write();
+            let used_fst = guard.as_deref_mut().expect("lock must not be poisoned.");
+
+            *used_fst = used_fst_builder
+                .into_inner()
+                .expect("subset of valid fst must be valid.");
         }
+
+        Some(self.used_fst.read().expect("lock must not be poisoned"))
     }
 
-    pub fn new(tagger: &Tagger, options: SpellcheckOptions) -> Self {
-        let mut deletes = DefaultHashMap::new();
-        let mut max_length = 0;
+    fn lookup(&self, token: &Token, options: &SpellcheckerOptions) -> Option<Vec<Candidate>> {
+        let guard = self.update_used_fst(options)?;
+        let used_fst = Map::new(guard.deref()).expect("used fst must be valid.");
 
-        for (word, id) in tagger.word_store() {
-            for delete in Self::deletes_prefix(word.as_bytes(), &options) {
-                deletes.entry(delete).or_insert_with(Vec::new).push(*id);
-            }
-            max_length = cmp::max(word.len(), max_length);
-        }
-
-        Spellchecker {
-            deletes,
-            max_length,
-            options,
-        }
-    }
-
-    pub fn lookup<'t>(&self, token: &'t Token, max_distance: usize) -> Option<Vec<Candidate<'t>>> {
-        if token.word.text.id().is_some() {
+        let text = token.word.text.as_ref();
+        // no text => nothing to correct, only the case for special tokens (e.g. SENT_START)
+        if text.is_empty() {
             return None;
         }
 
-        let word = token.word.text.0.as_ref();
-        let input_length = word.len();
+        let query = levenshtein::Levenshtein::new(text, options.max_distance, 2);
 
-        if input_length - self.options.max_dictionary_distance > self.max_length {
-            return Some(Vec::new());
-        }
+        let mut out = Vec::new();
 
-        let mut candidates = Vec::new();
-
-        // deletes we've considered already
-        let mut known_deletes: DefaultHashSet<u64> = DefaultHashSet::new();
-        // suggestions we've considered already
-        let mut known_suggestions: DefaultHashSet<WordIdInt> = DefaultHashSet::new();
-
-        let mut candidate_index = 0;
-        let deletes: AppendList<Vec<u8>> = AppendList::new();
-
-        let input_prefix_length = cmp::min(input_length, self.options.prefix_length);
-        deletes.push(word.as_bytes()[..input_prefix_length].to_vec());
-
-        while candidate_index < deletes.len() {
-            let candidate = deletes[candidate_index].as_slice();
-            let candidate_length = candidate.len();
-
-            candidate_index += 1;
-
-            let length_diff = input_prefix_length - candidate_length;
-
-            if let Some(suggestions) = self.deletes.get(&hash(candidate)) {
-                for suggestion_id in suggestions {
-                    let suggestion = token.tagger.str_for_word_id(suggestion_id);
-                    let suggestion_length = suggestion.len();
-
-                    if distance(suggestion_length, input_length) > max_distance
-                // suggestion must be for a different delete string, in same bin only because of hash collision
-                    || suggestion_length < candidate_length
-                // in the same bin only because of hash collision, a valid suggestion is always longer than the delete
-                    || suggestion_length == candidate_length
-                // we already added the suggestion
-                    || known_suggestions.contains(suggestion_id)
-                    {
-                        continue;
-                    }
-
-                    // SymSpell.cs covers some additional cases here where it is not necessary to compute the edit distance
-                    // would have to be benchmarked if they are worth it considering `triple_accel` is presumably faster than
-                    // the C# implementation of edit distance
-
-                    let distance = levenshtein(suggestion.as_bytes(), word.as_bytes()) as usize;
-                    let freq = suggestion_id.freq();
-
-                    candidates.push(Candidate {
-                        term: suggestion,
-                        distance,
-                        freq,
-                    });
-                    known_suggestions.insert(*suggestion_id);
-                }
+        let mut stream = used_fst.search_with_state(query).into_stream();
+        while let Some((k, v, s)) = stream.next() {
+            let state = s.expect("matching levenshtein state is always `Some`.");
+            if state.dist() == 0 {
+                return None;
             }
 
-            if length_diff < max_distance && candidate_length <= self.options.prefix_length {
-                for i in 0..candidate.len() {
-                    let mut delete = candidate.to_owned();
-                    delete.remove(i);
+            let id = SpellInt(v);
 
-                    let delete_hash = hash(&delete);
+            let string = String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8.");
+            out.push(Candidate {
+                score: (options.max_distance - state.dist()) as f32
+                    + id.freq() as f32 / self.max_freq as f32 * options.frequency_weight,
+                term: string,
+            })
+        }
 
-                    if !known_deletes.contains(&delete_hash) {
-                        deletes.push(delete);
-                        known_deletes.insert(delete_hash);
-                    }
-                }
+        // we want higher scores first
+        out.sort_by(|a, b| b.partial_cmp(a).expect("candidate scores are never NaN."));
+        Some(out)
+    }
+
+    pub fn suggest(&self, tokens: &[Token], options: &SpellcheckerOptions) -> Vec<Suggestion> {
+        let mut suggestions = Vec::new();
+
+        for token in tokens {
+            if let Some(candidates) = self.lookup(token, options) {
+                // TODO: disallow empty / properly treat empty
+                suggestions.push(Suggestion {
+                    source: "SPELLCHECK/SINGLE".into(),
+                    message: "Possibly misspelled word.".into(),
+                    start: token.char_span.0,
+                    end: token.char_span.1,
+                    replacements: candidates
+                        .into_iter()
+                        .map(|x| x.term.to_owned())
+                        .take(options.n_suggestions)
+                        .collect(),
+                })
             }
         }
 
-        candidates.sort();
-        Some(candidates)
+        suggestions
     }
 }

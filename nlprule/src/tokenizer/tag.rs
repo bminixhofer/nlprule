@@ -17,11 +17,6 @@ pub(crate) struct TaggerLangOptions {
     pub always_add_lower_tags: bool,
     /// Used part-of-speech tags which are not in the tagger dictionary.
     pub extra_tags: Vec<String>,
-    /// Variants of the language (e.g. "en_US", "en_GB") to consider for spellchecking.
-    pub variants: Vec<String>,
-    /// The language code in two-letter format. Set automatically by the compile module.
-    #[serde(skip)]
-    pub lang_code: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,15 +42,15 @@ impl From<Tagger> for TaggerFields {
 
                     let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
                     let pos_bytes = pos_id.0.to_be_bytes();
-                    let inflect_bytes = inflect_id.to_bytes();
+                    let inflect_bytes = inflect_id.0.to_be_bytes();
 
                     let value = u64::from_be_bytes([
                         inflect_bytes[0],
                         inflect_bytes[1],
                         inflect_bytes[2],
                         inflect_bytes[3],
-                        inflect_bytes[4],
-                        inflect_bytes[5],
+                        0,
+                        0,
                         pos_bytes[0],
                         pos_bytes[1],
                     ]);
@@ -69,7 +64,7 @@ impl From<Tagger> for TaggerFields {
         let mut word_store_items: Vec<_> = tagger
             .word_store
             .iter()
-            .map(|(key, value)| (key.clone(), value.to_u64()))
+            .map(|(key, value)| (key.clone(), value.0 as u64))
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -101,7 +96,7 @@ impl From<TaggerFields> for Tagger {
             .into_str_vec()
             .unwrap()
             .into_iter()
-            .map(|(key, value)| (key, WordIdInt::from_u64(value)))
+            .map(|(key, value)| (key, WordIdInt(value as u32)))
             .collect();
 
         let mut tags = DefaultHashMap::new();
@@ -115,14 +110,12 @@ impl From<TaggerFields> for Tagger {
             let word_id = *word_store.get_by_left(word).unwrap();
 
             let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt::from_bytes([
+            let inflection_id = WordIdInt(u32::from_be_bytes([
                 value_bytes[0],
                 value_bytes[1],
                 value_bytes[2],
                 value_bytes[3],
-                value_bytes[4],
-                value_bytes[5],
-            ]);
+            ]));
             let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
 
             let group = groups.entry(inflection_id).or_insert_with(Vec::new);
@@ -199,6 +192,10 @@ impl Tagger {
         }
 
         tags
+    }
+
+    pub(crate) fn lang_options(&self) -> &TaggerLangOptions {
+        &self.lang_options
     }
 
     #[allow(dead_code)] // used by compile module
