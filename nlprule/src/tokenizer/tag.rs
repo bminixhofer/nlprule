@@ -194,10 +194,6 @@ impl Tagger {
         tags
     }
 
-    pub(crate) fn lang_options(&self) -> &TaggerLangOptions {
-        &self.lang_options
-    }
-
     #[allow(dead_code)] // used by compile module
     pub(crate) fn tag_store(&self) -> &BiMap<String, PosIdInt> {
         &self.tag_store

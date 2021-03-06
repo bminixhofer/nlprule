@@ -34,7 +34,6 @@ class LanguageTool:
             lt_code, remote_server="http://localhost:8081/"
         )
         self.tool.disabled_rules = {
-            "MORFOLOGIK_RULE_EN_US",
             "GERMAN_SPELLER_RULE",
             "COMMA_PARENTHESIS_WHITESPACE",
             "DOUBLE_PUNCTUATION",
@@ -116,7 +115,11 @@ class LanguageTool:
 class NLPRule:
     def __init__(self, lang_code: str):
         self.tokenizer = nlprule.Tokenizer(f"storage/{lang_code}_tokenizer.bin")
-        self.rules = nlprule.Rules(f"storage/{lang_code}_rules.bin", self.tokenizer)
+        self.rules = nlprule.Rules(
+            f"storage/{lang_code}_rules.bin",
+            self.tokenizer,
+            spellchecker_options={"variant": "en_US", "max_distance": 0, "prefix": 0,},
+        )
 
     def suggest(self, sentence: str) -> Set[Suggestion]:
         suggestions = {

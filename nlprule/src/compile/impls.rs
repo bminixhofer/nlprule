@@ -83,7 +83,7 @@ impl Spellchecker {
             max_freq,
             lang_options,
             used_variant: Arc::new(AtomicUsize::new(usize::MAX)),
-            used_fst: Arc::new(Vec::new().into()),
+            used: Arc::new(Default::default()),
         })
     }
 }

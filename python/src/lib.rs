@@ -1,7 +1,7 @@
 use flate2::read::GzDecoder;
 use nlprule::{
     rule::{id::Selector, Example, Rule},
-    rules::{apply_suggestions, Rules},
+    rules::{apply_suggestions, Rules, RulesOptions},
     tokenizer::tag::Tagger,
     tokenizer::Tokenizer,
     types::*,
@@ -9,9 +9,10 @@ use nlprule::{
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
-use pyo3::prelude::*;
-use pyo3::types::PyString;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
+use pyo3::{prelude::*, types::PyDict};
+use pyo3::{types::PyString, ToPyObject};
+use pythonize::depythonize;
 use std::{
     convert::TryFrom,
     fs,
@@ -560,12 +561,24 @@ struct PyRules {
 
 #[pymethods]
 impl PyRules {
-    #[text_signature = "(code, tokenizer, sentence_splitter=None)"]
+    #[text_signature = "(code, tokenizer, sentence_splitter=None, **kwargs)"]
+    #[args(kwargs = "**")]
     #[staticmethod]
-    fn load(lang_code: &str, tokenizer: &PyTokenizer) -> PyResult<Self> {
+    fn load(
+        py: Python,
+        lang_code: &str,
+        tokenizer: &PyTokenizer,
+        kwargs: Option<&PyDict>,
+    ) -> PyResult<Self> {
         let bytes = get_resource(lang_code, "rules.bin.gz")?;
 
-        let rules = Rules::from_reader(bytes, tokenizer.tokenizer().clone())
+        let options = if let Some(options) = kwargs {
+            depythonize(options.to_object(py).as_ref(py))?
+        } else {
+            RulesOptions::default()
+        };
+
+        let rules = Rules::from_reader_with_options(bytes, tokenizer.tokenizer().clone(), options)
             .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
         Ok(PyRules {
             rules: Arc::from(RwLock::from(rules)),
@@ -573,15 +586,27 @@ impl PyRules {
     }
 
     #[new]
-    fn new(path: Option<&str>, tokenizer: Option<&PyTokenizer>) -> PyResult<Self> {
+    #[args(kwargs = "**")]
+    fn new(
+        py: Python,
+        path: Option<&str>,
+        tokenizer: Option<&PyTokenizer>,
+        kwargs: Option<&PyDict>,
+    ) -> PyResult<Self> {
         let tokenizer = if let Some(tokenizer) = tokenizer {
             tokenizer.tokenizer().clone()
         } else {
             PyTokenizer::default().tokenizer().clone()
         };
 
+        let options = if let Some(options) = kwargs {
+            depythonize(options.to_object(py).as_ref(py))?
+        } else {
+            RulesOptions::default()
+        };
+
         let rules = if let Some(path) = path {
-            Rules::new(path, tokenizer)
+            Rules::new_with_options(path, tokenizer, options)
                 .map_err(|x| PyValueError::new_err(format!("error creating Rules: {}", x)))?
         } else {
             Rules::default()
