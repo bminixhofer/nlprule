@@ -1,7 +1,8 @@
 use flate2::read::GzDecoder;
 use nlprule::{
     rule::{id::Selector, Example, Rule},
-    rules::{apply_suggestions, Rules, RulesOptions},
+    rules::{apply_suggestions, Rules},
+    spellcheck::{Candidate, Spell},
     tokenizer::tag::Tagger,
     tokenizer::Tokenizer,
     types::*,
@@ -10,16 +11,25 @@ use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
 use pyo3::{exceptions::PyValueError, types::PyBytes};
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyFrozenSet},
+    wrap_pymodule,
+};
 use pyo3::{types::PyString, ToPyObject};
 use pythonize::depythonize;
 use std::{
+    collections::HashSet,
     convert::TryFrom,
     fs,
     io::{Cursor, Read},
     path::PathBuf,
     sync::Arc,
 };
+
+fn err(error: nlprule::Error) -> PyErr {
+    PyValueError::new_err(format!("{}", error))
+}
 
 fn get_resource(lang_code: &str, name: &str) -> PyResult<impl Read> {
     let version = env!("CARGO_PKG_VERSION");
@@ -307,7 +317,7 @@ impl From<Suggestion> for PySuggestion {
 /// When created from a language code, the binary is downloaded from the internet the first time.
 /// Then it is stored at your cache and loaded from there.
 #[pyclass(name = "Tokenizer", module = "nlprule")]
-#[text_signature = "(path, sentence_splitter=None)"]
+#[text_signature = "(path)"]
 #[derive(Default)]
 pub struct PyTokenizer {
     tokenizer: Arc<Tokenizer>,
@@ -321,13 +331,12 @@ impl PyTokenizer {
 
 #[pymethods]
 impl PyTokenizer {
-    #[text_signature = "(code, sentence_splitter=None)"]
+    #[text_signature = "(code)"]
     #[staticmethod]
     fn load(lang_code: &str) -> PyResult<Self> {
         let bytes = get_resource(lang_code, "tokenizer.bin.gz")?;
 
-        let tokenizer: Tokenizer = bincode::deserialize_from(bytes)
-            .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
+        let tokenizer = Tokenizer::from_reader(bytes).map_err(err)?;
         Ok(PyTokenizer {
             tokenizer: Arc::new(tokenizer),
         })
@@ -336,8 +345,7 @@ impl PyTokenizer {
     #[new]
     fn new(path: Option<&str>) -> PyResult<Self> {
         let tokenizer = if let Some(path) = path {
-            Tokenizer::new(path)
-                .map_err(|x| PyValueError::new_err(format!("error creating Tokenizer: {}", x)))?
+            Tokenizer::new(path).map_err(err)?
         } else {
             Tokenizer::default()
         };
@@ -479,7 +487,7 @@ impl PyRule {
         RwLockWriteGuard::map(self.rules.write(), |x| &mut x.rules_mut()[self.index])
     }
 
-    fn from_rule(index: usize, rules: Arc<RwLock<Rules>>) -> Self {
+    fn from_rules(index: usize, rules: Arc<RwLock<Rules>>) -> Self {
         PyRule { rules, index }
     }
 }
@@ -541,6 +549,181 @@ impl PyRule {
     }
 }
 
+#[pyclass(name = "SpellOptions", module = "nlprule.spell")]
+struct PySpellOptions {
+    rules: Arc<RwLock<Rules>>,
+}
+
+impl PySpellOptions {
+    fn spell(&self) -> MappedRwLockReadGuard<'_, Spell> {
+        RwLockReadGuard::map(self.rules.read(), |x| x.spell())
+    }
+
+    fn spell_mut(&self) -> MappedRwLockWriteGuard<'_, Spell> {
+        RwLockWriteGuard::map(self.rules.write(), |x| x.spell_mut())
+    }
+}
+
+#[pymethods]
+impl PySpellOptions {
+    #[getter]
+    fn get_variant(&self) -> Option<String> {
+        self.spell()
+            .options()
+            .variant
+            .as_ref()
+            .map(|x| x.as_str().to_owned())
+    }
+
+    #[setter]
+    fn set_variant(&self, variant: Option<&str>) -> PyResult<()> {
+        if let Some(variant) = variant {
+            let mut spell = self.spell_mut();
+            let variant = spell.variant(variant).map_err(err)?;
+
+            spell.options_mut().variant = Some(variant);
+        } else {
+            self.spell_mut().options_mut().variant = None;
+        }
+
+        Ok(())
+    }
+
+    #[getter]
+    fn get_max_distance(&self) -> usize {
+        self.spell().options().max_distance
+    }
+
+    #[setter]
+    fn set_max_distance(&self, max_distance: usize) {
+        self.spell_mut().options_mut().max_distance = max_distance
+    }
+
+    #[getter]
+    fn get_prefix_length(&self) -> usize {
+        self.spell().options().prefix_length
+    }
+
+    #[setter]
+    fn set_prefix_length(&self, prefix_length: usize) {
+        self.spell_mut().options_mut().prefix_length = prefix_length
+    }
+
+    #[getter]
+    fn get_freq_weight(&self) -> f32 {
+        self.spell().options().freq_weight
+    }
+
+    #[setter]
+    fn set_freq_weight(&self, freq_weight: f32) {
+        self.spell_mut().options_mut().freq_weight = freq_weight
+    }
+
+    #[getter]
+    fn get_top_n(&self) -> usize {
+        self.spell().options().top_n
+    }
+
+    #[setter]
+    fn set_top_n(&self, top_n: usize) {
+        self.spell_mut().options_mut().top_n = top_n
+    }
+
+    #[getter]
+    fn get_whitelist<'py>(&self, py: Python<'py>) -> PyResult<&'py PyFrozenSet> {
+        let spell = self.spell();
+        let whitelist: Vec<&str> = spell
+            .options()
+            .whitelist
+            .iter()
+            .map(|x| x.as_str())
+            .collect();
+
+        PyFrozenSet::new(py, &whitelist)
+    }
+
+    #[setter]
+    fn set_whitelist(&self, py: Python, whitelist: PyObject) -> PyResult<()> {
+        let whitelist: PyResult<HashSet<String>> = whitelist
+            .as_ref(py)
+            .iter()?
+            .map(|x| x.and_then(PyAny::extract::<String>))
+            .collect();
+        self.spell_mut().options_mut().whitelist = whitelist?;
+        Ok(())
+    }
+}
+
+#[pyclass(name = "Candidate", module = "nlprule.spell")]
+struct PyCandidate {
+    candidate: Candidate,
+}
+
+#[pymethods]
+impl PyCandidate {
+    #[getter]
+    fn score(&self) -> f32 {
+        self.candidate.score()
+    }
+
+    #[getter]
+    fn distance(&self) -> usize {
+        self.candidate.distance()
+    }
+
+    #[getter]
+    fn freq(&self) -> usize {
+        self.candidate.freq()
+    }
+
+    #[getter]
+    fn term(&self) -> &str {
+        self.candidate.term()
+    }
+}
+
+#[pyclass(name = "Spell", module = "nlprule.spell")]
+struct PySpell {
+    rules: Arc<RwLock<Rules>>,
+}
+
+#[pymethods]
+impl PySpell {
+    #[getter]
+    fn variants(&self) -> Vec<String> {
+        self.rules
+            .read()
+            .spell()
+            .variants()
+            .iter()
+            .map(|x| x.as_str().to_owned())
+            .collect()
+    }
+
+    #[getter]
+    fn get_options(&self) -> PySpellOptions {
+        PySpellOptions {
+            rules: self.rules.clone(),
+        }
+    }
+
+    #[setter]
+    fn set_options(&self, py: Python, options: &PyDict) -> PyResult<()> {
+        let mut guard = self.rules.write();
+        *guard.spell_mut().options_mut() = depythonize(options.to_object(py).as_ref(py))?;
+        Ok(())
+    }
+
+    fn search(&self, word: &str) -> Option<Vec<PyCandidate>> {
+        self.rules.read().spell().search(word).map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|candidate| PyCandidate { candidate })
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
 /// The grammatical rules.
 /// Can be created from a rules binary:
 /// ```python
@@ -554,60 +737,34 @@ impl PyRule {
 /// When created from a language code, the binary is downloaded from the internet the first time.
 /// Then it is stored at your cache and loaded from there.
 #[pyclass(name = "Rules", module = "nlprule")]
-#[text_signature = "(path, tokenizer, sentence_splitter=None)"]
+#[text_signature = "(path, tokenizer)"]
 struct PyRules {
     rules: Arc<RwLock<Rules>>,
 }
 
 #[pymethods]
 impl PyRules {
-    #[text_signature = "(code, tokenizer, sentence_splitter=None, **kwargs)"]
-    #[args(kwargs = "**")]
+    #[text_signature = "(code, tokenizer)"]
     #[staticmethod]
-    fn load(
-        py: Python,
-        lang_code: &str,
-        tokenizer: &PyTokenizer,
-        kwargs: Option<&PyDict>,
-    ) -> PyResult<Self> {
+    fn load(lang_code: &str, tokenizer: &PyTokenizer) -> PyResult<Self> {
         let bytes = get_resource(lang_code, "rules.bin.gz")?;
 
-        let options = if let Some(options) = kwargs {
-            depythonize(options.to_object(py).as_ref(py))?
-        } else {
-            RulesOptions::default()
-        };
-
-        let rules = Rules::from_reader_with_options(bytes, tokenizer.tokenizer().clone(), options)
-            .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
+        let rules = Rules::from_reader(bytes, tokenizer.tokenizer().clone()).map_err(err)?;
         Ok(PyRules {
             rules: Arc::from(RwLock::from(rules)),
         })
     }
 
     #[new]
-    #[args(kwargs = "**")]
-    fn new(
-        py: Python,
-        path: Option<&str>,
-        tokenizer: Option<&PyTokenizer>,
-        kwargs: Option<&PyDict>,
-    ) -> PyResult<Self> {
+    fn new(path: Option<&str>, tokenizer: Option<&PyTokenizer>) -> PyResult<Self> {
         let tokenizer = if let Some(tokenizer) = tokenizer {
             tokenizer.tokenizer().clone()
         } else {
             PyTokenizer::default().tokenizer().clone()
         };
 
-        let options = if let Some(options) = kwargs {
-            depythonize(options.to_object(py).as_ref(py))?
-        } else {
-            RulesOptions::default()
-        };
-
         let rules = if let Some(path) = path {
-            Rules::new_with_options(path, tokenizer, options)
-                .map_err(|x| PyValueError::new_err(format!("error creating Rules: {}", x)))?
+            Rules::new(path, tokenizer).map_err(err)?
         } else {
             Rules::default()
         };
@@ -618,20 +775,27 @@ impl PyRules {
     }
 
     #[getter]
+    fn spell(&self) -> PySpell {
+        PySpell {
+            rules: self.rules.clone(),
+        }
+    }
+
+    #[getter]
     fn rules(&self) -> Vec<PyRule> {
         self.rules
             .read()
             .rules()
             .iter()
             .enumerate()
-            .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
+            .map(|(i, _)| PyRule::from_rules(i, self.rules.clone()))
             .collect()
     }
 
     /// Finds a rule by selector.
     fn select(&self, id: &str) -> PyResult<Vec<PyRule>> {
         let selector = Selector::try_from(id.to_owned())
-            .map_err(|err| PyValueError::new_err(format!("error creating selector: {}", err)))?;
+            .map_err(|err| PyValueError::new_err(format!("{}", err)))?;
 
         Ok(self
             .rules
@@ -640,7 +804,7 @@ impl PyRules {
             .iter()
             .enumerate()
             .filter(|(_, rule)| selector.is_match(rule.id()))
-            .map(|(i, _)| PyRule::from_rule(i, self.rules.clone()))
+            .map(|(i, _)| PyRule::from_rules(i, self.rules.clone()))
             .collect())
     }
 
@@ -652,12 +816,12 @@ impl PyRules {
     /// Returns:
     ///     suggestions (Union[List[Suggestion], List[List[Suggestion]]]):
     ///         The computed suggestions. Batched if the input is batched.
-    #[text_signature = "(sentence_or_sentences)"]
-    fn suggest(&self, py: Python, sentence_or_sentences: PyObject) -> PyResult<PyObject> {
-        text_guard(py, sentence_or_sentences, |sentence| {
+    #[text_signature = "(text_or_texts)"]
+    fn suggest(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
+        text_guard(py, text_or_texts, |text| {
             self.rules
                 .read()
-                .suggest(&sentence)
+                .suggest(&text)
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -724,9 +888,9 @@ impl PyRules {
     }
 
     pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        // rwlock is serialized the same way as the inner type
         Ok(PyBytes::new(
             py,
+            // rwlock serialization is transparent
             &bincode::serialize(&self.rules)
                 .map_err(|_| PyValueError::new_err("serializing state with `bincode` failed"))?,
         )
@@ -735,12 +899,22 @@ impl PyRules {
 }
 
 #[pymodule]
+fn spell(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<PySpell>()?;
+    m.add_class::<PySpellOptions>()?;
+    Ok(())
+}
+
+#[pymodule]
 fn nlprule(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+
     m.add_class::<PyTokenizer>()?;
     m.add_class::<PyRules>()?;
     m.add_class::<PySuggestion>()?;
     m.add_class::<PyToken>()?;
+
+    m.add_wrapped(wrap_pymodule!(spell))?;
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 use crate::{
-    rules::RulesLangOptions, spellcheck::SpellcheckerLangOptions, tokenizer::TokenizerLangOptions,
+    rules::RulesLangOptions, spellcheck::SpellLangOptions, tokenizer::TokenizerLangOptions,
 };
 use crate::{tokenizer::tag::TaggerLangOptions, types::*};
 use lazy_static::lazy_static;
@@ -38,7 +38,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref SPELLCHECKER_LANG_OPTIONS: DefaultHashMap<String, SpellcheckerLangOptions> = {
+    static ref SPELLCHECKER_LANG_OPTIONS: DefaultHashMap<String, SpellLangOptions> = {
         serde_json::from_slice(include_bytes!(concat!(
             env!("OUT_DIR"),
             "/",
@@ -64,7 +64,7 @@ pub(crate) fn tagger_lang_options(lang_code: &str) -> Option<TaggerLangOptions> 
 }
 
 /// Gets the spellchecker language options for the language code
-pub(crate) fn spellchecker_lang_options(lang_code: &str) -> Option<SpellcheckerLangOptions> {
+pub(crate) fn spellchecker_lang_options(lang_code: &str) -> Option<SpellLangOptions> {
     SPELLCHECKER_LANG_OPTIONS.get(lang_code).cloned()
 }
 

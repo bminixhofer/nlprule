@@ -78,6 +78,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("deserialization error: {0}")]
     Deserialization(#[from] bincode::Error),
+    #[error("unknown language variant: {0}")]
+    UnknownVariant(String),
 }
 
 /// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.

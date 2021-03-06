@@ -1,9 +1,7 @@
 use std::{convert::TryInto, sync::Arc};
 
 use lazy_static::lazy_static;
-use nlprule::{
-    rule::id::Category, rules::RulesOptions, spellcheck::SpellcheckerOptions, Rules, Tokenizer,
-};
+use nlprule::{rule::id::Category, Error, Rules, Tokenizer};
 use quickcheck_macros::quickcheck;
 
 const TOKENIZER_PATH: &str = "../storage/en_tokenizer.bin";
@@ -55,18 +53,9 @@ fn rules_can_be_disabled_enabled() {
 }
 
 #[test]
-fn spellchecker_works() {
-    let rules = Rules::new_with_options(
-        RULES_PATH,
-        TOKENIZER.clone(),
-        RulesOptions {
-            spellchecker_options: SpellcheckerOptions {
-                variant: Some("en_GB".into()),
-                ..SpellcheckerOptions::default()
-            },
-        },
-    )
-    .unwrap();
+fn spellchecker_works() -> Result<(), Error> {
+    let mut rules = Rules::new(RULES_PATH, TOKENIZER.clone()).unwrap();
+    rules.spell_mut().options_mut().variant = Some(rules.spell().variant("en_GB")?);
 
-    println!("{:#?}", rules.suggest("mom"));
+    Ok(())
 }

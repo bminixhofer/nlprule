@@ -138,3 +138,23 @@ def test_rules_can_be_disabled(tokenizer_and_rules):
         rule.disable()
 
     assert len(rules.suggest("I can due his homework")) == 0
+
+def test_spell_options_can_be_read(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    assert rules.spell.options.max_distance > 0
+    assert rules.spell.options.variant is None
+
+def test_spell_options_can_be_set(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    with pytest.raises(ValueError):
+        rules.spell.options.variant = "en_INVALID"
+
+    rules.spell.options.variant = "en_GB"
+    assert rules.spell.options.variant == "en_GB"
+
+def test_spellchecker_works(tokenizer_and_rules):
+    (tokenizer, rules) = tokenizer_and_rules
+
+    print(rules.spell.search("lämp"))

@@ -2,10 +2,7 @@
 
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
-use crate::{
-    spellcheck::Spellchecker, spellcheck::SpellcheckerOptions, types::*,
-    utils::parallelism::MaybeParallelRefIterator,
-};
+use crate::{spellcheck::Spell, types::*, utils::parallelism::MaybeParallelRefIterator};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,13 +10,6 @@ use std::{
     path::Path,
     sync::Arc,
 };
-
-/// Options for a rule set.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RulesOptions {
-    /// TODO
-    pub spellchecker_options: SpellcheckerOptions,
-}
 
 /// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,14 +37,14 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 struct RulesFields {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) spellchecker: Spellchecker,
+    pub(crate) spell: Spell,
 }
 
 impl From<Rules> for RulesFields {
     fn from(rules: Rules) -> Self {
         RulesFields {
             rules: rules.rules,
-            spellchecker: rules.spellchecker,
+            spell: rules.spell,
         }
     }
 }
@@ -63,9 +53,8 @@ impl From<Rules> for RulesFields {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) spellchecker: Spellchecker,
+    pub(crate) spell: Spell,
     pub(crate) tokenizer: Arc<Tokenizer>,
-    pub(crate) options: RulesOptions,
 }
 
 impl Rules {
@@ -77,36 +66,15 @@ impl Rules {
         Ok(())
     }
 
-    /// TODO
-    pub fn from_reader_with_options<R: Read>(
-        reader: R,
-        tokenizer: Arc<Tokenizer>,
-        options: RulesOptions,
-    ) -> Result<Self, Error> {
+    /// Creates a new rules set from a reader.
+    pub fn from_reader<R: Read>(reader: R, tokenizer: Arc<Tokenizer>) -> Result<Self, Error> {
         let fields: RulesFields = bincode::deserialize_from(reader)?;
         let rules = Rules {
             rules: fields.rules,
-            options,
-            spellchecker: fields.spellchecker,
+            spell: fields.spell,
             tokenizer,
         };
         Ok(rules)
-    }
-
-    /// Creates a new rule set with options. See [new][Rules::new].
-    pub fn new_with_options<P: AsRef<Path>>(
-        p: P,
-        tokenizer: Arc<Tokenizer>,
-        options: RulesOptions,
-    ) -> Result<Self, Error> {
-        let reader = BufReader::new(File::open(p.as_ref())?);
-
-        Self::from_reader_with_options(reader, tokenizer, options)
-    }
-
-    /// Creates a new rules set from a reader.
-    pub fn from_reader<R: Read>(reader: R, tokenizer: Arc<Tokenizer>) -> Result<Self, Error> {
-        Self::from_reader_with_options(reader, tokenizer, RulesOptions::default())
     }
 
     /// Creates a new rule set from a path to a binary.
@@ -115,17 +83,17 @@ impl Rules {
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P, tokenizer: Arc<Tokenizer>) -> Result<Self, Error> {
-        Self::new_with_options(p, tokenizer, RulesOptions::default())
+        let reader = BufReader::new(File::open(p.as_ref())?);
+
+        Self::from_reader(reader, tokenizer)
     }
 
-    /// Gets the options of this rule set.
-    pub fn options(&self) -> &RulesOptions {
-        &self.options
+    pub fn spell(&self) -> &Spell {
+        &self.spell
     }
 
-    /// Sets the options of this rule set.
-    pub fn mut_options(&mut self) -> &mut RulesOptions {
-        &mut self.options
+    pub fn spell_mut(&mut self) -> &mut Spell {
+        &mut self.spell
     }
 
     /// All rules ordered by priority.
@@ -177,12 +145,7 @@ impl Rules {
             .flatten()
             .collect();
 
-        output.extend(
-            self.spellchecker
-                .suggest(tokens, &self.options.spellchecker_options)
-                .into_iter()
-                .map(|x| (0, x)),
-        );
+        output.extend(self.spell.suggest(tokens).into_iter().map(|x| (0, x)));
 
         output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 

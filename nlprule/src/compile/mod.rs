@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     rules::Rules,
-    spellcheck::Spellchecker,
+    spellcheck::Spell,
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
     types::*,
 };
@@ -189,7 +189,7 @@ pub fn compile(
         None
     };
 
-    let spellchecker = Spellchecker::from_dumps(paths.spell_dir_path, spellchecker_lang_options)?;
+    let spellchecker = Spell::from_dumps(paths.spell_dir_path, spellchecker_lang_options)?;
 
     info!("Creating tokenizer.");
     let tokenizer = Tokenizer::from_xml(

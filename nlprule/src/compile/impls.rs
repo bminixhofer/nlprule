@@ -9,7 +9,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader},
     path::Path,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::Arc,
 };
 
 use crate::{
@@ -22,8 +22,8 @@ use crate::{
         id::Category,
         DisambiguationRule, MatchGraph, Rule,
     },
-    rules::{Rules, RulesLangOptions, RulesOptions},
-    spellcheck::{SpellInt, Spellchecker, SpellcheckerLangOptions},
+    rules::{Rules, RulesLangOptions},
+    spellcheck::{Spell, SpellInt, SpellLangOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -36,16 +36,19 @@ use crate::{
 
 use super::{parse_structure::BuildInfo, Error};
 
-impl Spellchecker {
+impl Spell {
     pub(in crate::compile) fn from_dumps<S: AsRef<Path>>(
         spell_dir_path: S,
-        lang_options: SpellcheckerLangOptions,
+        lang_options: SpellLangOptions,
     ) -> io::Result<Self> {
         let mut words: HashMap<String, SpellInt> = DefaultHashMap::new();
         let mut max_freq = 0;
 
         for (i, variant) in lang_options.variants.iter().enumerate() {
-            let spell_path = spell_dir_path.as_ref().join(variant).with_extension("dump");
+            let spell_path = spell_dir_path
+                .as_ref()
+                .join(variant.as_str())
+                .with_extension("dump");
 
             let reader = BufReader::new(File::open(spell_path)?);
             for line in reader.lines() {
@@ -78,13 +81,7 @@ impl Spellchecker {
         let map =
             fst::Map::from_iter(words.into_iter()).expect("words are lexicographically sorted.");
 
-        Ok(Spellchecker {
-            fst: map.into_fst().to_vec(),
-            max_freq,
-            lang_options,
-            used_variant: Arc::new(AtomicUsize::new(usize::MAX)),
-            used: Arc::new(Default::default()),
-        })
+        Ok(Spell::new(map.into_fst().to_vec(), max_freq, lang_options))
     }
 }
 
@@ -318,7 +315,7 @@ impl Rules {
     pub(in crate::compile) fn from_xml<P: AsRef<Path>>(
         path: P,
         build_info: &mut BuildInfo,
-        spellchecker: Spellchecker,
+        spell: Spell,
         tokenizer: Arc<Tokenizer>,
         options: RulesLangOptions,
     ) -> Self {
@@ -414,9 +411,8 @@ impl Rules {
 
         Rules {
             rules,
-            spellchecker,
+            spell,
             tokenizer,
-            options: RulesOptions::default(),
         }
     }
 }

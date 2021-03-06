@@ -1,16 +1,13 @@
 use std::{
-    collections::HashSet,
+    cmp::Ordering,
+    collections::{BinaryHeap, HashSet},
     ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, RwLock, RwLockReadGuard,
-    },
 };
 
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use serde::{Deserialize, Serialize};
 
-use crate::types::*;
+use crate::{types::*, Error};
 
 mod levenshtein;
 
@@ -84,149 +81,240 @@ mod spell_int {
 
 pub(crate) use spell_int::SpellInt;
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
-struct Candidate {
-    pub score: f32,
-    pub term: String,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Candidate {
+    score: f32,
+    distance: usize,
+    freq: usize,
+    term: String,
+}
+impl Eq for Candidate {}
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // higher score => lower order such that sorting puts highest scores first
+        other.score.partial_cmp(&self.score)
+    }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).expect("scores are never NaN")
+    }
+}
+
+impl Candidate {
+    pub fn score(&self) -> f32 {
+        self.score
+    }
+
+    pub fn freq(&self) -> usize {
+        self.freq
+    }
+
+    pub fn distance(&self) -> usize {
+        self.distance
+    }
+
+    pub fn term(&self) -> &str {
+        self.term.as_str()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 /// TODO
-pub struct SpellcheckerOptions {
-    pub variant: Option<String>,
+pub struct SpellOptions {
+    pub variant: Option<Variant>,
     pub max_distance: usize,
-    pub prefix: usize,
-    pub frequency_weight: f32,
-    pub n_suggestions: usize,
+    pub prefix_length: usize,
+    pub freq_weight: f32,
+    pub top_n: usize,
+    pub whitelist: HashSet<String>,
+}
+
+pub struct SpellOptionsGuard<'a> {
+    spell: &'a mut Spell,
+}
+
+impl<'a> Deref for SpellOptionsGuard<'a> {
+    type Target = SpellOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.spell.options
+    }
+}
+
+impl<'a> DerefMut for SpellOptionsGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.spell.options
+    }
+}
+
+impl<'a> Drop for SpellOptionsGuard<'a> {
+    fn drop(&mut self) {
+        self.spell.ingest_options()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub(crate) struct SpellcheckerLangOptions {
+pub(crate) struct SpellLangOptions {
     /// Variants of the language (e. g. "en_US", "en_GB") to consider for spellchecking.
-    pub variants: Vec<String>,
+    pub variants: Vec<Variant>,
 }
 
-impl Default for SpellcheckerOptions {
+impl Default for SpellOptions {
     fn default() -> Self {
-        SpellcheckerOptions {
+        SpellOptions {
             variant: None,
             max_distance: 2,
-            prefix: 2,
-            frequency_weight: 2.,
-            n_suggestions: 10,
+            prefix_length: 2,
+            freq_weight: 2.,
+            top_n: 10,
+            whitelist: HashSet::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(transparent)]
+pub struct Variant(String);
+
+impl Variant {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct Spellchecker {
-    pub(crate) fst: Vec<u8>,
-    pub(crate) max_freq: usize,
-    pub(crate) lang_options: SpellcheckerLangOptions,
-    pub(crate) used_variant: Arc<AtomicUsize>,
-    pub(crate) used: Arc<RwLock<(Vec<u8>, HashSet<String>)>>,
+pub struct Spell {
+    fst: Vec<u8>,
+    max_freq: usize,
+    lang_options: SpellLangOptions,
+    options: SpellOptions,
+    used_variant: Option<Variant>,
+    used_fst: Vec<u8>,
+    used_set: HashSet<String>,
 }
 
-impl Spellchecker {
-    fn update_used_fst(
-        &self,
-        options: &SpellcheckerOptions,
-    ) -> Option<RwLockReadGuard<'_, (Vec<u8>, HashSet<String>)>> {
-        let variant = if let Some(variant) = options.variant.as_ref() {
-            variant.as_str()
-        } else {
-            return None;
+impl Spell {
+    pub(crate) fn new(fst: Vec<u8>, max_freq: usize, lang_options: SpellLangOptions) -> Self {
+        let mut spell = Spell {
+            fst,
+            max_freq,
+            lang_options,
+            options: SpellOptions::default(),
+            ..Default::default()
         };
-        let variant_index = self
-            .lang_options
-            .variants
-            .iter()
-            .position(|x| x == variant)?;
-
-        if self.used_variant.swap(variant_index, Ordering::Relaxed) != variant_index {
-            let mut used_fst_builder = MapBuilder::memory();
-            let mut set = DefaultHashSet::new();
-
-            let fst = Map::new(&self.fst).expect("serialized fst must be valid.");
-            let mut stream = fst.into_stream();
-
-            while let Some((k, v)) = stream.next() {
-                if SpellInt(v).contains_variant(variant_index) {
-                    set.insert(
-                        String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8."),
-                    );
-                    used_fst_builder
-                        .insert(k, v)
-                        .expect("fst stream returns values in lexicographic order.");
-                }
-            }
-
-            let mut guard = self.used.write().expect("lock must not be poisoned.");
-            let (used_fst, used_set) = guard.deref_mut();
-
-            *used_fst = used_fst_builder
-                .into_inner()
-                .expect("subset of valid fst must be valid.");
-            *used_set = set;
-        }
-
-        Some(self.used.read().expect("lock must not be poisoned"))
+        spell.ingest_options();
+        spell
     }
 
-    fn lookup(&self, token: &Token, options: &SpellcheckerOptions) -> Option<Vec<Candidate>> {
-        let guard = self.update_used_fst(options)?;
-        let (used_fst, used_set) = guard.deref();
-        let used_fst = Map::new(used_fst).expect("used fst must be valid.");
+    pub fn options(&self) -> &SpellOptions {
+        &self.options
+    }
 
-        let text = token.word.text.as_ref();
-        // no text => nothing to correct, only the case for special tokens (e.g. SENT_START)
-        if text.is_empty() || used_set.contains(text) {
+    pub fn options_mut(&mut self) -> SpellOptionsGuard {
+        SpellOptionsGuard { spell: self }
+    }
+
+    pub fn variants(&self) -> &[Variant] {
+        self.lang_options.variants.as_slice()
+    }
+
+    pub fn variant(&self, variant: &str) -> Result<Variant, Error> {
+        self.lang_options
+            .variants
+            .iter()
+            .find(|x| x.as_str() == variant)
+            .cloned()
+            .ok_or_else(|| Error::UnknownVariant(variant.to_owned()))
+    }
+
+    pub(crate) fn ingest_options(&mut self) {
+        if self.used_variant == self.options.variant {
+            return;
+        }
+
+        let variant = if let Some(variant) = self.options.variant.as_ref() {
+            variant
+        } else {
+            self.used_variant = None;
+            self.used_fst = Vec::new();
+            self.used_set = DefaultHashSet::new();
+            return;
+        };
+
+        let mut used_fst_builder = MapBuilder::memory();
+        let mut set = DefaultHashSet::new();
+
+        let fst = Map::new(&self.fst).expect("serialized fst must be valid.");
+        let mut stream = fst.into_stream();
+
+        let variant_index = self
+            .variants()
+            .iter()
+            .position(|x| x == variant)
+            .expect("only valid variants are created.");
+
+        while let Some((k, v)) = stream.next() {
+            if SpellInt(v).contains_variant(variant_index) {
+                set.insert(String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8."));
+                used_fst_builder
+                    .insert(k, v)
+                    .expect("fst stream returns values in lexicographic order.");
+            }
+        }
+
+        self.used_variant = Some(variant.clone());
+        self.used_fst = used_fst_builder
+            .into_inner()
+            .expect("subset of valid fst must be valid.");
+        self.used_set = set;
+    }
+
+    pub fn search(&self, word: &str) -> Option<Vec<Candidate>> {
+        if self.used_variant.is_none() || word.is_empty() || self.used_set.contains(word) {
             return None;
         }
 
-        let query = levenshtein::Levenshtein::new(text, options.max_distance, 2);
+        let used_fst = Map::new(self.used_fst.as_slice()).expect("used fst must be valid.");
+        let query = levenshtein::Levenshtein::new(word, self.options.max_distance, 2);
 
-        let mut out = Vec::new();
+        let mut out = BinaryHeap::with_capacity(self.options.top_n);
 
         let mut stream = used_fst.search_with_state(query).into_stream();
         while let Some((k, v, s)) = stream.next() {
             let state = s.expect("matching levenshtein state is always `Some`.");
-            if state.dist() == 0 {
-                return None;
-            }
+            assert!(state.dist() > 0);
 
             let id = SpellInt(v);
 
-            let string = String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8.");
+            let term = String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8.");
             out.push(Candidate {
-                score: (options.max_distance - state.dist()) as f32
-                    + id.freq() as f32 / self.max_freq as f32 * options.frequency_weight,
-                term: string,
-            })
+                distance: state.dist(),
+                freq: id.freq(),
+                term,
+                score: (self.options.max_distance - state.dist()) as f32
+                    + id.freq() as f32 / self.max_freq as f32 * self.options.freq_weight,
+            });
+            if out.len() > self.options.top_n {
+                out.pop();
+            }
         }
 
-        // we want higher scores first
-        out.sort_by(|a, b| b.partial_cmp(a).expect("candidate scores are never NaN."));
-        Some(out)
+        Some(out.into_sorted_vec())
     }
 
-    pub fn suggest(&self, tokens: &[Token], options: &SpellcheckerOptions) -> Vec<Suggestion> {
+    pub fn suggest(&self, tokens: &[Token]) -> Vec<Suggestion> {
         let mut suggestions = Vec::new();
 
         for token in tokens {
-            if let Some(candidates) = self.lookup(token, options) {
-                // TODO: disallow empty / properly treat empty
+            if let Some(candidates) = self.search(token.word.text.as_ref()) {
                 suggestions.push(Suggestion {
                     source: "SPELLCHECK/SINGLE".into(),
                     message: "Possibly misspelled word.".into(),
                     start: token.char_span.0,
                     end: token.char_span.1,
-                    replacements: candidates
-                        .into_iter()
-                        .map(|x| x.term.to_owned())
-                        .take(options.n_suggestions)
-                        .collect(),
+                    replacements: candidates.into_iter().map(|x| x.term.to_owned()).collect(),
                 })
             }
         }
