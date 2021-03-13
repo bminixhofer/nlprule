@@ -154,7 +154,7 @@ See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for d
 ## Projects using nlprule
 
 - [prosemd](https://github.com/kitten/prosemd-lsp): a proofreading and linting language server for markdown files with VSCode integration.
-- [cargo-spellcheck](https://github.com/drahnr/cargo-spellcheck): A tool to check all your Rust documentation for spelling and grammar mistakes.
+- [cargo-spellcheck](https://github.com/drahnr/cargo-spellcheck): a tool to check all your Rust documentation for spelling and grammar mistakes.
 
 Please submit a PR to add your project!
 
