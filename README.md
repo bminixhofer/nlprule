@@ -151,6 +151,13 @@ fn main() {
 
 See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for details.
 
+## Projects using nlprule
+
+- [prosemd](https://github.com/kitten/prosemd-lsp): a proofreading and linting language server for markdown files with VSCode integration.
+- [cargo-spellcheck](https://github.com/drahnr/cargo-spellcheck): A tool to check all your Rust documentation for spelling and grammar mistakes.
+
+Please submit a PR to add your project!
+
 ## Acknowledgements
 
 All credit for the resources used in nlprule goes to [LanguageTool](https://github.com/languagetool-org/languagetool) who have made a Herculean effort to create high-quality resources for Grammatical Error Correction and broader NLP.
