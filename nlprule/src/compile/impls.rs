@@ -37,9 +37,12 @@ use crate::{
 use super::{parse_structure::BuildInfo, Error};
 
 impl Spell {
-    pub(in crate::compile) fn from_dumps<S: AsRef<Path>>(
-        spell_dir_path: S,
+    pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
+        spell_dir_path: S1,
+        map_path: S2,
+        extra_words: &HashSet<String>,
         lang_options: SpellLangOptions,
+        tokenizer: &Tokenizer,
     ) -> io::Result<Self> {
         let mut words: HashMap<String, SpellInt> = DefaultHashMap::new();
         let mut max_freq = 0;
@@ -50,7 +53,7 @@ impl Spell {
                 .join(variant.as_str())
                 .with_extension("dump");
 
-            let reader = BufReader::new(File::open(spell_path)?);
+            let reader = BufReader::new(File::open(&spell_path)?);
             for line in reader.lines() {
                 match line?
                     .trim()
@@ -61,7 +64,16 @@ impl Spell {
                     [freq, word] => {
                         // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
                         let freq = freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
-                        let value = words.entry(word.to_string()).or_default();
+                        let value = words.entry((*word).to_owned()).or_default();
+
+                        if tokenizer.get_token_strs(word).len() > 1 {
+                            warn!(
+                                "phrase '{}' ignored by {} spellchecker.",
+                                word,
+                                variant.as_str()
+                            );
+                            continue;
+                        }
 
                         max_freq = cmp::max(max_freq, freq);
 
@@ -71,6 +83,29 @@ impl Spell {
                     _ => continue,
                 }
             }
+
+            let extra_word_path = spell_path.with_extension("txt");
+            let reader = BufReader::new(File::open(&extra_word_path)?);
+            for line in reader
+                .lines()
+                .collect::<io::Result<Vec<_>>>()?
+                .into_iter()
+                .chain(extra_words.iter().cloned())
+            {
+                let word = line.trim();
+
+                if tokenizer.get_token_strs(word).len() > 1 {
+                    warn!(
+                        "phrase '{}' ignored by {} spellchecker.",
+                        word,
+                        variant.as_str()
+                    );
+                    continue;
+                }
+
+                let value = words.entry((*word).to_owned()).or_default();
+                value.add_variant(i);
+            }
         }
         let mut words: Vec<_> = words
             .into_iter()
@@ -78,10 +113,37 @@ impl Spell {
             .collect();
         words.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let map =
+        let fst =
             fst::Map::from_iter(words.into_iter()).expect("words are lexicographically sorted.");
 
-        Ok(Spell::new(map.into_fst().to_vec(), max_freq, lang_options))
+        let mut map = DefaultHashMap::new();
+        let reader = BufReader::new(File::open(map_path.as_ref())?);
+        for line in reader.lines() {
+            let line = line?;
+
+            let mut parts = line.split('=');
+            let wrong = parts
+                .next()
+                .expect("spell map line must have part before =")
+                .to_owned();
+            let right = parts
+                .next()
+                .expect("spell map line must have part after =")
+                .to_owned();
+
+            // map lookup happens on token level, so the key has to be exactly one token
+            assert_eq!(tokenizer.get_token_strs(&wrong).len(), 1);
+
+            map.insert(wrong, right);
+            assert!(parts.next().is_none());
+        }
+
+        Ok(Spell::new(
+            fst.into_fst().to_vec(),
+            max_freq,
+            map,
+            lang_options,
+        ))
     }
 }
 
@@ -226,6 +288,7 @@ impl Tagger {
 impl MultiwordTagger {
     pub(in crate::compile) fn from_dump<P: AsRef<Path>>(
         dump: P,
+        extra_phrases: impl Iterator<Item = String>,
         info: &BuildInfo,
     ) -> Result<Self, io::Error> {
         let reader = BufReader::new(File::open(dump.as_ref())?);
@@ -246,7 +309,11 @@ impl MultiwordTagger {
                 .collect::<Vec<_>>()
                 .join(" ");
             let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
-            multiwords.push((word, pos));
+            multiwords.push((word, Some(pos)));
+        }
+
+        for phrase in extra_phrases {
+            multiwords.push((phrase, None));
         }
 
         Ok((MultiwordTaggerFields { multiwords }).into())

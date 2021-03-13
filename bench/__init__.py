@@ -115,11 +115,8 @@ class LanguageTool:
 class NLPRule:
     def __init__(self, lang_code: str):
         self.tokenizer = nlprule.Tokenizer(f"storage/{lang_code}_tokenizer.bin")
-        self.rules = nlprule.Rules(
-            f"storage/{lang_code}_rules.bin",
-            self.tokenizer,
-            spellchecker_options={"variant": "en_US", "max_distance": 0, "prefix": 0,},
-        )
+        self.rules = nlprule.Rules(f"storage/{lang_code}_rules.bin", self.tokenizer)
+        self.rules.spell.options.variant = "en_US"
 
     def suggest(self, sentence: str) -> Set[Suggestion]:
         suggestions = {

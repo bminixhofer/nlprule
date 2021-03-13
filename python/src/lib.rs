@@ -714,13 +714,18 @@ impl PySpell {
         Ok(())
     }
 
-    fn search(&self, word: &str) -> Option<Vec<PyCandidate>> {
-        self.rules.read().spell().search(word).map(|candidates| {
-            candidates
-                .into_iter()
-                .map(|candidate| PyCandidate { candidate })
-                .collect::<Vec<_>>()
-        })
+    fn check(&self, word: &str) -> bool {
+        self.rules.read().spell().check(word)
+    }
+
+    fn search(&self, word: &str) -> Vec<PyCandidate> {
+        self.rules
+            .read()
+            .spell()
+            .search(word)
+            .into_iter()
+            .map(|candidate| PyCandidate { candidate })
+            .collect()
     }
 }
 

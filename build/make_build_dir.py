@@ -87,6 +87,45 @@ def dump_dict(out_path, lt_dir, tag_dict_path, tag_info_path):
         f.write(dump_bytes.decode(result["encoding"] or "utf-8"))
 
 
+def proc_spelling_text(in_paths, out_path, lang_code):
+    with open(out_path, "w") as f:
+        for in_path in in_paths:
+            if in_path.exists():
+                for line in open(in_path):
+                    # strip comments
+                    comment_index = line.find("#")
+                    if comment_index != -1:
+                        line = line[:comment_index]
+
+                    line = line.strip()
+                    if len(line) == 0:
+                        continue
+
+                    try:
+                        word, suffix = line.split("/")
+
+                        assert lang_code == "de", "Flags are only supported for German!"
+
+                        for flag in suffix:
+                            assert flag != "Ä"
+                            if flag == "A" and word.endswith("e"):
+                                flag = "Ä"
+
+                            f.write(word + "\n")
+
+                            for ending in {
+                                "S": ["s"],
+                                "N": ["n"],
+                                "E": ["e"],
+                                "F": ["in"],
+                                "A": ["e", "er", "es", "en", "em"],
+                                "Ä": ["r", "s", "n", "m"],
+                            }[flag]:
+                                f.write(word + ending + "\n")
+                    except ValueError:
+                        f.write(line + "\n")
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(
         description="""
@@ -140,6 +179,12 @@ Only needed if the language requires a chunker (e. g. English).
         help="Path to the OpenNLP chunker binary. See token model message for details.",
     )
     parser.add_argument(
+        "--spell_map_path",
+        default=None,
+        action="append",
+        help="Paths to files containing a mapping from incorrect words to correct ones e.g. contractions.txt for English.",
+    )
+    parser.add_argument(
         "--out_dir",
         type=lambda p: Path(p).absolute(),
         help="Directory to store the build files in.",
@@ -180,6 +225,41 @@ Only needed if the language requires a chunker (e. g. English).
         dump_dict(
             args.out_dir / "spell" / f"{variant_name}.dump", args.lt_dir, dic, info,
         )
+        proc_spelling_text(
+            [
+                (
+                    dic / ".." / ("spelling_" + variant_name.replace("_", "-") + ".txt")
+                ).resolve(),
+                (
+                    dic / ".." / ("spelling-" + variant_name.replace("_", "-") + ".txt")
+                ).resolve(),
+            ],
+            args.out_dir / "spell" / f"{variant_name}.txt",
+            args.lang_code,
+        )
+
+    proc_spelling_text(
+        [
+            args.lt_dir
+            / "org"
+            / "languagetool"
+            / "resource"
+            / args.lang_code
+            / "hunspell"
+            / "spelling.txt"
+        ],
+        args.out_dir / "spell" / "spelling.txt",
+        args.lang_code,
+    )
+
+    with open(args.out_dir / "spell" / "map.txt", "w") as f:
+        for path in args.spell_map_path:
+            for line in open(path):
+                if line.startswith("#"):
+                    continue
+
+                assert "#" not in line
+                f.write(line)
 
     if (
         args.chunker_token_model is not None

@@ -5,7 +5,7 @@ use fs_err as fs;
 
 use std::{
     hash::{Hash, Hasher},
-    io::{self, BufReader, BufWriter},
+    io::{self, BufRead, BufReader, BufWriter},
     num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
@@ -40,6 +40,8 @@ struct BuildFilePaths {
     srx_path: PathBuf,
     common_words_path: PathBuf,
     spell_dir_path: PathBuf,
+    spell_map_path: PathBuf,
+    spell_extra_path: PathBuf,
 }
 
 impl BuildFilePaths {
@@ -58,6 +60,8 @@ impl BuildFilePaths {
             srx_path: p.join("segment.srx"),
             common_words_path: p.join("common.txt"),
             spell_dir_path: p.join("spell"),
+            spell_map_path: p.join("spell/map.txt"),
+            spell_extra_path: p.join("spell/spelling.txt"),
         }
     }
 }
@@ -176,6 +180,41 @@ pub fn compile(
     } else {
         None
     };
+
+    info!("Creating tokenizer.");
+
+    let mut tokenizer = Tokenizer::from_xml(
+        &paths.disambiguation_path,
+        &mut build_info,
+        chunker,
+        None,
+        srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
+        tokenizer_lang_options,
+    )?;
+
+    let mut extra_phrases = DefaultHashSet::new();
+    let mut extra_spell_words = DefaultHashSet::new();
+
+    // comments must already be stripped from this file such that each line contains one word or phrase
+    let reader = BufReader::new(File::open(&paths.spell_extra_path)?);
+    for line in reader.lines() {
+        let line = line?;
+        let content = line.trim();
+
+        match tokenizer.get_token_strs(content).len() {
+            0 => {
+                return Err(Error::Unexpected(format!(
+                    "empty lines in {} are not allowed.",
+                    paths.spell_extra_path.display()
+                )))
+            }
+            // if the content is exactly one token, we just add it to the spellchecker regularly
+            1 => extra_spell_words.insert(content.to_owned()),
+            // if the content is a phrase (i.e multiple tokens) we add it to the multiword tagger, since words found by the multiword tagger are considered correct
+            _ => extra_phrases.insert(content.to_owned()),
+        };
+    }
+
     let multiword_tagger = if paths.multiword_tag_path.exists() {
         info!(
             "{} exists. Building multiword tagger.",
@@ -183,26 +222,27 @@ pub fn compile(
         );
         Some(MultiwordTagger::from_dump(
             paths.multiword_tag_path,
+            extra_phrases.into_iter(),
             &build_info,
         )?)
     } else {
         None
     };
-
-    let spellchecker = Spell::from_dumps(paths.spell_dir_path, spellchecker_lang_options)?;
-
-    info!("Creating tokenizer.");
-    let tokenizer = Tokenizer::from_xml(
-        &paths.disambiguation_path,
-        &mut build_info,
-        chunker,
-        multiword_tagger,
-        srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
-        tokenizer_lang_options,
-    )?;
+    tokenizer.multiword_tagger = multiword_tagger;
     tokenizer.to_writer(&mut tokenizer_dest)?;
 
+    info!("Creating spellchecker.");
+
+    let spellchecker = Spell::from_dumps(
+        paths.spell_dir_path,
+        paths.spell_map_path,
+        &extra_spell_words,
+        spellchecker_lang_options,
+        &tokenizer,
+    )?;
+
     info!("Creating grammar rules.");
+
     let rules = Rules::from_xml(
         &paths.grammar_path,
         &mut build_info,

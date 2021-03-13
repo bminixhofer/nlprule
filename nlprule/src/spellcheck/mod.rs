@@ -1,16 +1,19 @@
+use fst::{IntoStreamer, Map, MapBuilder, Streamer};
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     ops::{Deref, DerefMut},
 };
+use unicode_categories::UnicodeCategories;
 
-use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use serde::{Deserialize, Serialize};
-
-use crate::{types::*, Error};
+use crate::{
+    types::*,
+    utils::{apply_to_first, is_title_case},
+    Error,
+};
 
 mod levenshtein;
-
 mod spell_int {
     #[derive(Debug, Clone, Default, Copy)]
     pub(crate) struct SpellInt(pub(super) u64);
@@ -30,7 +33,7 @@ mod spell_int {
             assert!(freq < FreqType::MAX as usize);
 
             // erase previous frequency
-            self.0 = self.0 & (u64::MAX - FreqType::MAX as u64);
+            self.0 &= u64::MAX - FreqType::MAX as u64;
             // set new frequency
             self.0 |= freq as u64;
         }
@@ -81,7 +84,7 @@ mod spell_int {
 
 pub(crate) use spell_int::SpellInt;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     score: f32,
     distance: usize,
@@ -159,6 +162,7 @@ impl<'a> Drop for SpellOptionsGuard<'a> {
 pub(crate) struct SpellLangOptions {
     /// Variants of the language (e. g. "en_US", "en_GB") to consider for spellchecking.
     pub variants: Vec<Variant>,
+    pub split_hyphens: bool,
 }
 
 impl Default for SpellOptions {
@@ -188,18 +192,26 @@ impl Variant {
 pub struct Spell {
     fst: Vec<u8>,
     max_freq: usize,
+    map: DefaultHashMap<String, String>,
     lang_options: SpellLangOptions,
     options: SpellOptions,
+    // fields below are computed depending on the selected variant
     used_variant: Option<Variant>,
     used_fst: Vec<u8>,
-    used_set: HashSet<String>,
+    used_set: DefaultHashSet<String>,
 }
 
 impl Spell {
-    pub(crate) fn new(fst: Vec<u8>, max_freq: usize, lang_options: SpellLangOptions) -> Self {
+    pub(crate) fn new(
+        fst: Vec<u8>,
+        max_freq: usize,
+        map: DefaultHashMap<String, String>,
+        lang_options: SpellLangOptions,
+    ) -> Self {
         let mut spell = Spell {
             fst,
             max_freq,
+            map,
             lang_options,
             options: SpellOptions::default(),
             ..Default::default()
@@ -271,9 +283,31 @@ impl Spell {
         self.used_set = set;
     }
 
-    pub fn search(&self, word: &str) -> Option<Vec<Candidate>> {
-        if self.used_variant.is_none() || word.is_empty() || self.used_set.contains(word) {
-            return None;
+    fn check_flat(&self, word: &str) -> bool {
+        self.used_variant.is_none()
+            || word.is_empty()
+            || word.chars().all(|x| x.is_punctuation() || x.is_numeric())
+            || self.used_set.contains(word)
+            || (is_title_case(word)
+                && self.check(&apply_to_first(word, |x| x.to_lowercase().collect())))
+    }
+
+    pub fn check(&self, word: &str) -> bool {
+        self.check_flat(word)
+            || (self.lang_options.split_hyphens
+                && word
+                    .split(&['-', '\u{2010}', '\u{2011}'][..])
+                    .all(|x| self.check_flat(x)))
+    }
+
+    pub fn search(&self, word: &str) -> Vec<Candidate> {
+        if let Some(candidate) = self.map.get(word) {
+            return vec![Candidate {
+                score: 0., // numerical values here do not matter since there is always exactly one candidate - ranking is irrelevant
+                freq: 0,
+                distance: 0,
+                term: candidate.to_owned(),
+            }];
         }
 
         let used_fst = Map::new(self.used_fst.as_slice()).expect("used fst must be valid.");
@@ -301,22 +335,27 @@ impl Spell {
             }
         }
 
-        Some(out.into_sorted_vec())
+        out.into_sorted_vec()
     }
 
     pub fn suggest(&self, tokens: &[Token]) -> Vec<Suggestion> {
         let mut suggestions = Vec::new();
 
         for token in tokens {
-            if let Some(candidates) = self.search(token.word.text.as_ref()) {
-                suggestions.push(Suggestion {
-                    source: "SPELLCHECK/SINGLE".into(),
-                    message: "Possibly misspelled word.".into(),
-                    start: token.char_span.0,
-                    end: token.char_span.1,
-                    replacements: candidates.into_iter().map(|x| x.term.to_owned()).collect(),
-                })
+            let text = token.word.text.as_ref();
+
+            if token.ignore_spelling || self.check(text) {
+                continue;
             }
+
+            let candidates = self.search(text);
+            suggestions.push(Suggestion {
+                source: "SPELLCHECK/SINGLE".into(),
+                message: "Possibly misspelled word.".into(),
+                start: token.char_span.0,
+                end: token.char_span.1,
+                replacements: candidates.into_iter().map(|x| x.term).collect(),
+            });
         }
 
         suggestions

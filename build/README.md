@@ -79,6 +79,7 @@ python build/make_build_dir.py \
     --chunker_token_model=$HOME/Downloads/nlprule/en-token.bin \
     --chunker_pos_model=$HOME/Downloads/nlprule/en-pos-maxent.bin \
     --chunker_chunk_model=$HOME/Downloads/nlprule/en-chunker.bin \
+    --spell_map_path=$LT_PATH/org/languagetool/rules/en/contractions.txt \
     --out_dir=data/en
 ```
 
