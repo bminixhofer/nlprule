@@ -248,14 +248,9 @@ impl VariantChecker {
         }
     }
 
-    fn search(&self, word: &str) -> Vec<Candidate> {
+    fn search(&self, word: &str) -> Vec<String> {
         if let Some(candidate) = self.map.get(word) {
-            return vec![Candidate {
-                score: 0., // numerical values here do not matter since there is always exactly one candidate - ranking is irrelevant
-                freq: 0,
-                distance: 0,
-                term: candidate.to_owned(),
-            }];
+            return vec![candidate.to_owned()];
         }
 
         let used_fst = Map::new(self.fst.as_slice()).expect("used fst must be valid.");
@@ -283,7 +278,8 @@ impl VariantChecker {
             }
         }
 
-        out.into_sorted_vec()
+        // `into_iter_sorted` is unstable - see https://github.com/rust-lang/rust/issues/59278
+        out.into_sorted_vec().into_iter().map(|x| x.term).collect()
     }
 }
 
@@ -452,13 +448,12 @@ impl Spell {
                 continue;
             }
 
-            let candidates = variant_checker.search(text);
             suggestions.push(Suggestion {
                 source: "SPELLCHECK/SINGLE".into(),
                 message: "Possibly misspelled word.".into(),
                 start: token.char_span.0,
                 end: token.char_span.1,
-                replacements: candidates.into_iter().map(|x| x.term).collect(),
+                replacements: variant_checker.search(text),
             });
         }
 
