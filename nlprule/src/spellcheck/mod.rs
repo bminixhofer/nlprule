@@ -194,6 +194,99 @@ impl Variant {
     }
 }
 
+#[derive(Debug, Clone)]
+struct VariantChecker {
+    variant: Variant,
+    fst: Vec<u8>,
+    max_freq: usize,
+    multiwords: DefaultHashMap<String, Vec<Vec<String>>>,
+    set: DefaultHashSet<String>,
+    map: DefaultHashMap<String, String>,
+    lang_options: SpellLangOptions,
+    options: SpellOptions,
+}
+
+impl VariantChecker {
+    fn check_word(&self, word: &str, recurse: bool) -> bool {
+        word.is_empty()
+            || word
+                .chars()
+                .all(|x| x.is_symbol() || x.is_punctuation() || x.is_numeric())
+            || self.set.contains(word)
+            || (recurse
+                && is_title_case(word)
+                && self.check_word(&apply_to_first(word, |x| x.to_lowercase().collect()), false))
+    }
+
+    fn check(&self, tokens: &[Token], correct_mask: &mut [bool]) {
+        let word = tokens[0].word.text.as_ref();
+        let mut word_is_correct = self.check_word(word, true);
+
+        if !word_is_correct && self.lang_options.split_hyphens {
+            let hyphens = &['-', '\u{2010}', '\u{2011}'][..];
+
+            if word.contains(hyphens) && word.split(hyphens).all(|x| self.check_word(x, true)) {
+                word_is_correct = true;
+            }
+        }
+
+        correct_mask[0] = word_is_correct;
+
+        if let Some(continuations) = self.multiwords.get(word) {
+            if let Some(matching_cont) = continuations.iter().find(|cont| {
+                // important: an empty continuation matches! so single words can also validly be part of `multiwords`
+                (tokens.len() - 1) >= cont.len()
+                    && cont
+                        .iter()
+                        .enumerate()
+                        .all(|(i, x)| tokens[i + 1].word.text.as_ref() == x)
+            }) {
+                correct_mask[..1 + matching_cont.len()]
+                    .iter_mut()
+                    .for_each(|x| *x = true);
+            }
+        }
+    }
+
+    fn search(&self, word: &str) -> Vec<Candidate> {
+        if let Some(candidate) = self.map.get(word) {
+            return vec![Candidate {
+                score: 0., // numerical values here do not matter since there is always exactly one candidate - ranking is irrelevant
+                freq: 0,
+                distance: 0,
+                term: candidate.to_owned(),
+            }];
+        }
+
+        let used_fst = Map::new(self.fst.as_slice()).expect("used fst must be valid.");
+        let query = levenshtein::Levenshtein::new(word, self.options.max_distance, 2);
+
+        let mut out = BinaryHeap::with_capacity(self.options.top_n);
+
+        let mut stream = used_fst.search_with_state(query).into_stream();
+        while let Some((k, v, s)) = stream.next() {
+            let state = s.expect("matching levenshtein state is always `Some`.");
+            assert!(state.dist() > 0);
+
+            let id = SpellInt(v);
+
+            let term = String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8.");
+            out.push(Candidate {
+                distance: state.dist(),
+                freq: id.freq(),
+                term,
+                score: (self.options.max_distance - state.dist()) as f32
+                    + id.freq() as f32 / self.max_freq as f32 * self.options.freq_weight,
+            });
+            if out.len() > self.options.top_n {
+                out.pop();
+            }
+        }
+
+        out.into_sorted_vec()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Spell {
     fst: Vec<u8>,
@@ -202,15 +295,9 @@ pub struct Spell {
     map: DefaultHashMap<String, String>,
     lang_options: SpellLangOptions,
     options: SpellOptions,
-    // fields below are computed depending on the selected variant
+    // the `variant_checker` is computed based on the selected variant
     #[serde(skip)]
-    used_variant: Option<Variant>,
-    #[serde(skip)]
-    used_fst: Vec<u8>,
-    #[serde(skip)]
-    used_multiwords: DefaultHashMap<String, Vec<Vec<String>>>,
-    #[serde(skip)]
-    used_set: DefaultHashSet<String>,
+    variant_checker: Option<VariantChecker>,
 }
 
 impl Spell {
@@ -256,17 +343,14 @@ impl Spell {
     }
 
     pub(crate) fn ingest_options(&mut self) {
-        if self.used_variant == self.options.variant {
+        if self.variant_checker.as_ref().map(|x| &x.variant) == self.options.variant.as_ref() {
             return;
         }
 
         let variant = if let Some(variant) = self.options.variant.as_ref() {
-            variant
+            variant.clone()
         } else {
-            self.used_variant = None;
-            self.used_fst = Vec::new();
-            self.used_multiwords = DefaultHashMap::new();
-            self.used_set = DefaultHashSet::new();
+            self.variant_checker = None;
             return;
         };
 
@@ -279,7 +363,7 @@ impl Spell {
         let variant_index = self
             .variants()
             .iter()
-            .position(|x| x == variant)
+            .position(|x| *x == variant)
             .expect("only valid variants are created.");
 
         while let Some((k, v)) = stream.next() {
@@ -291,11 +375,10 @@ impl Spell {
             }
         }
 
-        self.used_variant = Some(variant.clone());
-        self.used_fst = used_fst_builder
+        let fst = used_fst_builder
             .into_inner()
             .expect("subset of valid fst must be valid.");
-        self.used_multiwords = self
+        let mut multiwords: DefaultHashMap<_, _> = self
             .multiwords
             .iter()
             .map(|(key, value)| {
@@ -313,85 +396,49 @@ impl Spell {
                 (key.to_owned(), value)
             })
             .collect();
-        self.used_set = set;
-    }
 
-    fn check_word(&self, word: &str) -> bool {
-        self.used_variant.is_none()
-            || word.is_empty()
-            || word
-                .chars()
-                .all(|x| x.is_symbol() || x.is_punctuation() || x.is_numeric())
-            || self.used_set.contains(word)
-            || (is_title_case(word)
-                && self.check_word(&apply_to_first(word, |x| x.to_lowercase().collect())))
-    }
+        for phrase in self
+            .options
+            .whitelist
+            .iter()
+            .map(|x| x.as_str())
+            // for some important words we have to manually make sure they are ignored :)
+            .chain(vec!["nlprule", "Minixhofer"])
+        {
+            let mut parts = phrase.trim().split_whitespace();
 
-    fn check(&self, tokens: &[Token], correct_mask: &mut [bool]) {
-        let word = tokens[0].word.text.as_ref();
+            let first = if let Some(first) = parts.next() {
+                first
+            } else {
+                // silently ignore empty words
+                continue;
+            };
 
-        let word_is_correct = self.check_word(word)
-            || (self.lang_options.split_hyphens
-                && word
-                    .split(&['-', '\u{2010}', '\u{2011}'][..])
-                    .all(|x| self.check_word(x)));
-
-        correct_mask[0] = word_is_correct;
-
-        if let Some(continuations) = self.used_multiwords.get(word) {
-            if let Some(matching_cont) = continuations.iter().find(|cont| {
-                (tokens.len() - 1) >= cont.len()
-                    && cont
-                        .iter()
-                        .enumerate()
-                        .all(|(i, x)| tokens[i + 1].word.text.as_ref() == x)
-            }) {
-                correct_mask[..1 + matching_cont.len()]
-                    .iter_mut()
-                    .for_each(|x| *x = true);
-            }
-        }
-    }
-
-    fn search(&self, word: &str) -> Vec<Candidate> {
-        if let Some(candidate) = self.map.get(word) {
-            return vec![Candidate {
-                score: 0., // numerical values here do not matter since there is always exactly one candidate - ranking is irrelevant
-                freq: 0,
-                distance: 0,
-                term: candidate.to_owned(),
-            }];
+            multiwords
+                .entry(first.to_owned())
+                .or_insert_with(Vec::new)
+                .push(parts.map(|x| x.to_owned()).collect());
         }
 
-        let used_fst = Map::new(self.used_fst.as_slice()).expect("used fst must be valid.");
-        let query = levenshtein::Levenshtein::new(word, self.options.max_distance, 2);
-
-        let mut out = BinaryHeap::with_capacity(self.options.top_n);
-
-        let mut stream = used_fst.search_with_state(query).into_stream();
-        while let Some((k, v, s)) = stream.next() {
-            let state = s.expect("matching levenshtein state is always `Some`.");
-            assert!(state.dist() > 0);
-
-            let id = SpellInt(v);
-
-            let term = String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8.");
-            out.push(Candidate {
-                distance: state.dist(),
-                freq: id.freq(),
-                term,
-                score: (self.options.max_distance - state.dist()) as f32
-                    + id.freq() as f32 / self.max_freq as f32 * self.options.freq_weight,
-            });
-            if out.len() > self.options.top_n {
-                out.pop();
-            }
-        }
-
-        out.into_sorted_vec()
+        self.variant_checker = Some(VariantChecker {
+            variant,
+            fst,
+            multiwords,
+            set,
+            map: self.map.clone(),
+            max_freq: self.max_freq,
+            options: self.options.clone(),
+            lang_options: self.lang_options.clone(),
+        })
     }
 
     pub fn suggest(&self, tokens: &[Token]) -> Vec<Suggestion> {
+        let variant_checker = if let Some(checker) = self.variant_checker.as_ref() {
+            checker
+        } else {
+            return Vec::new();
+        };
+
         let mut suggestions = Vec::new();
         let mut correct_mask = vec![false; tokens.len()];
 
@@ -399,13 +446,13 @@ impl Spell {
             let text = token.word.text.as_ref();
 
             if !correct_mask[i] {
-                self.check(&tokens[i..], &mut correct_mask[i..]);
+                variant_checker.check(&tokens[i..], &mut correct_mask[i..]);
             }
             if correct_mask[i] || token.ignore_spelling {
                 continue;
             }
 
-            let candidates = self.search(text);
+            let candidates = variant_checker.search(text);
             suggestions.push(Suggestion {
                 source: "SPELLCHECK/SINGLE".into(),
                 message: "Possibly misspelled word.".into(),
