@@ -19,6 +19,7 @@ use crate::{
             composition::{GraphId, Matcher, PosMatcher, TextMatcher},
             Engine,
         },
+        grammar::PosReplacer,
         id::Category,
         DisambiguationRule, MatchGraph, Rule,
     },
@@ -37,14 +38,17 @@ use crate::{
 use super::{parse_structure::BuildInfo, Error};
 
 impl Spell {
-    pub(in crate::compile) fn from_dumps<S1: AsRef<Path>, S2: AsRef<Path>>(
-        spell_dir_path: S1,
-        map_path: S2,
-        extra_words: &HashSet<String>,
+    pub(in crate::compile) fn from_dumps(
+        spell_dir_path: impl AsRef<Path>,
+        map_path: impl AsRef<Path>,
+        global_word_path: impl AsRef<Path>,
+        build_info: &mut BuildInfo,
         lang_options: SpellLangOptions,
         tokenizer: &Tokenizer,
     ) -> io::Result<Self> {
-        let mut words: HashMap<String, SpellInt> = DefaultHashMap::new();
+        let mut words: DefaultHashMap<String, SpellInt> = DefaultHashMap::new();
+        let mut multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>> =
+            DefaultHashMap::new();
         let mut max_freq = 0;
 
         for (i, variant) in lang_options.variants.iter().enumerate() {
@@ -66,12 +70,24 @@ impl Spell {
                         let freq = freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
                         let value = words.entry((*word).to_owned()).or_default();
 
-                        if tokenizer.get_token_strs(word).len() > 1 {
-                            warn!(
-                                "phrase '{}' ignored by {} spellchecker.",
-                                word,
-                                variant.as_str()
-                            );
+                        let tokens = tokenizer.get_token_strs(word);
+
+                        if tokens.len() > 1 {
+                            let mut int = SpellInt::default();
+                            int.add_variant(i);
+
+                            multiwords
+                                .entry(tokens[0].to_owned())
+                                .or_insert_with(Vec::new)
+                                .push((
+                                    tokens[1..]
+                                        .iter()
+                                        .filter(|x| !x.trim().is_empty())
+                                        .map(|x| (*x).to_owned())
+                                        .collect(),
+                                    int,
+                                ));
+
                             continue;
                         }
 
@@ -84,27 +100,62 @@ impl Spell {
                 }
             }
 
+            let global_word_reader = BufReader::new(File::open(global_word_path.as_ref())?);
+
             let extra_word_path = spell_path.with_extension("txt");
             let reader = BufReader::new(File::open(&extra_word_path)?);
-            for line in reader
-                .lines()
-                .collect::<io::Result<Vec<_>>>()?
-                .into_iter()
-                .chain(extra_words.iter().cloned())
-            {
+            for line in reader.lines().chain(global_word_reader.lines()) {
+                let line = line?;
                 let word = line.trim();
 
-                if tokenizer.get_token_strs(word).len() > 1 {
-                    warn!(
-                        "phrase '{}' ignored by {} spellchecker.",
-                        word,
-                        variant.as_str()
-                    );
+                let tokens = tokenizer.get_token_strs(word);
+
+                if tokens.len() > 1 {
+                    let mut int = SpellInt::default();
+                    int.add_variant(i);
+                    multiwords
+                        .entry(tokens[0].to_owned())
+                        .or_insert_with(Vec::new)
+                        .push((
+                            tokens[1..]
+                                .iter()
+                                .filter(|x| !x.trim().is_empty())
+                                .map(|x| (*x).to_owned())
+                                .collect(),
+                            int,
+                        ));
+
                     continue;
                 }
 
-                let value = words.entry((*word).to_owned()).or_default();
-                value.add_variant(i);
+                if word.contains('_') {
+                    assert!(!word.contains('\\')); // escaped underlines are not supported
+                    let mut parts = word.split('_');
+
+                    let prefix = parts.next().unwrap();
+                    let suffix = parts.next().unwrap();
+
+                    // this will presumably always be covered by the extra suffixes, but add it just to make sure
+                    words
+                        .entry(format!("{}{}", prefix, suffix))
+                        .or_default()
+                        .add_variant(i);
+
+                    let replacer = PosReplacer {
+                        matcher: PosMatcher::new(
+                            Matcher::new_regex(Regex::new("^VER:.*".into()), false, true),
+                            build_info,
+                        ),
+                    };
+
+                    for new_suffix in replacer.apply(suffix, tokenizer) {
+                        let new_word = format!("{}{}", prefix, new_suffix);
+
+                        words.entry(new_word).or_default().add_variant(i);
+                    }
+                }
+
+                words.entry((*word).to_owned()).or_default().add_variant(i);
             }
         }
         let mut words: Vec<_> = words
@@ -140,6 +191,7 @@ impl Spell {
 
         Ok(Spell::new(
             fst.into_fst().to_vec(),
+            multiwords,
             max_freq,
             map,
             lang_options,
@@ -288,7 +340,6 @@ impl Tagger {
 impl MultiwordTagger {
     pub(in crate::compile) fn from_dump<P: AsRef<Path>>(
         dump: P,
-        extra_phrases: impl Iterator<Item = String>,
         info: &BuildInfo,
     ) -> Result<Self, io::Error> {
         let reader = BufReader::new(File::open(dump.as_ref())?);
@@ -309,11 +360,7 @@ impl MultiwordTagger {
                 .collect::<Vec<_>>()
                 .join(" ");
             let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
-            multiwords.push((word, Some(pos)));
-        }
-
-        for phrase in extra_phrases {
-            multiwords.push((phrase, None));
+            multiwords.push((word, pos));
         }
 
         Ok((MultiwordTaggerFields { multiwords }).into())

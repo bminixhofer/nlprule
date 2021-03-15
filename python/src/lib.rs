@@ -713,20 +713,6 @@ impl PySpell {
         *guard.spell_mut().options_mut() = depythonize(options.to_object(py).as_ref(py))?;
         Ok(())
     }
-
-    fn check(&self, word: &str) -> bool {
-        self.rules.read().spell().check(word)
-    }
-
-    fn search(&self, word: &str) -> Vec<PyCandidate> {
-        self.rules
-            .read()
-            .spell()
-            .search(word)
-            .into_iter()
-            .map(|candidate| PyCandidate { candidate })
-            .collect()
-    }
 }
 
 /// The grammatical rules.

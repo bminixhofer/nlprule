@@ -15,7 +15,11 @@ use crate::{
 
 mod levenshtein;
 mod spell_int {
-    #[derive(Debug, Clone, Default, Copy)]
+    use std::cmp;
+
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Default, Copy, Serialize, Deserialize)]
     pub(crate) struct SpellInt(pub(super) u64);
 
     type FreqType = u8;
@@ -32,10 +36,12 @@ mod spell_int {
         pub fn update_freq(&mut self, freq: usize) {
             assert!(freq < FreqType::MAX as usize);
 
+            let prev_freq = self.freq();
             // erase previous frequency
             self.0 &= u64::MAX - FreqType::MAX as u64;
-            // set new frequency
-            self.0 |= freq as u64;
+            // set new frequency, strictly speaking we would have to store a frequency for each variant
+            // but that would need significantly more space, so we just store the highest frequency
+            self.0 |= cmp::max(prev_freq, freq) as u64;
         }
 
         pub fn add_variant(&mut self, index: usize) {
@@ -191,25 +197,33 @@ impl Variant {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Spell {
     fst: Vec<u8>,
+    multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
     max_freq: usize,
     map: DefaultHashMap<String, String>,
     lang_options: SpellLangOptions,
     options: SpellOptions,
     // fields below are computed depending on the selected variant
+    #[serde(skip)]
     used_variant: Option<Variant>,
+    #[serde(skip)]
     used_fst: Vec<u8>,
+    #[serde(skip)]
+    used_multiwords: DefaultHashMap<String, Vec<Vec<String>>>,
+    #[serde(skip)]
     used_set: DefaultHashSet<String>,
 }
 
 impl Spell {
     pub(crate) fn new(
         fst: Vec<u8>,
+        multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
         max_freq: usize,
         map: DefaultHashMap<String, String>,
         lang_options: SpellLangOptions,
     ) -> Self {
         let mut spell = Spell {
             fst,
+            multiwords,
             max_freq,
             map,
             lang_options,
@@ -251,6 +265,7 @@ impl Spell {
         } else {
             self.used_variant = None;
             self.used_fst = Vec::new();
+            self.used_multiwords = DefaultHashMap::new();
             self.used_set = DefaultHashSet::new();
             return;
         };
@@ -280,27 +295,65 @@ impl Spell {
         self.used_fst = used_fst_builder
             .into_inner()
             .expect("subset of valid fst must be valid.");
+        self.used_multiwords = self
+            .multiwords
+            .iter()
+            .map(|(key, value)| {
+                let value = value
+                    .iter()
+                    .filter_map(|(continuations, int)| {
+                        if int.contains_variant(variant_index) {
+                            Some(continuations)
+                        } else {
+                            None
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                (key.to_owned(), value)
+            })
+            .collect();
         self.used_set = set;
     }
 
-    fn check_flat(&self, word: &str) -> bool {
+    fn check_word(&self, word: &str) -> bool {
         self.used_variant.is_none()
             || word.is_empty()
-            || word.chars().all(|x| x.is_punctuation() || x.is_numeric())
+            || word
+                .chars()
+                .all(|x| x.is_symbol() || x.is_punctuation() || x.is_numeric())
             || self.used_set.contains(word)
             || (is_title_case(word)
-                && self.check(&apply_to_first(word, |x| x.to_lowercase().collect())))
+                && self.check_word(&apply_to_first(word, |x| x.to_lowercase().collect())))
     }
 
-    pub fn check(&self, word: &str) -> bool {
-        self.check_flat(word)
+    fn check(&self, tokens: &[Token], correct_mask: &mut [bool]) {
+        let word = tokens[0].word.text.as_ref();
+
+        let word_is_correct = self.check_word(word)
             || (self.lang_options.split_hyphens
                 && word
                     .split(&['-', '\u{2010}', '\u{2011}'][..])
-                    .all(|x| self.check_flat(x)))
+                    .all(|x| self.check_word(x)));
+
+        correct_mask[0] = word_is_correct;
+
+        if let Some(continuations) = self.used_multiwords.get(word) {
+            if let Some(matching_cont) = continuations.iter().find(|cont| {
+                (tokens.len() - 1) >= cont.len()
+                    && cont
+                        .iter()
+                        .enumerate()
+                        .all(|(i, x)| tokens[i + 1].word.text.as_ref() == x)
+            }) {
+                correct_mask[..1 + matching_cont.len()]
+                    .iter_mut()
+                    .for_each(|x| *x = true);
+            }
+        }
     }
 
-    pub fn search(&self, word: &str) -> Vec<Candidate> {
+    fn search(&self, word: &str) -> Vec<Candidate> {
         if let Some(candidate) = self.map.get(word) {
             return vec![Candidate {
                 score: 0., // numerical values here do not matter since there is always exactly one candidate - ranking is irrelevant
@@ -340,11 +393,15 @@ impl Spell {
 
     pub fn suggest(&self, tokens: &[Token]) -> Vec<Suggestion> {
         let mut suggestions = Vec::new();
+        let mut correct_mask = vec![false; tokens.len()];
 
-        for token in tokens {
+        for (i, token) in tokens.iter().enumerate() {
             let text = token.word.text.as_ref();
 
-            if token.ignore_spelling || self.check(text) {
+            if !correct_mask[i] {
+                self.check(&tokens[i..], &mut correct_mask[i..]);
+            }
+            if correct_mask[i] || token.ignore_spelling {
                 continue;
             }
 

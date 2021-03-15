@@ -5,7 +5,7 @@ use fs_err as fs;
 
 use std::{
     hash::{Hash, Hasher},
-    io::{self, BufRead, BufReader, BufWriter},
+    io::{self, BufReader, BufWriter},
     num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
@@ -192,29 +192,6 @@ pub fn compile(
         tokenizer_lang_options,
     )?;
 
-    let mut extra_phrases = DefaultHashSet::new();
-    let mut extra_spell_words = DefaultHashSet::new();
-
-    // comments must already be stripped from this file such that each line contains one word or phrase
-    let reader = BufReader::new(File::open(&paths.spell_extra_path)?);
-    for line in reader.lines() {
-        let line = line?;
-        let content = line.trim();
-
-        match tokenizer.get_token_strs(content).len() {
-            0 => {
-                return Err(Error::Unexpected(format!(
-                    "empty lines in {} are not allowed.",
-                    paths.spell_extra_path.display()
-                )))
-            }
-            // if the content is exactly one token, we just add it to the spellchecker regularly
-            1 => extra_spell_words.insert(content.to_owned()),
-            // if the content is a phrase (i.e multiple tokens) we add it to the multiword tagger, since words found by the multiword tagger are considered correct
-            _ => extra_phrases.insert(content.to_owned()),
-        };
-    }
-
     let multiword_tagger = if paths.multiword_tag_path.exists() {
         info!(
             "{} exists. Building multiword tagger.",
@@ -222,7 +199,6 @@ pub fn compile(
         );
         Some(MultiwordTagger::from_dump(
             paths.multiword_tag_path,
-            extra_phrases.into_iter(),
             &build_info,
         )?)
     } else {
@@ -236,7 +212,8 @@ pub fn compile(
     let spellchecker = Spell::from_dumps(
         paths.spell_dir_path,
         paths.spell_map_path,
-        &extra_spell_words,
+        paths.spell_extra_path,
+        &mut build_info,
         spellchecker_lang_options,
         &tokenizer,
     )?;

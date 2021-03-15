@@ -21,7 +21,8 @@ fn main() {
     let opts = Opts::parse();
 
     let tokenizer = Arc::new(Tokenizer::new(opts.tokenizer).unwrap());
-    let rules = Rules::new(opts.rules, tokenizer.clone()).unwrap();
+    let mut rules = Rules::new(opts.rules, tokenizer.clone()).unwrap();
+    rules.spell_mut().options_mut().variant = Some(rules.spell().variant("en_GB").unwrap());
 
     let tokens = tokenizer.pipe(&opts.text);
 

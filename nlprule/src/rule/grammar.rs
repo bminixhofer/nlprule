@@ -64,7 +64,7 @@ pub struct PosReplacer {
 }
 
 impl PosReplacer {
-    fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
+    pub fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Vec<String> {
         let mut candidates: Vec<_> = tokenizer
             .tagger()
             .get_tags(text)
@@ -75,13 +75,13 @@ impl PosReplacer {
                     .get_group_members(&x.lemma.as_ref().to_string());
                 let mut data = Vec::new();
                 for word in group_words {
-                    if let Some(i) = tokenizer
+                    if let Some(_i) = tokenizer
                         .tagger()
                         .get_tags(word)
                         .iter()
                         .position(|x| self.matcher.is_match(&x.pos))
                     {
-                        data.push((word.to_string(), i));
+                        data.push(word.to_string());
                     }
                 }
                 data
@@ -89,12 +89,9 @@ impl PosReplacer {
             .rev()
             .flatten()
             .collect();
-        candidates.sort_by(|(_, a), (_, b)| a.cmp(b));
-        if candidates.is_empty() {
-            None
-        } else {
-            Some(candidates.remove(0).0)
-        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
     }
 }
 
@@ -111,7 +108,7 @@ impl Match {
         let text = graph.by_id(self.id).text(graph.tokens()[0].sentence);
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
-            replacer.apply(text, tokenizer)?
+            replacer.apply(text, tokenizer).into_iter().next()?
         } else {
             text.to_string()
         };

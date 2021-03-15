@@ -253,7 +253,7 @@ Only needed if the language requires a chunker (e. g. English).
     )
 
     with open(args.out_dir / "spell" / "map.txt", "w") as f:
-        for path in args.spell_map_path:
+        for path in args.spell_map_path or []:
             for line in open(path):
                 if line.startswith("#"):
                     continue

@@ -8,7 +8,7 @@ use super::tag::Tagger;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct MultiwordTaggerFields {
-    pub(crate) multiwords: Vec<(String, Option<owned::PosId>)>,
+    pub(crate) multiwords: Vec<(String, owned::PosId)>,
 }
 
 impl From<MultiwordTaggerFields> for MultiwordTagger {
@@ -35,7 +35,7 @@ impl From<MultiwordTaggerFields> for MultiwordTagger {
 pub struct MultiwordTagger {
     #[serde(skip)]
     matcher: AhoCorasick,
-    multiwords: Vec<(String, Option<owned::PosId>)>,
+    multiwords: Vec<(String, owned::PosId)>,
 }
 
 impl MultiwordTagger {
@@ -66,13 +66,10 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in tokens[*start..(*end + 1)].iter_mut() {
-                    if let Some(pos) = pos.as_ref() {
-                        token.multiword_data = Some(WordData::new(
-                            tagger.id_word(word.as_str().into()),
-                            pos.as_ref_id(),
-                        ));
-                    }
-
+                    token.multiword_data = Some(WordData::new(
+                        tagger.id_word(word.as_str().into()),
+                        pos.as_ref_id(),
+                    ));
                     token.ignore_spelling = true;
                 }
             }

@@ -44,6 +44,7 @@ pub enum Disambiguation {
     Replace(Vec<owned::WordData>),
     Filter(Vec<Option<either::Either<owned::WordData, POSFilter>>>),
     Unify(Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>),
+    IgnoreSpelling,
     Nop,
 }
 
@@ -187,6 +188,13 @@ impl Disambiguation {
                                 token.word = before;
                             }
                         }
+                    }
+                }
+            }
+            Disambiguation::IgnoreSpelling => {
+                for group in groups {
+                    for token in group {
+                        token.ignore_spelling = true;
                     }
                 }
             }
