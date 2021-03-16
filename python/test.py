@@ -157,4 +157,5 @@ def test_spell_options_can_be_set(tokenizer_and_rules):
 def test_spellchecker_works(tokenizer_and_rules):
     (tokenizer, rules) = tokenizer_and_rules
 
-    print(rules.spell.search("lämp"))
+    # TODO
+    # print(rules.spell.search("lämp"))

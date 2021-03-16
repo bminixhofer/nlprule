@@ -23,7 +23,12 @@ build_change Cargo.toml
 
 cd python
 
-trap cleanup INT
+trap ctrl_c INT
+
+function ctrl_c() {
+    cleanup
+    exit
+}
 
 function cleanup() {
     # this is a bit hacky, assume we are in python/ dir
@@ -33,12 +38,11 @@ function cleanup() {
     mv nlprule/.Cargo.toml.bak nlprule/Cargo.toml
     mv build/.Cargo.toml.bak build/Cargo.toml
     mv .Cargo.toml.bak Cargo.toml
-    exit
 }
 
 maturin $@
 exit_code=$?
 
-cleanup()
+cleanup
 
 exit $exit_code
