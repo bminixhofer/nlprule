@@ -89,7 +89,7 @@ mod spell_int {
             assert!(int.contains_variant(1));
             assert!(int.contains_variant(10));
             assert!(!int.contains_variant(2));
-            assert!(int.freq() == 10);
+            assert!(int.freq() == 100);
         }
     }
 }
