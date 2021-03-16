@@ -70,6 +70,7 @@ impl MultiwordTagger {
                         tagger.id_word(word.as_str().into()),
                         pos.as_ref_id(),
                     ));
+                    token.ignore_spelling = true;
                 }
             }
         }

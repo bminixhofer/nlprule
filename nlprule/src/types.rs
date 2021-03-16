@@ -13,9 +13,11 @@ pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd, Default,
+)]
 pub(crate) struct WordIdInt(pub u32);
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
 pub(crate) struct PosIdInt(pub u16);
@@ -196,7 +198,7 @@ pub struct IncompleteToken<'t> {
     pub byte_span: (usize, usize),
     /// Char start (inclusive) and end (exclusive) of this token in the sentence.
     pub char_span: (usize, usize),
-    /// Whether this token is the last token in the sentence-
+    /// Whether this token is the last token in the sentence.
     pub is_sentence_end: bool,
     /// Whether this token has one or more whitespace characters before.
     pub has_space_before: bool,
@@ -204,6 +206,8 @@ pub struct IncompleteToken<'t> {
     pub chunks: Vec<String>,
     /// A *multiword* lemma and part-of-speech tag. Set if the token was found in a list of phrases.
     pub multiword_data: Option<WordData<'t>>,
+    /// Whether to ignore spelling for this token.
+    pub ignore_spelling: bool,
     /// The sentence this token is in.
     pub sentence: &'t str,
     /// The tagger used for lookup related to this token.
@@ -225,6 +229,7 @@ pub struct Token<'t> {
     pub word: Word<'t>,
     pub char_span: (usize, usize),
     pub byte_span: (usize, usize),
+    pub ignore_spelling: bool,
     pub has_space_before: bool,
     pub chunks: Vec<String>,
     pub sentence: &'t str,
@@ -247,6 +252,7 @@ impl<'t> Token<'t> {
             ),
             char_span: (0, 0),
             byte_span: (0, 0),
+            ignore_spelling: true,
             has_space_before: false,
             chunks: Vec::new(),
             sentence,
@@ -296,6 +302,7 @@ impl<'t> From<IncompleteToken<'t>> for Token<'t> {
             word,
             byte_span: data.byte_span,
             char_span: data.char_span,
+            ignore_spelling: data.ignore_spelling,
             has_space_before: data.has_space_before,
             chunks: data.chunks,
             sentence: data.sentence,

@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Matcher {
     pub matcher: either::Either<either::Either<String, GraphId>, Regex>,
     pub negate: bool,
@@ -68,7 +68,7 @@ impl Matcher {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TextMatcher {
     pub(crate) matcher: Matcher,
     pub(crate) set: Option<DefaultHashSet<WordIdInt>>,
@@ -107,7 +107,7 @@ impl PosMatcher {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordDataMatcher {
     pub(crate) pos_matcher: Option<PosMatcher>,
     pub(crate) inflect_matcher: Option<TextMatcher>,
@@ -141,7 +141,7 @@ impl WordDataMatcher {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Quantifier {
     pub min: usize,
     pub max: usize,
@@ -153,7 +153,7 @@ pub trait Atomable: Send + Sync {
 }
 
 #[enum_dispatch(Atomable)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Atom {
     ChunkAtom(concrete::ChunkAtom),
     SpaceBeforeAtom(concrete::SpaceBeforeAtom),
@@ -171,7 +171,7 @@ pub mod concrete {
     use super::{Atomable, MatchGraph, Matcher, TextMatcher, Token, WordDataMatcher};
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct TextAtom {
         pub(crate) matcher: TextMatcher,
     }
@@ -183,7 +183,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ChunkAtom {
         pub(crate) matcher: Matcher,
     }
@@ -195,7 +195,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SpaceBeforeAtom {
         pub(crate) value: bool,
     }
@@ -206,7 +206,7 @@ pub mod concrete {
         }
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct WordDataAtom {
         pub(crate) matcher: WordDataMatcher,
         pub(crate) case_sensitive: bool,
@@ -222,7 +222,7 @@ pub mod concrete {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
@@ -231,7 +231,7 @@ impl Atomable for TrueAtom {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FalseAtom {}
 
 impl Atomable for FalseAtom {
@@ -240,7 +240,7 @@ impl Atomable for FalseAtom {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AndAtom {
     pub(crate) atoms: Vec<Atom>,
 }
@@ -253,7 +253,7 @@ impl Atomable for AndAtom {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrAtom {
     pub(crate) atoms: Vec<Atom>,
 }
@@ -266,7 +266,7 @@ impl Atomable for OrAtom {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotAtom {
     pub(crate) atom: Box<Atom>,
 }
@@ -277,7 +277,7 @@ impl Atomable for NotAtom {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OffsetAtom {
     pub(crate) atom: Box<Atom>,
     pub(crate) offset: isize,
@@ -449,7 +449,7 @@ impl<'t> MatchGraph<'t> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Part {
     pub atom: Atom,
     pub quantifier: Quantifier,
@@ -458,7 +458,7 @@ pub struct Part {
     pub unify: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Composition {
     pub(crate) parts: Vec<Part>,
     pub(crate) id_to_idx: DefaultHashMap<GraphId, usize>,

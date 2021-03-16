@@ -16,7 +16,7 @@ impl std::cmp::PartialEq for Suggestion {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Conversion {
     Nop,
     AllLower,
@@ -38,7 +38,7 @@ impl Conversion {
 }
 
 /// An example associated with a [Rule][crate::rule::Rule].
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Example {
     pub(crate) text: String,
     pub(crate) suggestion: Option<Suggestion>,
@@ -58,13 +58,13 @@ impl Example {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PosReplacer {
     pub(crate) matcher: PosMatcher,
 }
 
 impl PosReplacer {
-    fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
+    pub fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Vec<String> {
         let mut candidates: Vec<_> = tokenizer
             .tagger()
             .get_tags(text)
@@ -75,13 +75,13 @@ impl PosReplacer {
                     .get_group_members(&x.lemma.as_ref().to_string());
                 let mut data = Vec::new();
                 for word in group_words {
-                    if let Some(i) = tokenizer
+                    if let Some(_i) = tokenizer
                         .tagger()
                         .get_tags(word)
                         .iter()
                         .position(|x| self.matcher.is_match(&x.pos))
                     {
-                        data.push((word.to_string(), i));
+                        data.push(word.to_string());
                     }
                 }
                 data
@@ -89,16 +89,13 @@ impl PosReplacer {
             .rev()
             .flatten()
             .collect();
-        candidates.sort_by(|(_, a), (_, b)| a.cmp(b));
-        if candidates.is_empty() {
-            None
-        } else {
-            Some(candidates.remove(0).0)
-        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     pub(crate) id: GraphId,
     pub(crate) conversion: Conversion,
@@ -111,7 +108,7 @@ impl Match {
         let text = graph.by_id(self.id).text(graph.tokens()[0].sentence);
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
-            replacer.apply(text, tokenizer)?
+            replacer.apply(text, tokenizer).into_iter().next()?
         } else {
             text.to_string()
         };
@@ -131,14 +128,14 @@ impl Match {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SynthesizerPart {
     Text(String),
     // Regex with the `fancy_regex` backend is large on the stack
     Match(Box<Match>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Synthesizer {
     pub(crate) use_titlecase_adjust: bool,
     pub(crate) parts: Vec<SynthesizerPart>,

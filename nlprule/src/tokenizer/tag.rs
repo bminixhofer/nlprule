@@ -9,7 +9,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, iter::once};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct TaggerLangOptions {
     /// Whether to use a heuristic to split potential compound words.
     pub use_compound_split_heuristic: bool,
@@ -17,16 +17,6 @@ pub(crate) struct TaggerLangOptions {
     pub always_add_lower_tags: bool,
     /// Used part-of-speech tags which are not in the tagger dictionary.
     pub extra_tags: Vec<String>,
-}
-
-impl Default for TaggerLangOptions {
-    fn default() -> Self {
-        TaggerLangOptions {
-            use_compound_split_heuristic: false,
-            always_add_lower_tags: false,
-            extra_tags: Vec::new(),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -214,13 +204,13 @@ impl Tagger {
         &self.word_store
     }
 
-    fn str_for_word_id(&self, id: &WordIdInt) -> &str {
+    pub(crate) fn str_for_word_id(&self, id: &WordIdInt) -> &str {
         self.word_store
             .get_by_right(id)
             .expect("only valid word ids are created")
     }
 
-    fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
+    pub(crate) fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
         self.tag_store
             .get_by_right(id)
             .expect("only valid pos ids are created")

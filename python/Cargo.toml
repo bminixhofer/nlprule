@@ -15,6 +15,7 @@ parking_lot = { version = "0.11", features = ["serde"] }
 reqwest = { version = "0.11", default_features = false, features = ["blocking", "rustls-tls"]}
 flate2 = "1"
 directories = "3"
+pythonize = "0.13"
 syn = "=1.0.57" # workaround for "could not find `export` in `syn`" by enum_dispatch
 nlprule = { path = "../nlprule" } # BUILD_BINDINGS_COMMENT
 # nlprule = { package = "nlprule-core", path = "../nlprule" } # BUILD_BINDINGS_UNCOMMENT

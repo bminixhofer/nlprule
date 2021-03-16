@@ -3,5 +3,6 @@
     "ignore_ids": [
         "GRAMMAR/PRP_MD_NN/2",
         "TYPOS/VERB_APOSTROPHE_S/3"
-    ]
+    ],
+    "split_hyphens": true
 }

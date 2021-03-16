@@ -13,7 +13,7 @@ use crate::{
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
     path::Path,
     sync::Arc,
 };
@@ -128,6 +128,11 @@ impl Tokenizer {
         Ok(bincode::deserialize_from(reader)?)
     }
 
+    /// Serializes the tokenizer to a writer.
+    pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        Ok(bincode::serialize_into(writer, &self)?)
+    }
+
     /// Gets all disambigation rules in the order they are applied.
     pub fn rules(&self) -> &[DisambiguationRule] {
         &self.rules
@@ -196,7 +201,7 @@ impl Tokenizer {
         self.disambiguate_up_to_id(tokens, None)
     }
 
-    fn get_token_strs<'t>(&self, text: &'t str) -> Vec<&'t str> {
+    pub(crate) fn get_token_strs<'t>(&self, text: &'t str) -> Vec<&'t str> {
         let mut tokens = Vec::new();
 
         let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
@@ -274,6 +279,7 @@ impl Tokenizer {
                     char_span: (char_start, current_char),
                     byte_span: (byte_start, byte_start + x.len()),
                     is_sentence_end,
+                    ignore_spelling: false,
                     has_space_before: sentence[..byte_start].ends_with(char::is_whitespace),
                     chunks: Vec::new(),
                     multiword_data: None,

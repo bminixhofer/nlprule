@@ -1,0 +1,8 @@
+{
+    "variants": [
+        "de_AT",
+        "de_DE",
+        "de_CH"
+    ],
+    "split_hyphens": true
+}

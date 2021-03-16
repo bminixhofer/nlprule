@@ -31,7 +31,7 @@ use self::{
 /// A *Unification* makes an otherwise matching pattern invalid if no combination of its filters
 /// matches all tokens marked with "unify".
 /// Can also be negated.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Unification {
     pub(crate) mask: Vec<Option<bool>>,
     pub(crate) filters: Vec<Vec<POSFilter>>,
@@ -375,7 +375,7 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
 ///     <example correction="doesn't">He <marker>dosn't</marker> know about it.</example>
 /// </rule>
 /// ```
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
     pub(crate) id: Index,
     pub(crate) engine: Engine,

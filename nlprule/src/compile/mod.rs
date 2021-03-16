@@ -14,8 +14,9 @@ use std::{
 
 use crate::{
     rules::Rules,
+    spell::Spell,
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
-    types::DefaultHasher,
+    types::*,
 };
 use log::info;
 
@@ -35,12 +36,16 @@ struct BuildFilePaths {
     disambiguation_path: PathBuf,
     grammar_path: PathBuf,
     multiword_tag_path: PathBuf,
-    common_words_path: PathBuf,
     regex_cache_path: PathBuf,
     srx_path: PathBuf,
+    common_words_path: PathBuf,
+    spell_dir_path: PathBuf,
+    spell_map_path: PathBuf,
+    spell_extra_path: PathBuf,
 }
 
 impl BuildFilePaths {
+    // this has to be kept in sync with the paths the builder in build/make_build_dir.py stores the resources at
     fn new<P: AsRef<Path>>(build_dir: P) -> Self {
         let p = build_dir.as_ref();
         BuildFilePaths {
@@ -51,9 +56,12 @@ impl BuildFilePaths {
             disambiguation_path: p.join("disambiguation.xml"),
             grammar_path: p.join("grammar.xml"),
             multiword_tag_path: p.join("tags/multiwords.txt"),
-            common_words_path: p.join("common.txt"),
             regex_cache_path: p.join("regex_cache.bin"),
             srx_path: p.join("segment.srx"),
+            common_words_path: p.join("common.txt"),
+            spell_dir_path: p.join("spell"),
+            spell_map_path: p.join("spell/map.txt"),
+            spell_extra_path: p.join("spell/spelling.txt"),
         }
     }
 }
@@ -81,6 +89,8 @@ pub enum Error {
     Unimplemented(String),
     #[error("error parsing to integer: {0}")]
     ParseError(#[from] ParseIntError),
+    #[error("nlprule error: {0}")]
+    NLPRuleError(#[from] crate::Error),
     #[error("unknown error")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
@@ -118,6 +128,13 @@ pub fn compile(
     let tagger_lang_options =
         utils::tagger_lang_options(&lang_code).ok_or_else(|| Error::LanguageOptionsDoNotExist {
             lang_code: lang_code.clone(),
+        })?;
+
+    let spellchecker_lang_options =
+        utils::spellchecker_lang_options(&lang_code).ok_or_else(|| {
+            Error::LanguageOptionsDoNotExist {
+                lang_code: lang_code.clone(),
+            }
         })?;
 
     info!("Creating tagger.");
@@ -163,6 +180,18 @@ pub fn compile(
     } else {
         None
     };
+
+    info!("Creating tokenizer.");
+
+    let mut tokenizer = Tokenizer::from_xml(
+        &paths.disambiguation_path,
+        &mut build_info,
+        chunker,
+        None,
+        srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
+        tokenizer_lang_options,
+    )?;
+
     let multiword_tagger = if paths.multiword_tag_path.exists() {
         info!(
             "{} exists. Building multiword tagger.",
@@ -175,22 +204,30 @@ pub fn compile(
     } else {
         None
     };
+    tokenizer.multiword_tagger = multiword_tagger;
+    tokenizer.to_writer(&mut tokenizer_dest)?;
 
-    info!("Creating tokenizer.");
-    let tokenizer = Tokenizer::from_xml(
-        &paths.disambiguation_path,
+    info!("Creating spellchecker.");
+
+    let spellchecker = Spell::from_dumps(
+        paths.spell_dir_path,
+        paths.spell_map_path,
+        paths.spell_extra_path,
         &mut build_info,
-        chunker,
-        multiword_tagger,
-        srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
-        tokenizer_lang_options,
+        spellchecker_lang_options,
+        &tokenizer,
     )?;
 
-    bincode::serialize_into(&mut tokenizer_dest, &tokenizer)?;
-
     info!("Creating grammar rules.");
-    let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_lang_options);
-    bincode::serialize_into(&mut rules_dest, &rules)?;
+
+    let rules = Rules::from_xml(
+        &paths.grammar_path,
+        &mut build_info,
+        spellchecker,
+        Arc::new(tokenizer),
+        rules_lang_options,
+    );
+    rules.to_writer(&mut rules_dest)?;
 
     // we need to write the regex cache after building the rules, otherwise it isn't fully populated
     let f = BufWriter::new(File::create(&paths.regex_cache_path)?);

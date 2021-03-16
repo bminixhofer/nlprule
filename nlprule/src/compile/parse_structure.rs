@@ -1054,7 +1054,7 @@ impl DisambiguationRule {
                     })
                     .collect(),
             )),
-            Some("ignore_spelling") => Ok(Disambiguation::Nop), // ignore_spelling can be ignored since we dont check spelling
+            Some("ignore_spelling") => Ok(Disambiguation::IgnoreSpelling),
             Some("immunize") => Ok(Disambiguation::Nop), // immunize can probably not be ignored
             Some("filterall") => {
                 let mut disambig = Vec::new();

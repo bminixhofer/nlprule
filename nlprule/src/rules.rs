@@ -1,19 +1,15 @@
 //! Sets of grammatical error correction rules.
 
-use crate::types::*;
-use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
+use crate::{spell::Spell, types::*, utils::parallelism::MaybeParallelRefIterator};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
     path::Path,
+    sync::Arc,
 };
-
-/// Options for a rule set.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RulesOptions {}
 
 /// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,45 +34,68 @@ impl Default for RulesLangOptions {
     }
 }
 
-/// A set of grammatical error correction rules.
 #[derive(Serialize, Deserialize, Default)]
+struct RulesFields {
+    pub(crate) rules: Vec<Rule>,
+    pub(crate) spell: Spell,
+}
+
+impl From<Rules> for RulesFields {
+    fn from(rules: Rules) -> Self {
+        RulesFields {
+            rules: rules.rules,
+            spell: rules.spell,
+        }
+    }
+}
+
+/// A set of grammatical error correction rules.
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) options: RulesOptions,
+    pub(crate) spell: Spell,
+    pub(crate) tokenizer: Arc<Tokenizer>,
 }
 
 impl Rules {
+    /// Serializes the rules set to a writer.
+    pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        // TODO: the .clone() here could be avoided
+        let fields: RulesFields = self.clone().into();
+        writer.write_all(&bincode::serialize(&fields)?)?;
+        Ok(())
+    }
+
+    /// Creates a new rules set from a reader.
+    pub fn from_reader<R: Read>(reader: R, tokenizer: Arc<Tokenizer>) -> Result<Self, Error> {
+        let fields: RulesFields = bincode::deserialize_from(reader)?;
+        let rules = Rules {
+            rules: fields.rules,
+            spell: fields.spell,
+            tokenizer,
+        };
+        Ok(rules)
+    }
+
     /// Creates a new rule set from a path to a binary.
     ///
     /// # Errors
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
-    pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
-        Rules::new_with_options(p, RulesOptions::default())
-    }
-
-    /// Creates a new rule set with options. See [new][Rules::new].
-    pub fn new_with_options<P: AsRef<Path>>(p: P, options: RulesOptions) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(p: P, tokenizer: Arc<Tokenizer>) -> Result<Self, Error> {
         let reader = BufReader::new(File::open(p.as_ref())?);
-        let mut rules: Rules = bincode::deserialize_from(reader)?;
 
-        rules.options = options;
-        Ok(rules)
+        Self::from_reader(reader, tokenizer)
     }
 
-    /// Gets the options of this rule set.
-    pub fn options(&self) -> &RulesOptions {
-        &self.options
+    /// Gets the spellchecker associated with this rules set. The spellchecker always exists, even if spellchecking is disabled (default).
+    pub fn spell(&self) -> &Spell {
+        &self.spell
     }
 
-    /// Gets the options of this rule set (mutable).
-    pub fn options_mut(&mut self) -> &mut RulesOptions {
-        &mut self.options
-    }
-
-    /// Creates a new rules set from a reader.
-    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
-        Ok(bincode::deserialize_from(reader)?)
+    /// Mutably gets the spellchecker.
+    pub fn spell_mut(&mut self) -> &mut Spell {
+        &mut self.spell
     }
 
     /// All rules ordered by priority.
@@ -106,7 +125,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given tokens by checking all rules.
-    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    pub fn apply(&self, tokens: &[Token]) -> Vec<Suggestion> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -119,7 +138,7 @@ impl Rules {
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
-                for suggestion in rule.apply(tokens, tokenizer) {
+                for suggestion in rule.apply(tokens, self.tokenizer.as_ref()) {
                     output.push((i, suggestion));
                 }
 
@@ -127,6 +146,8 @@ impl Rules {
             })
             .flatten()
             .collect();
+
+        output.extend(self.spell.suggest(tokens).into_iter().map(|x| (0, x)));
 
         output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 
@@ -148,7 +169,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for a text by checking all rules.
-    pub fn suggest(&self, text: &str, tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    pub fn suggest(&self, text: &str) -> Vec<Suggestion> {
         if text.is_empty() {
             return Vec::new();
         }
@@ -157,19 +178,15 @@ impl Rules {
         let mut char_offset = 0;
 
         // get suggestions sentence by sentence
-        for tokens in tokenizer.pipe(text) {
+        for tokens in self.tokenizer.pipe(text) {
             if tokens.is_empty() {
                 continue;
             }
 
-            suggestions.extend(
-                self.apply(&tokens, tokenizer)
-                    .into_iter()
-                    .map(|mut suggestion| {
-                        suggestion.rshift(char_offset);
-                        suggestion
-                    }),
-            );
+            suggestions.extend(self.apply(&tokens).into_iter().map(|mut suggestion| {
+                suggestion.rshift(char_offset);
+                suggestion
+            }));
 
             char_offset += tokens[0].sentence.chars().count();
         }
@@ -178,26 +195,31 @@ impl Rules {
     }
 
     /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
-    pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> String {
-        let suggestions = self.suggest(text, tokenizer);
+    pub fn correct(&self, text: &str) -> String {
+        let suggestions = self.suggest(text);
         apply_suggestions(text, &suggestions)
     }
 }
 
 /// Correct a text by applying suggestions to it.
-/// In the case of multiple possible replacements, always chooses the first one.
+/// - In case of multiple possible replacements, always chooses the first one.
+/// - In case of a suggestion without any replacements, ignores the suggestion.
 pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     let mut offset: isize = 0;
     let mut chars: Vec<_> = text.chars().collect();
 
     for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.replacements[0].chars().collect();
-        chars.splice(
-            (suggestion.start as isize + offset) as usize
-                ..(suggestion.end as isize + offset) as usize,
-            replacement.iter().cloned(),
-        );
-        offset = offset + replacement.len() as isize - (suggestion.end - suggestion.start) as isize;
+        if let Some(replacement) = suggestion.replacements.get(0) {
+            let replacement_chars: Vec<_> = replacement.chars().collect();
+
+            chars.splice(
+                (suggestion.start as isize + offset) as usize
+                    ..(suggestion.end as isize + offset) as usize,
+                replacement_chars.iter().cloned(),
+            );
+            offset = offset + replacement_chars.len() as isize
+                - (suggestion.end - suggestion.start) as isize;
+        }
     }
 
     chars.into_iter().collect()

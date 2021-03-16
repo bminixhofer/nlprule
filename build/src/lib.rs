@@ -5,7 +5,7 @@ use flate2::bufread::GzDecoder;
 use fs::File;
 use fs_err as fs;
 use nlprule::{compile, rules_filename, tokenizer_filename};
-use std::fs::Permissions;
+use std::{fs::Permissions, sync::Arc};
 use std::{
     io::{self, BufReader, BufWriter, Cursor, Read},
     path::{Path, PathBuf},
@@ -469,10 +469,11 @@ impl BinaryBuilder {
             let tokenizer_out = self.out_dir.join(tokenizer_filename(lang_code));
             let rules_out = self.out_dir.join(rules_filename(lang_code));
 
-            nlprule::Rules::new(rules_out)
-                .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Rules, e))?;
-            nlprule::Tokenizer::new(tokenizer_out)
+            let tokenizer = nlprule::Tokenizer::new(tokenizer_out)
                 .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Tokenizer, e))?;
+
+            nlprule::Rules::new(rules_out, Arc::new(tokenizer))
+                .map_err(|e| Error::ValidationFailed(lang_code.to_owned(), Binary::Rules, e))?;
         }
 
         Ok(())

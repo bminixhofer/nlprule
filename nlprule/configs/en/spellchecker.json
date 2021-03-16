@@ -1,0 +1,8 @@
+{
+    "variants": [
+        "en_GB",
+        "en_US",
+        "en_AU"
+    ],
+    "split_hyphens": true
+}
