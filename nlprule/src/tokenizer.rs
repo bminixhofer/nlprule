@@ -128,7 +128,7 @@ impl Tokenizer {
         Ok(bincode::deserialize_from(reader)?)
     }
 
-    /// TODO
+    /// Serializes the tokenizer to a writer.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         Ok(bincode::serialize_into(writer, &self)?)
     }

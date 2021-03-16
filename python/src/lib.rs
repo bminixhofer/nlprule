@@ -2,7 +2,7 @@ use flate2::read::GzDecoder;
 use nlprule::{
     rule::{id::Selector, Example, Rule},
     rules::{apply_suggestions, Rules},
-    spellcheck::{Candidate, Spell},
+    spell::Spell,
     tokenizer::tag::Tagger,
     tokenizer::Tokenizer,
     types::*,
@@ -651,34 +651,6 @@ impl PySpellOptions {
             .collect();
         self.spell_mut().options_mut().whitelist = whitelist?;
         Ok(())
-    }
-}
-
-#[pyclass(name = "Candidate", module = "nlprule.spell")]
-struct PyCandidate {
-    candidate: Candidate,
-}
-
-#[pymethods]
-impl PyCandidate {
-    #[getter]
-    fn score(&self) -> f32 {
-        self.candidate.score()
-    }
-
-    #[getter]
-    fn distance(&self) -> usize {
-        self.candidate.distance()
-    }
-
-    #[getter]
-    fn freq(&self) -> usize {
-        self.candidate.freq()
-    }
-
-    #[getter]
-    fn term(&self) -> &str {
-        self.candidate.term()
     }
 }
 

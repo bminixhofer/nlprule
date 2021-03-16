@@ -1,3 +1,4 @@
+//! Structures and implementations related to spellchecking.
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,6 +20,10 @@ mod spell_int {
 
     use serde::{Deserialize, Serialize};
 
+    /// Encodes information about a valid word in a `u64` for storage as value in an FST.
+    /// Currently:
+    /// - the bottom 8 bits encode the frequency
+    /// - the other 56 bits act as flags for the variants e.g. bit 10 and 12 are set if the word exists in the the second and fourth variant.
     #[derive(Debug, Clone, Default, Copy, Serialize, Deserialize)]
     pub(crate) struct SpellInt(pub(super) u64);
 
@@ -91,7 +96,7 @@ mod spell_int {
 pub(crate) use spell_int::SpellInt;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Candidate {
+struct Candidate {
     score: f32,
     distance: usize,
     freq: usize,
@@ -110,36 +115,27 @@ impl Ord for Candidate {
     }
 }
 
-impl Candidate {
-    pub fn score(&self) -> f32 {
-        self.score
-    }
-
-    pub fn freq(&self) -> usize {
-        self.freq
-    }
-
-    pub fn distance(&self) -> usize {
-        self.distance
-    }
-
-    pub fn term(&self) -> &str {
-        self.term.as_str()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
-/// TODO
+/// Options to configure the spellchecker.
 pub struct SpellOptions {
+    /// The language variant to use. Setting this to `None` disables spellchecking.
     pub variant: Option<Variant>,
+    /// The maximum edit distance to consider for corrections. Currently Optimal String Alignment distance is used.
     pub max_distance: usize,
+    /// A fixed prefix length for which to consider only edits with a distance of 1. This speeds up the search by pruning the tree early.
     pub prefix_length: usize,
+    /// How high to weigh the frequency of a word compared to the edit distance when ranking correction candidates.
+    /// Setting this to `x` makes the frequency make a difference of at most `x` edit distance.
     pub freq_weight: f32,
+    /// The maximum number of correction candidates to return.
     pub top_n: usize,
+    /// A set of words to ignore. Can also contain phrases delimited by a space.
     pub whitelist: HashSet<String>,
 }
 
+/// A guard around the [SpellOptions]. Makes sure the spellchecker is updated once this is dropped.
+/// Implements `Deref` and `DerefMut` to the [SpellOptions].
 pub struct SpellOptionsGuard<'a> {
     spell: &'a mut Spell,
 }
@@ -166,7 +162,7 @@ impl<'a> Drop for SpellOptionsGuard<'a> {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub(crate) struct SpellLangOptions {
-    /// Variants of the language (e. g. "en_US", "en_GB") to consider for spellchecking.
+    /// Variants of the language (e.g. "en_US", "en_GB") to consider for spellchecking.
     pub variants: Vec<Variant>,
     pub split_hyphens: bool,
 }
@@ -184,16 +180,19 @@ impl Default for SpellOptions {
     }
 }
 
+/// A valid language variant. Obtained by [Spell::variant].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(transparent)]
 pub struct Variant(String);
 
 impl Variant {
+    /// Gets the language code of this variant.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
+/// Spellchecker logic for one variant. Does the actual work.
 #[derive(Debug, Clone)]
 struct VariantChecker {
     variant: Variant,
@@ -207,22 +206,32 @@ struct VariantChecker {
 }
 
 impl VariantChecker {
+    /// Checks the validity of one word.
+    /// NB: The ordering of this chain of `||` operators is somewhat nontrivial. Could potentially be improved by benchmarking.
+    /// If this is true, the token is always correct. The converse is not true because e.g. multiwords are checked separately.
     fn check_word(&self, word: &str, recurse: bool) -> bool {
         word.is_empty()
+            || self.set.contains(word)
             || word
                 .chars()
                 .all(|x| x.is_symbol() || x.is_punctuation() || x.is_numeric())
-            || self.set.contains(word)
             || (recurse
+                // for title case words, it is enough if the lowercase variant is known.
+                // it is possible that `is_title_case` is still true for word where `.to_lowercase()` was called so we need a `recurse` parameter.
                 && is_title_case(word)
                 && self.check_word(&apply_to_first(word, |x| x.to_lowercase().collect()), false))
     }
 
+    /// Populates `correct_mask` according to the correctness of the given zeroth token.
+    /// - `correct_mask[0]` is `true` if the zeroth token is correct, `false` if it is not correct.
+    /// - Indices `1..n` of `correct_mask` are `true` if the `n`th token is also definitely correct.
+    ///     If they are `false`, they need to be checked separately.  
     fn check(&self, tokens: &[Token], correct_mask: &mut [bool]) {
         let word = tokens[0].word.text.as_ref();
         let mut word_is_correct = self.check_word(word, true);
 
         if !word_is_correct && self.lang_options.split_hyphens {
+            // there exist multiple valid hyphens, see https://jkorpela.fi/dashes.html
             let hyphens = &['-', '\u{2010}', '\u{2011}'][..];
 
             if word.contains(hyphens) && word.split(hyphens).all(|x| self.check_word(x, true)) {
@@ -261,7 +270,6 @@ impl VariantChecker {
         let mut stream = used_fst.search_with_state(query).into_stream();
         while let Some((k, v, s)) = stream.next() {
             let state = s.expect("matching levenshtein state is always `Some`.");
-            assert!(state.dist() > 0);
 
             let id = SpellInt(v);
 
@@ -284,14 +292,19 @@ impl VariantChecker {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// A spellchecker implementing the algorithm described in [Error-tolerant Finite State Recognition](https://www.aclweb.org/anthology/1995.iwpt-1.24/) with some extensions.
 pub struct Spell {
+    /// An FST mapping valid words (always single tokens!) to a [SpellInt].
     fst: Vec<u8>,
+    /// Known *multiwords* i. e. phrases. Can also validly contain single words if they should not be part of the FST (e.g. words in the whitelist).
     multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
+    ///  The maximum occured word frequency. Used to normalize.
     max_freq: usize,
+    /// A map of `wrong->right`. `wrong` must always be exactly one token.
     map: DefaultHashMap<String, String>,
     lang_options: SpellLangOptions,
     options: SpellOptions,
-    // the `variant_checker` is computed based on the selected variant
+    /// The structure containing the actual spellchecking logic. Computed based on the selected variant.
     #[serde(skip)]
     variant_checker: Option<VariantChecker>,
 }
@@ -317,18 +330,24 @@ impl Spell {
         spell
     }
 
+    /// Gets the options.
     pub fn options(&self) -> &SpellOptions {
         &self.options
     }
 
+    /// Mutably gets the options.
     pub fn options_mut(&mut self) -> SpellOptionsGuard {
         SpellOptionsGuard { spell: self }
     }
 
+    /// Returns all known variants.
     pub fn variants(&self) -> &[Variant] {
         self.lang_options.variants.as_slice()
     }
 
+    /// Returns the variant for a language code e.g. `"en_GB"`.
+    /// # Errors
+    /// - If no variant exists for the language code.
     pub fn variant(&self, variant: &str) -> Result<Variant, Error> {
         self.lang_options
             .variants
@@ -338,11 +357,7 @@ impl Spell {
             .ok_or_else(|| Error::UnknownVariant(variant.to_owned()))
     }
 
-    pub(crate) fn ingest_options(&mut self) {
-        if self.variant_checker.as_ref().map(|x| &x.variant) == self.options.variant.as_ref() {
-            return;
-        }
-
+    fn ingest_options(&mut self) {
         let variant = if let Some(variant) = self.options.variant.as_ref() {
             variant.clone()
         } else {
@@ -350,30 +365,55 @@ impl Spell {
             return;
         };
 
-        let mut used_fst_builder = MapBuilder::memory();
-        let mut set = DefaultHashSet::new();
-
-        let fst = Map::new(&self.fst).expect("serialized fst must be valid.");
-        let mut stream = fst.into_stream();
-
         let variant_index = self
             .variants()
             .iter()
             .position(|x| *x == variant)
             .expect("only valid variants are created.");
 
-        while let Some((k, v)) = stream.next() {
-            if SpellInt(v).contains_variant(variant_index) {
-                set.insert(String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8."));
-                used_fst_builder
-                    .insert(k, v)
-                    .expect("fst stream returns values in lexicographic order.");
-            }
-        }
+        let mut checker = match self.variant_checker.take() {
+            // if the variant checker exists and uses the correct variant, we don't need to rebuild
+            Some(checker) if checker.variant == variant => checker,
+            _ => {
+                let mut used_fst_builder = MapBuilder::memory();
+                let mut set = DefaultHashSet::new();
 
-        let fst = used_fst_builder
-            .into_inner()
-            .expect("subset of valid fst must be valid.");
+                let fst = Map::new(&self.fst).expect("serialized fst must be valid.");
+                let mut stream = fst.into_stream();
+
+                while let Some((k, v)) = stream.next() {
+                    if SpellInt(v).contains_variant(variant_index) {
+                        set.insert(
+                            String::from_utf8(k.to_vec()).expect("fst keys must be valid utf-8."),
+                        );
+                        used_fst_builder
+                            .insert(k, v)
+                            .expect("fst stream returns values in lexicographic order.");
+                    }
+                }
+
+                let fst = used_fst_builder
+                    .into_inner()
+                    .expect("subset of valid fst must be valid.");
+
+                VariantChecker {
+                    variant,
+                    fst,
+                    multiwords: DefaultHashMap::new(),
+                    set,
+                    map: self.map.clone(),
+                    max_freq: self.max_freq,
+                    options: self.options.clone(),
+                    lang_options: self.lang_options.clone(),
+                }
+            }
+        };
+
+        // `multiwords` depend on the whitelist. For convenience we always rebuild this.
+        // the whitelist could be separated into a new structure for a speedup.
+        // We can revisit this if performance becomes an issue, it should still be quite fast as implemented now.
+
+        // selects only the multiwords which exist for the selected variant
         let mut multiwords: DefaultHashMap<_, _> = self
             .multiwords
             .iter()
@@ -393,6 +433,8 @@ impl Spell {
             })
             .collect();
 
+        // adds words from the user-set whitelist
+        // careful: words in the `whitelist` are set by the user, so this must never fail!
         for phrase in self
             .options
             .whitelist
@@ -416,18 +458,11 @@ impl Spell {
                 .push(parts.map(|x| x.to_owned()).collect());
         }
 
-        self.variant_checker = Some(VariantChecker {
-            variant,
-            fst,
-            multiwords,
-            set,
-            map: self.map.clone(),
-            max_freq: self.max_freq,
-            options: self.options.clone(),
-            lang_options: self.lang_options.clone(),
-        })
+        checker.multiwords = multiwords;
+        self.variant_checker = Some(checker);
     }
 
+    /// Runs the spellchecking algorithm on all tokens and returns suggestions.
     pub fn suggest(&self, tokens: &[Token]) -> Vec<Suggestion> {
         let variant_checker = if let Some(checker) = self.variant_checker.as_ref() {
             checker

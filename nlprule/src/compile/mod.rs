@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     rules::Rules,
-    spellcheck::Spell,
+    spell::Spell,
     tokenizer::{chunk::Chunker, multiword::MultiwordTagger, tag::Tagger, Tokenizer},
     types::*,
 };

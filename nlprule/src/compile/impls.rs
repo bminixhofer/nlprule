@@ -24,7 +24,7 @@ use crate::{
         DisambiguationRule, MatchGraph, Rule,
     },
     rules::{Rules, RulesLangOptions},
-    spellcheck::{Spell, SpellInt, SpellLangOptions},
+    spell::{Spell, SpellInt, SpellLangOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},

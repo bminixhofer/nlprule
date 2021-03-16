@@ -2,7 +2,7 @@
 
 use crate::{rule::id::Selector, tokenizer::Tokenizer};
 use crate::{rule::Rule, Error};
-use crate::{spellcheck::Spell, types::*, utils::parallelism::MaybeParallelRefIterator};
+use crate::{spell::Spell, types::*, utils::parallelism::MaybeParallelRefIterator};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -58,7 +58,7 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// TODO
+    /// Serializes the rules set to a writer.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         // TODO: the .clone() here could be avoided
         let fields: RulesFields = self.clone().into();
@@ -88,10 +88,12 @@ impl Rules {
         Self::from_reader(reader, tokenizer)
     }
 
+    /// Gets the spellchecker associated with this rules set. The spellchecker always exists, even if spellchecking is disabled (default).
     pub fn spell(&self) -> &Spell {
         &self.spell
     }
 
+    /// Mutably gets the spellchecker.
     pub fn spell_mut(&mut self) -> &mut Spell {
         &mut self.spell
     }

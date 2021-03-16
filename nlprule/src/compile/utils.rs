@@ -1,6 +1,4 @@
-use crate::{
-    rules::RulesLangOptions, spellcheck::SpellLangOptions, tokenizer::TokenizerLangOptions,
-};
+use crate::{rules::RulesLangOptions, spell::SpellLangOptions, tokenizer::TokenizerLangOptions};
 use crate::{tokenizer::tag::TaggerLangOptions, types::*};
 use lazy_static::lazy_static;
 
