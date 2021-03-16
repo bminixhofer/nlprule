@@ -33,6 +33,7 @@ mod spell_int {
         std::mem::size_of::<FreqType>() * 8
     }
 
+    #[allow(dead_code)] // some methods are only needed for compilation - kept here for clarity
     impl SpellInt {
         pub fn as_u64(&self) -> u64 {
             self.0
@@ -194,7 +195,7 @@ impl Variant {
 
 /// Spellchecker logic for one variant. Does the actual work.
 #[derive(Debug, Clone)]
-struct VariantChecker {
+pub(crate) struct VariantChecker {
     variant: Variant,
     fst: Vec<u8>,
     max_freq: usize,
@@ -295,41 +296,21 @@ impl VariantChecker {
 /// A spellchecker implementing the algorithm described in [Error-tolerant Finite State Recognition](https://www.aclweb.org/anthology/1995.iwpt-1.24/) with some extensions.
 pub struct Spell {
     /// An FST mapping valid words (always single tokens!) to a [SpellInt].
-    fst: Vec<u8>,
+    pub(crate) fst: Vec<u8>,
     /// Known *multiwords* i. e. phrases. Can also validly contain single words if they should not be part of the FST (e.g. words in the whitelist).
-    multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
+    pub(crate) multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
     ///  The maximum occured word frequency. Used to normalize.
-    max_freq: usize,
+    pub(crate) max_freq: usize,
     /// A map of `wrong->right`. `wrong` must always be exactly one token.
-    map: DefaultHashMap<String, String>,
-    lang_options: SpellLangOptions,
-    options: SpellOptions,
+    pub(crate) map: DefaultHashMap<String, String>,
+    pub(crate) lang_options: SpellLangOptions,
+    pub(crate) options: SpellOptions,
     /// The structure containing the actual spellchecking logic. Computed based on the selected variant.
     #[serde(skip)]
-    variant_checker: Option<VariantChecker>,
+    pub(crate) variant_checker: Option<VariantChecker>,
 }
 
 impl Spell {
-    pub(crate) fn new(
-        fst: Vec<u8>,
-        multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
-        max_freq: usize,
-        map: DefaultHashMap<String, String>,
-        lang_options: SpellLangOptions,
-    ) -> Self {
-        let mut spell = Spell {
-            fst,
-            multiwords,
-            max_freq,
-            map,
-            lang_options,
-            options: SpellOptions::default(),
-            ..Default::default()
-        };
-        spell.ingest_options();
-        spell
-    }
-
     /// Gets the options.
     pub fn options(&self) -> &SpellOptions {
         &self.options
@@ -354,10 +335,19 @@ impl Spell {
             .iter()
             .find(|x| x.as_str() == variant)
             .cloned()
-            .ok_or_else(|| Error::UnknownVariant(variant.to_owned()))
+            .ok_or_else(|| {
+                Error::UnknownVariant(
+                    variant.to_owned(),
+                    self.lang_options
+                        .variants
+                        .iter()
+                        .map(|x| x.as_str().to_owned())
+                        .collect(),
+                )
+            })
     }
 
-    fn ingest_options(&mut self) {
+    pub(crate) fn ingest_options(&mut self) {
         let variant = if let Some(variant) = self.options.variant.as_ref() {
             variant.clone()
         } else {

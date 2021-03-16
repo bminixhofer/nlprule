@@ -38,6 +38,92 @@ use crate::{
 use super::{parse_structure::BuildInfo, Error};
 
 impl Spell {
+    fn new(
+        fst: Vec<u8>,
+        multiwords: DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
+        max_freq: usize,
+        map: DefaultHashMap<String, String>,
+        lang_options: SpellLangOptions,
+    ) -> Self {
+        let mut spell = Spell {
+            fst,
+            multiwords,
+            max_freq,
+            map,
+            lang_options,
+            ..Default::default()
+        };
+        spell.ingest_options();
+        spell
+    }
+
+    #[allow(clippy::clippy::too_many_arguments)] // lots of arguments here but not easily avoidable
+    fn add_line(
+        word: &str,
+        freq: usize,
+        words: &mut DefaultHashMap<String, SpellInt>,
+        multiwords: &mut DefaultHashMap<String, Vec<(Vec<String>, SpellInt)>>,
+        variant_index: usize,
+        // in some LT lists an underline denotes a prefix such that e.g. "hin_reiten" also adds "hingeritten"
+        underline_denotes_prefix: bool,
+        build_info: &mut BuildInfo,
+        tokenizer: &Tokenizer,
+    ) {
+        let tokens = tokenizer.get_token_strs(word);
+
+        if tokens.len() > 1 {
+            assert!(!(underline_denotes_prefix && word.contains('_'))); // not supported in entries spanning multiple tokens
+
+            let mut int = SpellInt::default();
+            int.add_variant(variant_index);
+
+            // we do not add the frequency for multiwords - they are not used for suggestions, just to check validity
+
+            multiwords
+                .entry(tokens[0].to_owned())
+                .or_insert_with(Vec::new)
+                .push((
+                    tokens[1..]
+                        .iter()
+                        .filter(|x| !x.trim().is_empty())
+                        .map(|x| (*x).to_owned())
+                        .collect(),
+                    int,
+                ));
+        } else if word.contains('_') && underline_denotes_prefix {
+            assert!(!word.contains('\\')); // escaped underlines are not supported
+            let mut parts = word.split('_');
+
+            let prefix = parts.next().unwrap();
+            let suffix = parts.next().unwrap();
+
+            // this will presumably always be covered by the extra suffixes, but add it just to make sure
+            let value = words.entry(format!("{}{}", prefix, suffix)).or_default();
+            value.add_variant(variant_index);
+            value.update_freq(freq);
+
+            let replacer = PosReplacer {
+                matcher: PosMatcher::new(
+                    Matcher::new_regex(Regex::new("^VER:.*".into()), false, true),
+                    build_info,
+                ),
+            };
+
+            for new_suffix in replacer.apply(suffix, tokenizer) {
+                let new_word = format!("{}{}", prefix, new_suffix);
+
+                let value = words.entry(new_word).or_default();
+                value.add_variant(variant_index);
+                value.update_freq(freq);
+            }
+        } else {
+            let value = words.entry((*word).to_owned()).or_default();
+
+            value.update_freq(freq);
+            value.add_variant(variant_index);
+        }
+    }
+
     pub(in crate::compile) fn from_dumps(
         spell_dir_path: impl AsRef<Path>,
         map_path: impl AsRef<Path>,
@@ -68,33 +154,18 @@ impl Spell {
                     [freq, word] => {
                         // frequency is denoted as letters from A to Z in LanguageTool where A is the least frequent.
                         let freq = freq.chars().next().expect("freq must have one char - would not have been yielded by split_whitespace otherwise.") as usize - 'A' as usize;
-                        let value = words.entry((*word).to_owned()).or_default();
 
-                        let tokens = tokenizer.get_token_strs(word);
-
-                        if tokens.len() > 1 {
-                            let mut int = SpellInt::default();
-                            int.add_variant(i);
-
-                            multiwords
-                                .entry(tokens[0].to_owned())
-                                .or_insert_with(Vec::new)
-                                .push((
-                                    tokens[1..]
-                                        .iter()
-                                        .filter(|x| !x.trim().is_empty())
-                                        .map(|x| (*x).to_owned())
-                                        .collect(),
-                                    int,
-                                ));
-
-                            continue;
-                        }
-
+                        Spell::add_line(
+                            word,
+                            freq,
+                            &mut words,
+                            &mut multiwords,
+                            i,
+                            false,
+                            build_info,
+                            tokenizer,
+                        );
                         max_freq = cmp::max(max_freq, freq);
-
-                        value.update_freq(freq);
-                        value.add_variant(i);
                     }
                     _ => continue,
                 }
@@ -108,54 +179,16 @@ impl Spell {
                 let line = line?;
                 let word = line.trim();
 
-                let tokens = tokenizer.get_token_strs(word);
-
-                if tokens.len() > 1 {
-                    let mut int = SpellInt::default();
-                    int.add_variant(i);
-                    multiwords
-                        .entry(tokens[0].to_owned())
-                        .or_insert_with(Vec::new)
-                        .push((
-                            tokens[1..]
-                                .iter()
-                                .filter(|x| !x.trim().is_empty())
-                                .map(|x| (*x).to_owned())
-                                .collect(),
-                            int,
-                        ));
-
-                    continue;
-                }
-
-                if word.contains('_') {
-                    assert!(!word.contains('\\')); // escaped underlines are not supported
-                    let mut parts = word.split('_');
-
-                    let prefix = parts.next().unwrap();
-                    let suffix = parts.next().unwrap();
-
-                    // this will presumably always be covered by the extra suffixes, but add it just to make sure
-                    words
-                        .entry(format!("{}{}", prefix, suffix))
-                        .or_default()
-                        .add_variant(i);
-
-                    let replacer = PosReplacer {
-                        matcher: PosMatcher::new(
-                            Matcher::new_regex(Regex::new("^VER:.*".into()), false, true),
-                            build_info,
-                        ),
-                    };
-
-                    for new_suffix in replacer.apply(suffix, tokenizer) {
-                        let new_word = format!("{}{}", prefix, new_suffix);
-
-                        words.entry(new_word).or_default().add_variant(i);
-                    }
-                }
-
-                words.entry((*word).to_owned()).or_default().add_variant(i);
+                Spell::add_line(
+                    word,
+                    0,
+                    &mut words,
+                    &mut multiwords,
+                    i,
+                    true,
+                    build_info,
+                    tokenizer,
+                );
             }
         }
         let mut words: Vec<_> = words
