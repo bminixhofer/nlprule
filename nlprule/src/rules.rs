@@ -202,19 +202,24 @@ impl Rules {
 }
 
 /// Correct a text by applying suggestions to it.
-/// In the case of multiple possible replacements, always chooses the first one.
+/// - In case of multiple possible replacements, always chooses the first one.
+/// - In case of a suggestion without any replacements, ignores the suggestion.
 pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     let mut offset: isize = 0;
     let mut chars: Vec<_> = text.chars().collect();
 
     for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.replacements[0].chars().collect();
-        chars.splice(
-            (suggestion.start as isize + offset) as usize
-                ..(suggestion.end as isize + offset) as usize,
-            replacement.iter().cloned(),
-        );
-        offset = offset + replacement.len() as isize - (suggestion.end - suggestion.start) as isize;
+        if let Some(replacement) = suggestion.replacements.get(0) {
+            let replacement_chars: Vec<_> = replacement.chars().collect();
+
+            chars.splice(
+                (suggestion.start as isize + offset) as usize
+                    ..(suggestion.end as isize + offset) as usize,
+                replacement_chars.iter().cloned(),
+            );
+            offset = offset + replacement_chars.len() as isize
+                - (suggestion.end - suggestion.start) as isize;
+        }
     }
 
     chars.into_iter().collect()

@@ -806,8 +806,9 @@ impl PyRules {
         })
     }
 
-    /// Convenience method to apply suggestions to the given text.
-    /// Always uses the first element of `suggestion.replacements` as replacement.
+    /// Correct a text by applying suggestions to it.
+    /// - In case of multiple possible replacements, always chooses the first one.
+    /// - In case of a suggestion without any replacements, ignores the suggestion.
     ///
     /// Arguments:
     ///     text (str): The input text.

@@ -57,7 +57,7 @@ fn spellchecker_works() -> Result<(), Error> {
     let mut rules = Rules::new(RULES_PATH, TOKENIZER.clone()).unwrap();
     rules.spell_mut().options_mut().variant = Some(rules.spell().variant("en_GB")?);
 
-    println!("{:?}", rules.suggest("Unicode punctuation: —"));
+    assert_eq!(rules.correct("color spellhceking"), "colour spellchecking");
 
     Ok(())
 }

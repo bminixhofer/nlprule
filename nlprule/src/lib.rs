@@ -5,32 +5,35 @@
 //! - A [Tokenizer][tokenizer::Tokenizer] to split a text into tokens and analyze it by chunking, lemmatizing and part-of-speech tagging. Can also be used independently of the grammatical rules.
 //! - A [Rules][rules::Rules] structure containing a set of grammatical error correction rules.
 //!
-//! # Example: correct a text
+//! # Examples
 //!
+//! Correct a text:
 //! ```no_run
 //! use nlprule::{Tokenizer, Rules};
 //!
 //! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
-//! let rules = Rules::new("path/to/en_rules.bin")?;
+//! let mut rules = Rules::new("path/to/en_rules.bin", tokenizer.into())?;
+//! // enable spellchecking
+//! rules.spell_mut().options_mut().variant = Some(rules.spell().variant("en_GB")?);
 //!
 //! assert_eq!(
-//!     rules.correct("She was not been here since Monday.", &tokenizer),
-//!     String::from("She was not here since Monday.")
+//!     rules.correct("I belive she was not been here since Monday."),
+//!     String::from("I believe she was not here since Monday.")
 //! );
 //! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
-//! # Example: get suggestions and correct a text
+//! Get suggestions and correct a text:
 //!
 //! ```no_run
 //! use nlprule::{Tokenizer, Rules, types::Suggestion, rules::apply_suggestions};
 //!
 //! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
-//! let rules = Rules::new("path/to/en_rules.bin")?;
+//! let rules = Rules::new("path/to/en_rules.bin", tokenizer.into())?;
 //!
 //! let text = "She was not been here since Monday.";
 //!
-//! let suggestions = rules.suggest(text, &tokenizer);
+//! let suggestions = rules.suggest(text);
 //! assert_eq!(
 //!     suggestions,
 //!     vec![Suggestion {
@@ -48,6 +51,28 @@
 //! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
+//! Tokenize & analyze a text:
+//!
+//! ```no_run
+//! use nlprule::Tokenizer;
+//!
+//! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
+//!
+//! let text = "A brief example is shown.";
+//!
+//! // returns a vector over sentences
+//! // we assume this is one sentence so we take the first element
+//! let tokens = tokenizer.pipe(text).remove(0);
+//!
+//! println!("{:#?}", tokens);
+//! // token at index zero is the special SENT_START token - generally not interesting
+//! assert_eq!(tokens[2].word.text.as_ref(), "brief");
+//! assert_eq!(tokens[2].word.tags[0].pos.as_ref(), "JJ");
+//! assert_eq!(tokens[2].chunks, vec!["I-NP-singular"]);
+//! // some other information like char / byte span, lemmas etc. is also set!
+//! # Ok::<(), nlprule::Error>(())
+//! ```
+//! ---
 //! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
 //!
 //! # The 't lifetime
