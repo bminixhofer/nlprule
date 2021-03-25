@@ -16,14 +16,14 @@ pub struct TokenEngine {
 }
 
 impl TokenEngine {
-    fn get_match<'t>(&'t self, tokens: &'t [Token], i: usize) -> Option<MatchGraph<'t>> {
-        if let Some(graph) = self.composition.apply(tokens, i) {
+    fn get_match<'t>(&'t self, sentence: &'t MatchSentence, i: usize) -> Option<MatchGraph<'t>> {
+        if let Some(graph) = self.composition.apply(sentence, i) {
             let mut blocked = false;
 
             // TODO: cache / move to outer loop
-            for i in 0..tokens.len() {
+            for i in 0..sentence.len() {
                 for antipattern in &self.antipatterns {
-                    if let Some(anti_graph) = antipattern.apply(tokens, i) {
+                    if let Some(anti_graph) = antipattern.apply(sentence, i) {
                         let anti_start = anti_graph.by_index(0).char_span.0;
                         let anti_end = anti_graph
                             .by_index(anti_graph.groups().len() - 1)
@@ -78,7 +78,7 @@ enum InnerMatches<'a: 't, 't> {
 }
 
 pub struct EngineMatches<'a, 't> {
-    tokens: &'t [Token<'t>],
+    sentence: &'t MatchSentence<'t>,
     start: GraphId,
     end: GraphId,
     inner: InnerMatches<'a, 't>,
@@ -88,13 +88,13 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
     type Item = MatchGraph<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let tokens = self.tokens;
+        let sentence = self.sentence;
         let start_id = self.start;
         let end_id = self.end;
 
         match &mut self.inner {
-            InnerMatches::Token(inner) => (inner.index..tokens.len()).find_map(|i| {
-                inner.engine.get_match(tokens, i).and_then(|graph| {
+            InnerMatches::Token(inner) => (inner.index..sentence.len()).find_map(|i| {
+                inner.engine.get_match(sentence, i).and_then(|graph| {
                     let start_group = graph.by_id(start_id);
                     let end_group = graph.by_id(end_id);
 
@@ -130,7 +130,7 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
                     }
                 }
 
-                MatchGraph::new(groups, inner.id_to_idx, tokens)
+                MatchGraph::new(groups, inner.id_to_idx, sentence)
             }),
         }
     }
@@ -139,36 +139,33 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 impl Engine {
     pub fn get_matches<'a, 't>(
         &'a self,
-        tokens: &'t [Token],
+        sentence: &'t MatchSentence,
         start: GraphId,
         end: GraphId,
     ) -> EngineMatches<'a, 't> {
-        assert!(!tokens.is_empty()); // this has to be checked before calling `get_matches`
-
         EngineMatches {
-            tokens,
+            sentence,
             start,
             end,
             inner: match &self {
                 Engine::Token(engine) => InnerMatches::Token(TokenMatches {
                     engine,
                     index: 0,
-                    mask: vec![false; tokens[0].sentence.chars().count()],
+                    mask: vec![false; sentence.text().chars().count()],
                 }),
                 Engine::Text(regex, id_to_idx) => {
-                    let sentence = tokens[0].sentence;
-
                     let mut bi_to_ci: DefaultHashMap<usize, usize> = sentence
+                        .text()
                         .char_indices()
                         .enumerate()
                         .map(|(ci, (bi, _))| (bi, ci))
                         .collect();
-                    bi_to_ci.insert(sentence.len(), bi_to_ci.len());
+                    bi_to_ci.insert(sentence.text().len(), bi_to_ci.len());
 
                     InnerMatches::Text(TextMatches {
                         byte_idx_to_char_idx: bi_to_ci,
                         id_to_idx,
-                        captures: regex.captures_iter(sentence),
+                        captures: regex.captures_iter(sentence.text()),
                     })
                 }
             },

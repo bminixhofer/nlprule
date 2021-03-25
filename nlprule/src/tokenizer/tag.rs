@@ -5,6 +5,7 @@ use crate::types::*;
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
+use lazycell::AtomicLazyCell;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, iter::once};
@@ -146,6 +147,7 @@ impl From<TaggerFields> for Tagger {
             word_store,
             groups,
             lang_options: data.lang_options,
+            ..Default::default()
         }
     }
 }
@@ -159,6 +161,7 @@ pub struct Tagger {
     pub(crate) word_store: BiMap<String, WordIdInt>,
     pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
+    pub(crate) sent_start: AtomicLazyCell<Token<'static>>,
 }
 
 impl Tagger {
@@ -204,6 +207,31 @@ impl Tagger {
         tags
     }
 
+    pub(crate) fn sent_start(&self) -> &Token<'static> {
+        if let Some(token) = self.sent_start.borrow() {
+            token
+        } else {
+            self.sent_start
+                .fill(Token {
+                    word: Word::new_with_tags(
+                        self.id_word("".into()),
+                        vec![WordData::new(
+                            self.id_word("".into()),
+                            self.id_tag("SENT_START"),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    char_span: (0, 0),
+                    byte_span: (0, 0),
+                    has_space_before: false,
+                    chunks: Vec::new(),
+                })
+                .ok();
+            self.sent_start.borrow().unwrap()
+        }
+    }
+
     #[allow(dead_code)] // used by compile module
     pub(crate) fn tag_store(&self) -> &BiMap<String, PosIdInt> {
         &self.tag_store
@@ -243,7 +271,7 @@ impl Tagger {
 
     /// Tags the given text.
     /// Unknown words will not get a numerical id.
-    pub fn id_word<'t>(&'t self, text: Cow<'t, str>) -> WordId<'t> {
+    pub fn id_word<'a>(&self, text: Cow<'a, str>) -> WordId<'a> {
         let id = self.word_store.get_by_left(text.as_ref()).copied();
         WordId(text, id)
     }

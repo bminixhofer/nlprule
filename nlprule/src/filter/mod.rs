@@ -26,7 +26,7 @@ pub struct NoDisambiguationEnglishPartialPosTagFilter {
 
 impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
-        graph.by_id(self.id).tokens(graph.tokens()).all(|token| {
+        graph.by_id(self.id).tokens(graph.sentence()).all(|token| {
             if let Some(captures) = self.regexp.captures(&token.word.text.as_ref()) {
                 let tags = tokenizer
                     .tagger()

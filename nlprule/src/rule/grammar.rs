@@ -108,7 +108,7 @@ pub struct Match {
 
 impl Match {
     fn apply(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> Option<String> {
-        let text = graph.by_id(self.id).text(graph.tokens()[0].sentence);
+        let text = graph.by_id(self.id).text(graph.sentence().text());
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
             replacer.apply(text, tokenizer)?
@@ -176,7 +176,7 @@ impl Synthesizer {
         let make_uppercase = !starts_with_conversion
             && graph.groups()[graph.get_index(start)..]
                 .iter()
-                .find_map(|x| x.tokens(graph.tokens()).next())
+                .find_map(|x| x.tokens(graph.sentence()).next())
                 .map(|first_token| {
                     (self.use_titlecase_adjust
                         && first_token

@@ -1,13 +1,13 @@
 //! Fundamental types used by this crate.
 
+use crate::tokenizer::tag::Tagger;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{hash_map, HashMap, HashSet},
+    iter,
 };
-
-use crate::tokenizer::tag::Tagger;
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
@@ -91,6 +91,123 @@ pub mod owned {
         pub byte_span: (usize, usize),
         pub has_space_before: bool,
         pub chunks: Vec<String>,
+    }
+}
+
+#[derive(Derivative, Clone)]
+#[derivative(Debug, PartialEq)]
+pub struct IncompleteSentence<'t> {
+    text: &'t str,
+    tokens: Vec<IncompleteToken<'t>>,
+    #[derivative(Debug = "ignore", PartialEq = "ignore")]
+    tagger: &'t Tagger,
+}
+
+impl<'t> IncompleteSentence<'t> {
+    pub fn new(tokens: Vec<IncompleteToken<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
+        IncompleteSentence {
+            text,
+            tokens,
+            tagger,
+        }
+    }
+
+    pub fn text(&self) -> &'t str {
+        self.text
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut IncompleteToken<'t>> {
+        self.tokens.iter_mut()
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &IncompleteToken> {
+        self.tokens.iter()
+    }
+
+    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = IncompleteToken<'t>> {
+        self.tokens.into_iter()
+    }
+
+    pub(crate) fn tagger(&self) -> &'t Tagger {
+        self.tagger
+    }
+}
+
+#[derive(Derivative, Clone)]
+#[derivative(Debug, PartialEq)]
+pub struct Sentence<'t> {
+    text: &'t str,
+    tokens: Vec<Token<'t>>,
+    #[derivative(Debug = "ignore", PartialEq = "ignore")]
+    tagger: &'t Tagger,
+}
+
+impl<'t> Sentence<'t> {
+    pub fn new(sentence: IncompleteSentence<'t>) -> Self {
+        let tagger = sentence.tagger();
+
+        Sentence {
+            text: sentence.text(),
+            tagger,
+            tokens: sentence
+                .into_iter()
+                .map(|token| token.into_token(tagger))
+                .collect(),
+        }
+    }
+
+    pub fn tokens(&self) -> &[Token<'t>] {
+        &self.tokens
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Token> {
+        self.tokens.iter()
+    }
+
+    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = Token<'t>> {
+        self.tokens.into_iter()
+    }
+
+    pub fn text(&self) -> &'t str {
+        self.text
+    }
+
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchSentence<'t> {
+    sentence: &'t Sentence<'t>,
+    sent_start: &'t Token<'t>,
+}
+
+impl<'t> MatchSentence<'t> {
+    pub fn new(sentence: &'t Sentence<'t>) -> Self {
+        MatchSentence {
+            sentence,
+            sent_start: sentence.tagger.sent_start(),
+        }
+    }
+
+    pub fn index(&self, index: usize) -> &Token {
+        match index {
+            0 => &self.sent_start,
+            i => &self.sentence.tokens[i - 1],
+        }
+    }
+
+    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t Token> {
+        iter::once(self.sent_start).chain(self.sentence.iter())
+    }
+
+    pub fn len(&self) -> usize {
+        self.sentence.len() + 1
+    }
+
+    pub fn text(&self) -> &str {
+        self.sentence.text()
     }
 }
 
@@ -186,9 +303,7 @@ impl<'t> Word<'t> {
 }
 
 /// A token where varying levels of information are set.
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteToken<'t> {
     /// The word of this token. Contains information about the actual text and part-of-speech tags + lemmas.
     pub word: Word<'t>,
@@ -204,22 +319,42 @@ pub struct IncompleteToken<'t> {
     pub chunks: Vec<String>,
     /// A *multiword* lemma and part-of-speech tag. Set if the token was found in a list of phrases.
     pub multiword_data: Option<WordData<'t>>,
-    /// The sentence this token is in.
-    pub sentence: &'t str,
-    /// The tagger used for lookup related to this token.
-    #[derivative(PartialEq = "ignore", Debug = "ignore")]
-    pub tagger: &'t Tagger,
 }
 
-/// A token to which disambiguation rules have been applied to.
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq)]
-#[derive(Clone)]
-pub struct DisambiguatedToken<'t>(pub IncompleteToken<'t>);
+impl<'t> IncompleteToken<'t> {
+    pub fn into_token(self, tagger: &'t Tagger) -> Token {
+        let mut word = self.word.clone();
+
+        word.tags
+            .push(WordData::new(self.word.text.clone(), tagger.id_tag("")));
+
+        // multiword tags are added last because they can not be touched by disambiguation
+        word.tags.extend(self.multiword_data.into_iter());
+
+        if word.tags.iter().all(|x| x.pos.0.is_empty()) {
+            word.tags.push(WordData::new(
+                self.word.text.clone(),
+                tagger.id_tag("UNKNOWN"),
+            ));
+        }
+
+        if self.is_sentence_end {
+            word.tags
+                .push(WordData::new(self.word.text, tagger.id_tag("SENT_END")));
+        }
+
+        Token {
+            word,
+            byte_span: self.byte_span,
+            char_span: self.char_span,
+            has_space_before: self.has_space_before,
+            chunks: self.chunks,
+        }
+    }
+}
 
 /// A finished token with all information set. See [IncompleteToken].
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(missing_docs)]
 pub struct Token<'t> {
     pub word: Word<'t>,
@@ -227,33 +362,9 @@ pub struct Token<'t> {
     pub byte_span: (usize, usize),
     pub has_space_before: bool,
     pub chunks: Vec<String>,
-    pub sentence: &'t str,
-    #[derivative(Debug = "ignore")]
-    pub tagger: &'t Tagger,
 }
 
 impl<'t> Token<'t> {
-    /// Get the special sentence start token.
-    pub fn sent_start(sentence: &'t str, tagger: &'t Tagger) -> Self {
-        Token {
-            word: Word::new_with_tags(
-                tagger.id_word("".into()),
-                vec![WordData::new(
-                    tagger.id_word("".into()),
-                    tagger.id_tag("SENT_START"),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-            char_span: (0, 0),
-            byte_span: (0, 0),
-            has_space_before: false,
-            chunks: Vec::new(),
-            sentence,
-            tagger,
-        }
-    }
-
     /// Converts this token to an owned equivalent.
     pub fn to_owned_token(&self) -> owned::Token {
         owned::Token {
@@ -262,44 +373,6 @@ impl<'t> Token<'t> {
             byte_span: self.byte_span,
             has_space_before: self.has_space_before,
             chunks: self.chunks.clone(),
-        }
-    }
-}
-
-impl<'t> From<IncompleteToken<'t>> for Token<'t> {
-    fn from(data: IncompleteToken<'t>) -> Self {
-        let mut word = data.word.clone();
-
-        word.tags.push(WordData::new(
-            data.word.text.clone(),
-            data.tagger.id_tag(""),
-        ));
-
-        // multiword tags are added last because they can not be touched by disambiguation
-        word.tags.extend(data.multiword_data.into_iter());
-
-        if word.tags.iter().all(|x| x.pos.0.is_empty()) {
-            word.tags.push(WordData::new(
-                data.word.text.clone(),
-                data.tagger.id_tag("UNKNOWN"),
-            ));
-        }
-
-        if data.is_sentence_end {
-            word.tags.push(WordData::new(
-                data.word.text,
-                data.tagger.id_tag("SENT_END"),
-            ));
-        }
-
-        Token {
-            word,
-            byte_span: data.byte_span,
-            char_span: data.char_span,
-            has_space_before: data.has_space_before,
-            chunks: data.chunks,
-            sentence: data.sentence,
-            tagger: data.tagger,
         }
     }
 }

@@ -4,8 +4,6 @@ use crate::types::*;
 use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
 
-use super::tag::Tagger;
-
 #[derive(Serialize, Deserialize)]
 pub(crate) struct MultiwordTaggerFields {
     pub(crate) multiwords: Vec<(String, owned::PosId)>,
@@ -40,12 +38,14 @@ pub struct MultiwordTagger {
 
 impl MultiwordTagger {
     /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(&'t self, tokens: &mut Vec<IncompleteToken<'t>>, tagger: &'t Tagger) {
+    pub fn apply<'t>(&'t self, sentence: &mut IncompleteSentence<'t>) {
+        let tagger = sentence.tagger();
+
         let mut start_indices = DefaultHashMap::new();
         let mut end_indices = DefaultHashMap::new();
         let mut byte_index = 0;
 
-        let joined = tokens
+        let joined = sentence
             .iter()
             .enumerate()
             .map(|(i, x)| {
@@ -65,7 +65,7 @@ impl MultiwordTagger {
             {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
-                for token in tokens[*start..(*end + 1)].iter_mut() {
+                for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
                     token.multiword_data = Some(WordData::new(
                         tagger.id_word(word.as_str().into()),
                         pos.as_ref_id(),

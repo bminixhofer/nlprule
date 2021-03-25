@@ -105,11 +105,9 @@ impl Rules {
         }
     }
 
-    /// Compute the suggestions for the given tokens by checking all rules.
-    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
-        if tokens.is_empty() {
-            return Vec::new();
-        }
+    /// Compute the suggestions for the given sentence by checking all rules.
+    pub fn apply(&self, sentence: &Sentence, tokenizer: &Tokenizer) -> Vec<Suggestion> {
+        let sentence = MatchSentence::new(sentence);
 
         let mut output: Vec<(usize, Suggestion)> = self
             .rules
@@ -119,7 +117,7 @@ impl Rules {
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
-                for suggestion in rule.apply(tokens, tokenizer) {
+                for suggestion in rule.apply(&sentence, tokenizer) {
                     output.push((i, suggestion));
                 }
 
@@ -130,7 +128,7 @@ impl Rules {
 
         output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
 
-        let mut mask = vec![false; tokens[0].sentence.chars().count()];
+        let mut mask = vec![false; sentence.text().chars().count()];
 
         output
             .into_iter()
@@ -157,21 +155,15 @@ impl Rules {
         let mut char_offset = 0;
 
         // get suggestions sentence by sentence
-        for tokens in tokenizer.pipe(text) {
-            if tokens.is_empty() {
-                continue;
-            }
+        for sentence in tokenizer.pipe(text) {
+            suggestions.extend(self.apply(&sentence, tokenizer).into_iter().map(
+                |mut suggestion| {
+                    suggestion.rshift(char_offset);
+                    suggestion
+                },
+            ));
 
-            suggestions.extend(
-                self.apply(&tokens, tokenizer)
-                    .into_iter()
-                    .map(|mut suggestion| {
-                        suggestion.rshift(char_offset);
-                        suggestion
-                    }),
-            );
-
-            char_offset += tokens[0].sentence.chars().count();
+            char_offset += sentence.text().chars().count();
         }
 
         suggestions

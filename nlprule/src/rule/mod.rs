@@ -3,7 +3,7 @@
 use crate::types::*;
 use crate::{
     filter::{Filter, Filterable},
-    tokenizer::{finalize, Tokenizer},
+    tokenizer::Tokenizer,
     utils,
 };
 use itertools::Itertools;
@@ -38,7 +38,7 @@ pub(crate) struct Unification {
 }
 
 impl Unification {
-    pub fn keep(&self, graph: &MatchGraph, tokens: &[Token]) -> bool {
+    pub fn keep(&self, graph: &MatchGraph, sentence: &MatchSentence) -> bool {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
@@ -46,7 +46,7 @@ impl Unification {
 
         for (group, maybe_mask_val) in graph.groups()[1..].iter().zip(self.mask.iter()) {
             if maybe_mask_val.is_some() {
-                for token in group.tokens(tokens) {
+                for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
                         *mask_val = *mask_val && POSFilter::and(filter, &token.word);
                     }
@@ -108,7 +108,11 @@ impl DisambiguationRule {
         &self.id
     }
 
-    pub(crate) fn apply<'t>(&'t self, tokens: &[Token<'t>], tokenizer: &Tokenizer) -> Changes {
+    pub(crate) fn apply<'t>(
+        &'t self,
+        tokens: &MatchSentence<'t>,
+        tokenizer: &Tokenizer,
+    ) -> Changes {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
             return Changes::default();
         }
@@ -133,8 +137,10 @@ impl DisambiguationRule {
             for group_idx in GraphId::range(&self.start, &self.end) {
                 let group = graph.by_id(group_idx);
 
-                let group_byte_spans: HashSet<_> =
-                    group.tokens(graph.tokens()).map(|x| x.byte_span).collect();
+                let group_byte_spans: HashSet<_> = group
+                    .tokens(graph.sentence())
+                    .map(|x| x.byte_span)
+                    .collect();
 
                 byte_spans.push(group_byte_spans);
             }
@@ -147,15 +153,15 @@ impl DisambiguationRule {
 
     pub(crate) fn change<'t>(
         &'t self,
-        tokens: &mut Vec<IncompleteToken<'t>>,
-        tokenizer: &Tokenizer,
+        sentence: &mut IncompleteSentence<'t>,
+        tokenizer: &'t Tokenizer,
         changes: Changes,
     ) {
         log::info!("applying {}", self.id);
 
         for byte_spans in changes.0 {
             let mut groups = Vec::new();
-            let mut refs = tokens.iter_mut().collect::<Vec<_>>();
+            let mut refs = sentence.iter_mut().collect::<Vec<_>>();
 
             for group_byte_spans in byte_spans {
                 let mut group = Vec::new();
@@ -170,8 +176,11 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations
-                .apply(groups, tokenizer.lang_options().retain_last);
+            self.disambiguations.apply(
+                groups,
+                tokenizer.lang_options().retain_last,
+                tokenizer.tagger(),
+            );
         }
     }
 
@@ -187,31 +196,30 @@ impl DisambiguationRule {
             };
 
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let tokens_before =
+            let sentence_before =
                 tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
-            let finalized = finalize(tokens_before.clone());
-            let changes = self.apply(&finalized, tokenizer);
+            let sentence_before_complete = Sentence::new(sentence_before.clone());
+            let changes = self.apply(&MatchSentence::new(&sentence_before_complete), tokenizer);
 
-            let tokens_before: Vec<_> = tokens_before.into_iter().map(|x| x.0).collect();
-            let mut tokens_after: Vec<_> = tokens_before.clone();
+            let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut tokens_after, tokenizer, changes);
+                self.change(&mut sentence_after, tokenizer, changes);
             }
 
-            info!("Tokens: {:#?}", tokens_before);
+            info!("Tokens: {:#?}", sentence_before);
 
             let pass = match test {
                 disambiguation::DisambiguationExample::Unchanged(_) => {
-                    tokens_before == tokens_after
+                    sentence_before == sentence_after
                 }
                 disambiguation::DisambiguationExample::Changed(change) => {
-                    let _before = tokens_before
+                    let _before = sentence_before
                         .iter()
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
 
-                    let after = tokens_after
+                    let after = sentence_after
                         .iter()
                         .find(|x| x.char_span == change.char_span)
                         .unwrap();
@@ -238,10 +246,7 @@ impl DisambiguationRule {
             if !pass {
                 let error_str = format!(
                     "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
-                    self.id,
-                    test,
-                    tokens_before.into_iter().collect::<Vec<_>>(),
-                    tokens_after.into_iter().collect::<Vec<_>>(),
+                    self.id, test, sentence_before, sentence_after,
                 );
 
                 if tokenizer
@@ -267,25 +272,21 @@ pub struct Suggestions<'a, 't> {
     rule: &'a Rule,
     tokenizer: &'a Tokenizer,
     matches: EngineMatches<'a, 't>,
-    tokens: &'t [Token<'t>],
+    sentence: &'t MatchSentence<'t>,
 }
 
 impl<'a, 't> Iterator for Suggestions<'a, 't> {
     type Item = Suggestion;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.tokens.is_empty() {
-            return None;
-        }
-
         let rule = self.rule;
         let tokenizer = self.tokenizer;
-        let tokens = self.tokens;
+        let sentence = self.sentence;
         let (start, end) = (self.rule.start, self.rule.end);
 
         self.matches.find_map(|graph| {
             if let Some(unification) = &rule.unification {
-                if !unification.keep(&graph, tokens) {
+                if !unification.keep(&graph, sentence) {
                     return None;
                 }
             }
@@ -305,16 +306,16 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
             {
                 let first_token = graph.groups()[graph.get_index(start)..]
                     .iter()
-                    .find_map(|x| x.tokens(graph.tokens()).next())
+                    .find_map(|x| x.tokens(graph.sentence()).next())
                     .unwrap();
 
-                let idx = tokens
+                let idx = sentence
                     .iter()
                     .position(|x| std::ptr::eq(x, first_token))
                     .unwrap_or(0);
 
                 if idx > 0 {
-                    tokens[idx - 1].char_span.1
+                    sentence.index(idx - 1).char_span.1
                 } else {
                     start_group.char_span.0
                 }
@@ -328,8 +329,8 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
             if end < start {
                 return None;
             }
-            let text_before: String = tokens[0]
-                .sentence
+            let text_before: String = sentence
+                .text()
                 .chars()
                 .skip(start)
                 .take(end - start)
@@ -452,14 +453,14 @@ impl Rule {
 
     pub(crate) fn apply<'a, 't>(
         &'a self,
-        tokens: &'t [Token<'t>],
+        sentence: &'t MatchSentence<'t>,
         tokenizer: &'a Tokenizer,
     ) -> Suggestions<'a, 't> {
         Suggestions {
-            matches: self.engine.get_matches(tokens, self.start, self.end),
+            matches: self.engine.get_matches(sentence, self.start, self.end),
             rule: &self,
             tokenizer,
-            tokens,
+            sentence,
         }
     }
 
@@ -470,9 +471,11 @@ impl Rule {
 
         for test in self.examples.iter() {
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let tokens = finalize(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
-            info!("Tokens: {:#?}", tokens);
-            let suggestions: Vec<_> = self.apply(&tokens, tokenizer).collect();
+            let sentence = Sentence::new(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
+            info!("Sentence: {:#?}", sentence);
+            let suggestions: Vec<_> = self
+                .apply(&MatchSentence::new(&sentence), tokenizer)
+                .collect();
 
             let pass = if suggestions.len() > 1 {
                 false
