@@ -19,7 +19,7 @@ pub mod id;
 
 use engine::Engine;
 
-pub(crate) use engine::composition::MatchGraph;
+pub(crate) use engine::composition::{MatchGraph, MatchSentence};
 pub use grammar::Example;
 
 use self::{
@@ -196,7 +196,7 @@ impl DisambiguationRule {
                     .expect("test text must not be empty"),
                 Some(&self.id),
             );
-            let sentence_before_complete = Sentence::new(sentence_before.clone());
+            let sentence_before_complete = sentence_before.clone().into_sentence();
             let changes = self.apply(&MatchSentence::new(&sentence_before_complete));
 
             let mut sentence_after = sentence_before.clone();
@@ -462,13 +462,13 @@ impl Rule {
 
         for test in self.examples.iter() {
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence = Sentence::new(
-                tokenizer.disambiguate(
+            let sentence = tokenizer
+                .disambiguate(
                     tokenizer
                         .tokenize(&test.text())
                         .expect("test text must not be empty."),
-                ),
-            );
+                )
+                .into_sentence();
             info!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self.apply(&MatchSentence::new(&sentence)).collect();
 

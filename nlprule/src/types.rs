@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{hash_map, HashMap, HashSet},
-    fmt, iter,
+    fmt,
 };
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
@@ -94,6 +94,8 @@ pub mod owned {
     }
 }
 
+/// A incomplete sentence containing partially set information about the tokens.
+/// Can be converted to a complete sentence with [into_sentence][IncompleteSentence::into_sentence].
 #[derive(Derivative, Clone)]
 #[derivative(Debug, PartialEq)]
 pub struct IncompleteSentence<'t> {
@@ -104,7 +106,8 @@ pub struct IncompleteSentence<'t> {
 }
 
 impl<'t> IncompleteSentence<'t> {
-    pub fn new(tokens: Vec<IncompleteToken<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
+    /// Creates a new incomplete sentence.
+    pub(crate) fn new(tokens: Vec<IncompleteToken<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
         IncompleteSentence {
             text,
             tokens,
@@ -112,27 +115,53 @@ impl<'t> IncompleteSentence<'t> {
         }
     }
 
+    /// Gets the text of this sentence.
     pub fn text(&self) -> &'t str {
         self.text
     }
 
+    /// Returns an iterator over tokens by mutable reference.
     pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut IncompleteToken<'t>> {
         self.tokens.iter_mut()
     }
 
+    /// Returns an iterator over tokens by reference.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &IncompleteToken> {
         self.tokens.iter()
     }
 
+    /// Consumes `self` to return an iterator over tokens by value.
     pub fn into_iter(self) -> impl DoubleEndedIterator<Item = IncompleteToken<'t>> {
         self.tokens.into_iter()
     }
 
-    pub(crate) fn tagger(&self) -> &'t Tagger {
+    /// Gets the amount of tokens in this sentence.
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    /// Gets the tagger associated with this sentence.
+    pub fn tagger(&self) -> &'t Tagger {
         self.tagger
+    }
+
+    /// Converts this incomplete sentence into a [Sentence].
+    pub fn into_sentence(self) -> Sentence<'t> {
+        let tagger = self.tagger();
+
+        Sentence {
+            text: self.text(),
+            tagger,
+            tokens: self
+                .into_iter()
+                .map(|token| token.into_token(tagger))
+                .collect(),
+        }
     }
 }
 
+/// A Sentence. As opposed to [IncompleteSentence], all information is set and frozen.
+/// Always contains at least one token.
 #[derive(Derivative, Clone)]
 #[derivative(Debug, PartialEq)]
 pub struct Sentence<'t> {
@@ -143,79 +172,34 @@ pub struct Sentence<'t> {
 }
 
 impl<'t> Sentence<'t> {
-    pub fn new(sentence: IncompleteSentence<'t>) -> Self {
-        let tagger = sentence.tagger();
-
-        Sentence {
-            text: sentence.text(),
-            tagger,
-            tokens: sentence
-                .into_iter()
-                .map(|token| token.into_token(tagger))
-                .collect(),
-        }
-    }
-
+    /// Gets the tokens in this sentence.
     pub fn tokens(&self) -> &[Token<'t>] {
         &self.tokens
     }
 
+    /// Returns an iterator over tokens by reference.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Token> {
         self.tokens.iter()
     }
 
+    /// Consumes `self` to return an iterator over tokens by value.
     pub fn into_iter(self) -> impl DoubleEndedIterator<Item = Token<'t>> {
         self.tokens.into_iter()
     }
 
+    /// Gets the text of this sentence.
     pub fn text(&self) -> &'t str {
         self.text
     }
 
+    /// Gets the amount of tokens in this sentence.
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
 
+    /// Gets the tagger associated with this sentence.
     pub fn tagger(&self) -> &'t Tagger {
         self.tagger
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct MatchSentence<'t> {
-    sentence: &'t Sentence<'t>,
-    sent_start: &'t Token<'t>,
-}
-
-impl<'t> MatchSentence<'t> {
-    pub fn new(sentence: &'t Sentence<'t>) -> Self {
-        MatchSentence {
-            sentence,
-            sent_start: sentence.tagger.sent_start(),
-        }
-    }
-
-    pub fn index(&self, index: usize) -> &Token {
-        match index {
-            0 => &self.sent_start,
-            i => &self.sentence.tokens[i - 1],
-        }
-    }
-
-    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t Token> {
-        iter::once(self.sent_start).chain(self.sentence.iter())
-    }
-
-    pub fn len(&self) -> usize {
-        self.sentence.len() + 1
-    }
-
-    pub fn text(&self) -> &str {
-        self.sentence.text()
-    }
-
-    pub fn tagger(&self) -> &'t Tagger {
-        self.sentence.tagger()
     }
 }
 
@@ -348,6 +332,7 @@ pub struct IncompleteToken<'t> {
 }
 
 impl<'t> IncompleteToken<'t> {
+    /// Converts this incomplete token to a complete token.
     pub fn into_token(self, tagger: &'t Tagger) -> Token {
         let mut word = self.word.clone();
 

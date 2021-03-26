@@ -5,9 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 pub mod composition;
 
-use composition::{Composition, Group, MatchGraph};
-
-use self::composition::GraphId;
+use composition::{Composition, GraphId, Group, MatchGraph, MatchSentence};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TokenEngine {

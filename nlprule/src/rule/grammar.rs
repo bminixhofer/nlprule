@@ -1,4 +1,4 @@
-use super::engine::composition::{GraphId, MatchGraph, PosMatcher};
+use super::engine::composition::{GraphId, MatchGraph, MatchSentence, PosMatcher};
 use crate::types::*;
 use crate::utils::{self, regex::Regex};
 use serde::{Deserialize, Serialize};

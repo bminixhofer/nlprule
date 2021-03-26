@@ -1,8 +1,5 @@
+use crate::rule::{engine::composition::GraphId, MatchGraph, MatchSentence};
 use crate::utils::regex::Regex;
-use crate::{
-    rule::{engine::composition::GraphId, MatchGraph},
-    types::MatchSentence,
-};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 

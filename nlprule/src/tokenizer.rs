@@ -6,6 +6,7 @@
 
 use crate::{
     rule::id::{Index, Selector},
+    rule::MatchSentence,
     types::*,
     utils::{parallelism::MaybeParallelRefIterator, regex::Regex},
     Error,
@@ -145,7 +146,7 @@ impl Tokenizer {
         let mut i = 0;
 
         while i < n {
-            let complete_sentence = Sentence::new(sentence.clone());
+            let complete_sentence = sentence.clone().into_sentence();
             let match_sentence = MatchSentence::new(&complete_sentence);
 
             let result = self.rules[i..n]
@@ -297,6 +298,6 @@ impl Tokenizer {
     pub fn pipe<'t>(&'t self, text: &'t str) -> impl DoubleEndedIterator<Item = Sentence<'t>> {
         self.sentencize(text)
             .into_iter()
-            .map(move |sentence| Sentence::new(self.disambiguate(sentence)))
+            .map(move |sentence| self.disambiguate(sentence).into_sentence())
     }
 }

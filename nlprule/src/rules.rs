@@ -2,8 +2,7 @@
 
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{rule::id::Selector, tokenizer::Tokenizer};
-use crate::{rule::Rule, Error};
+use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, tokenizer::Tokenizer, Error};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{

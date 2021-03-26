@@ -1,4 +1,6 @@
-use crate::{types::*, utils::regex::Regex};
+use std::iter;
+
+use crate::{tokenizer::tag::Tagger, types::*, utils::regex::Regex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -355,6 +357,44 @@ impl GraphId {
     /// might not be valid!
     pub fn range(lower: &GraphId, upper: &GraphId) -> impl DoubleEndedIterator<Item = GraphId> {
         (lower.0..upper.0 + 1).map(GraphId)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchSentence<'t> {
+    sentence: &'t Sentence<'t>,
+    sent_start: &'t Token<'t>,
+}
+
+impl<'t> MatchSentence<'t> {
+    pub fn new(sentence: &'t Sentence<'t>) -> Self {
+        MatchSentence {
+            sentence,
+            sent_start: sentence.tagger().sent_start(),
+        }
+    }
+
+    pub fn index(&self, index: usize) -> &Token {
+        match index {
+            0 => &self.sent_start,
+            i => &self.sentence.tokens()[i - 1],
+        }
+    }
+
+    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t Token> {
+        iter::once(self.sent_start).chain(self.sentence.iter())
+    }
+
+    pub fn len(&self) -> usize {
+        self.sentence.len() + 1
+    }
+
+    pub fn text(&self) -> &str {
+        self.sentence.text()
+    }
+
+    pub fn tagger(&self) -> &'t Tagger {
+        self.sentence.tagger()
     }
 }
 
