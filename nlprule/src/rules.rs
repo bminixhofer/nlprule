@@ -106,7 +106,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given sentence by checking all rules.
-    pub fn apply(&self, sentence: &Sentence, tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    pub fn apply(&self, sentence: &Sentence) -> Vec<Suggestion> {
         let sentence = MatchSentence::new(sentence);
 
         let mut output: Vec<(usize, Suggestion)> = self
@@ -117,7 +117,7 @@ impl Rules {
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
-                for suggestion in rule.apply(&sentence, tokenizer) {
+                for suggestion in rule.apply(&sentence) {
                     output.push((i, suggestion));
                 }
 
@@ -156,12 +156,10 @@ impl Rules {
 
         // get suggestions sentence by sentence
         for sentence in tokenizer.pipe(text) {
-            suggestions.extend(self.apply(&sentence, tokenizer).into_iter().map(
-                |mut suggestion| {
-                    suggestion.rshift(char_offset);
-                    suggestion
-                },
-            ));
+            suggestions.extend(self.apply(&sentence).into_iter().map(|mut suggestion| {
+                suggestion.rshift(char_offset);
+                suggestion
+            }));
 
             char_offset += sentence.text().chars().count();
         }

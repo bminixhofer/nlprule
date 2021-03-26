@@ -710,7 +710,6 @@ pub struct Chunker {
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
     pub fn apply(&self, sentence: &mut IncompleteSentence) {
-        debug_assert!('’'.len_utf8() == '\''.len_utf8(),); // replacement must not change char indices
         let text = sentence.text().replace('’', "\'");
 
         let mut bi_to_ci: DefaultHashMap<usize, usize> = text

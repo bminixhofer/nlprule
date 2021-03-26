@@ -1,9 +1,6 @@
 use super::engine::composition::{GraphId, MatchGraph, PosMatcher};
 use crate::types::*;
-use crate::{
-    tokenizer::Tokenizer,
-    utils::{self, regex::Regex},
-};
+use crate::utils::{self, regex::Regex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -64,18 +61,18 @@ pub struct PosReplacer {
 }
 
 impl PosReplacer {
-    fn apply(&self, text: &str, tokenizer: &Tokenizer) -> Option<String> {
-        let mut candidates: Vec<_> = tokenizer
+    fn apply(&self, text: &str, sentence: &MatchSentence) -> Option<String> {
+        let mut candidates: Vec<_> = sentence
             .tagger()
             .get_tags(text)
             .iter()
             .map(|x| {
-                let group_words = tokenizer
+                let group_words = sentence
                     .tagger()
                     .get_group_members(&x.lemma.as_ref().to_string());
                 let mut data = Vec::new();
                 for word in group_words {
-                    if let Some(i) = tokenizer
+                    if let Some(i) = sentence
                         .tagger()
                         .get_tags(word)
                         .iter()
@@ -107,11 +104,11 @@ pub struct Match {
 }
 
 impl Match {
-    fn apply(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> Option<String> {
-        let text = graph.by_id(self.id).text(graph.sentence().text());
+    fn apply(&self, sentence: &MatchSentence, graph: &MatchGraph) -> Option<String> {
+        let text = graph.by_id(self.id).text(sentence.text());
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
-            replacer.apply(text, tokenizer)?
+            replacer.apply(text, sentence)?
         } else {
             text.to_string()
         };
@@ -147,8 +144,8 @@ pub struct Synthesizer {
 impl Synthesizer {
     pub fn apply(
         &self,
+        sentence: &MatchSentence,
         graph: &MatchGraph,
-        tokenizer: &Tokenizer,
         start: GraphId,
         _end: GraphId,
     ) -> Option<String> {
@@ -163,7 +160,7 @@ impl Synthesizer {
             match part {
                 SynthesizerPart::Text(t) => output.push(t.clone()),
                 SynthesizerPart::Match(m) => {
-                    output.push(m.apply(graph, tokenizer)?);
+                    output.push(m.apply(sentence, graph)?);
                 }
             }
         }
@@ -176,7 +173,7 @@ impl Synthesizer {
         let make_uppercase = !starts_with_conversion
             && graph.groups()[graph.get_index(start)..]
                 .iter()
-                .find_map(|x| x.tokens(graph.sentence()).next())
+                .find_map(|x| x.tokens(sentence).next())
                 .map(|first_token| {
                     (self.use_titlecase_adjust
                         && first_token

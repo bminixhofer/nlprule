@@ -175,6 +175,10 @@ impl<'t> Sentence<'t> {
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
+
+    pub fn tagger(&self) -> &'t Tagger {
+        self.tagger
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,6 +212,10 @@ impl<'t> MatchSentence<'t> {
 
     pub fn text(&self) -> &str {
         self.sentence.text()
+    }
+
+    pub fn tagger(&self) -> &'t Tagger {
+        self.sentence.tagger()
     }
 }
 

@@ -152,7 +152,7 @@ impl Tokenizer {
                 .maybe_par_iter()
                 .enumerate()
                 .filter_map(|(j, rule)| {
-                    let changes = rule.apply(&match_sentence, &self);
+                    let changes = rule.apply(&match_sentence);
                     if changes.is_empty() {
                         None
                     } else {
