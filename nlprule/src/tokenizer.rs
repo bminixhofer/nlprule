@@ -227,18 +227,17 @@ impl Tokenizer {
 
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
     // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
-    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> IncompleteSentence<'t> {
-        assert!(
-            !sentence.trim().is_empty(),
-            "By definition, a sentence must contain at least one non-whitespace character."
-        );
+    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Option<IncompleteSentence<'t>> {
+        if sentence.trim().is_empty() {
+            return None;
+        }
 
         let token_strs = self.get_token_strs(sentence);
 
         let mut tokens: Vec<_> = token_strs
             .iter()
             .enumerate()
-            .filter(|(_, token_text)| token_text.trim().is_empty())
+            .filter(|(_, token_text)| !token_text.trim().is_empty())
             .map(|(i, token_text)| {
                 let byte_start = token_text.as_ptr() as usize - sentence.as_ptr() as usize;
                 let char_start = sentence[..byte_start].chars().count();
@@ -280,7 +279,7 @@ impl Tokenizer {
             multiword_tagger.apply(&mut sentence);
         }
 
-        sentence
+        Some(sentence)
     }
 
     /// Splits the text into sentences and tokenizes each sentence.
@@ -291,7 +290,7 @@ impl Tokenizer {
         self.sentencizer
             .split(text)
             .into_iter()
-            .map(move |sentence| self.tokenize(sentence))
+            .filter_map(move |sentence| self.tokenize(sentence))
     }
 
     /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.

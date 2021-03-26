@@ -326,9 +326,11 @@ impl Group {
         let start = self.char_span.0;
         let end = self.char_span.1;
 
-        sentence
-            .iter()
-            .filter(move |x| x.char_span.0 >= start && x.char_span.1 <= end)
+        sentence.iter().filter(move |x| {
+            x.char_span.1 > x.char_span.0 // special tokens with zero range (e. g. SENT_START) can not be part of groups
+                && x.char_span.0 >= start
+                && x.char_span.1 <= end
+        })
     }
 
     pub fn text<'a>(&self, text: &'a str) -> &'a str {

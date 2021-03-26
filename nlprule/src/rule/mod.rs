@@ -190,8 +190,12 @@ impl DisambiguationRule {
             };
 
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence_before =
-                tokenizer.disambiguate_up_to_id(tokenizer.tokenize(text), Some(&self.id));
+            let sentence_before = tokenizer.disambiguate_up_to_id(
+                tokenizer
+                    .tokenize(text)
+                    .expect("test text must not be empty"),
+                Some(&self.id),
+            );
             let sentence_before_complete = Sentence::new(sentence_before.clone());
             let changes = self.apply(&MatchSentence::new(&sentence_before_complete));
 
@@ -458,7 +462,13 @@ impl Rule {
 
         for test in self.examples.iter() {
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence = Sentence::new(tokenizer.disambiguate(tokenizer.tokenize(&test.text())));
+            let sentence = Sentence::new(
+                tokenizer.disambiguate(
+                    tokenizer
+                        .tokenize(&test.text())
+                        .expect("test text must not be empty."),
+                ),
+            );
             info!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self.apply(&MatchSentence::new(&sentence)).collect();
 

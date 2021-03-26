@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{hash_map, HashMap, HashSet},
-    iter,
+    fmt, iter,
 };
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
@@ -220,8 +220,20 @@ impl<'t> MatchSentence<'t> {
 }
 
 /// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
+
+impl<'t> fmt::Debug for WordId<'t> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id_str = if let Some(id) = self.1 {
+            id.0.to_string()
+        } else {
+            "none".into()
+        };
+
+        write!(f, "{:?}<id={}>", self.0, id_str)
+    }
+}
 
 impl<'t> WordId<'t> {
     pub(crate) fn to_owned_id(&self) -> owned::WordId {
@@ -240,8 +252,14 @@ impl<'t> AsRef<str> for WordId<'t> {
 }
 
 /// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
+
+impl<'t> fmt::Debug for PosId<'t> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}<id={}>", self.0, self.1 .0)
+    }
+}
 
 impl<'t> PosId<'t> {
     /// Converts this ID to an owned ID.

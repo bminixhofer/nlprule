@@ -14,12 +14,13 @@ lazy_static! {
 
 #[test]
 fn can_tokenize_empty_text() {
-    TOKENIZER.pipe("");
+    let sentences: Vec<_> = TOKENIZER.pipe("").collect();
+    assert!(sentences.is_empty());
 }
 
 #[quickcheck]
 fn can_tokenize_anything(text: String) -> bool {
-    TOKENIZER.pipe(&text);
+    let _: Vec<_> = TOKENIZER.pipe(&text).collect();
     true
 }
 
