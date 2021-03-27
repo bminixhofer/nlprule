@@ -106,6 +106,17 @@ pub struct IncompleteSentence<'t> {
     span: Span,
 }
 
+impl<'t> IntoIterator for IncompleteSentence<'t> {
+    type Item = IncompleteToken<'t>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.tokens.into_iter()
+    }
+}
+
+// is_empty does not make sense because there is always at least one token
+#[allow(clippy::clippy::len_without_is_empty)]
 impl<'t> IncompleteSentence<'t> {
     /// Creates a new incomplete sentence.
     pub(crate) fn new(tokens: Vec<IncompleteToken<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
@@ -130,11 +141,6 @@ impl<'t> IncompleteSentence<'t> {
     /// Returns an iterator over tokens by reference.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &IncompleteToken> {
         self.tokens.iter()
-    }
-
-    /// Consumes `self` to return an iterator over tokens by value.
-    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = IncompleteToken<'t>> {
-        self.tokens.into_iter()
     }
 
     /// Gets the amount of tokens in this sentence.
@@ -192,6 +198,17 @@ pub struct Sentence<'t> {
     span: Span,
 }
 
+impl<'t> IntoIterator for Sentence<'t> {
+    type Item = Token<'t>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.tokens.into_iter()
+    }
+}
+
+// is_empty does not make sense because there is always at least one token
+#[allow(clippy::clippy::len_without_is_empty)]
 impl<'t> Sentence<'t> {
     /// Gets the tokens in this sentence.
     pub fn tokens(&self) -> &[Token<'t>] {
@@ -201,11 +218,6 @@ impl<'t> Sentence<'t> {
     /// Returns an iterator over tokens by reference.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Token> {
         self.tokens.iter()
-    }
-
-    /// Consumes `self` to return an iterator over tokens by value.
-    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = Token<'t>> {
-        self.tokens.into_iter()
     }
 
     /// Gets the text of this sentence.
@@ -624,6 +636,11 @@ impl Span {
     /// Gets the char range.
     pub fn char(&self) -> &Range<usize> {
         &self.char
+    }
+
+    /// Checks whether this span is empty.y
+    pub fn is_empty(&self) -> bool {
+        self.end() == self.start()
     }
 
     /// Gets the length of this span.

@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     rule::{
-        disambiguation::POSFilter,
+        disambiguation::PosFilter,
         engine::{
             composition::{GraphId, Matcher, PosMatcher, TextMatcher},
             Engine,
@@ -505,9 +505,9 @@ impl chunk::Chunker {
     }
 }
 
-impl POSFilter {
+impl PosFilter {
     pub(in crate::compile) fn new(matcher: PosMatcher) -> Self {
-        POSFilter { matcher }
+        PosFilter { matcher }
     }
 }
 

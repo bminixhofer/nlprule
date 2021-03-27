@@ -23,7 +23,7 @@ pub(crate) use engine::composition::{MatchGraph, MatchSentence};
 pub use grammar::Example;
 
 use self::{
-    disambiguation::POSFilter,
+    disambiguation::PosFilter,
     engine::{composition::GraphId, EngineMatches},
     id::Index,
 };
@@ -34,7 +34,7 @@ use self::{
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Unification {
     pub(crate) mask: Vec<Option<bool>>,
-    pub(crate) filters: Vec<Vec<POSFilter>>,
+    pub(crate) filters: Vec<Vec<PosFilter>>,
 }
 
 impl Unification {
@@ -48,7 +48,7 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && POSFilter::and(filter, token.word());
+                        *mask_val = *mask_val && PosFilter::and(filter, token.word());
                     }
                 }
             }

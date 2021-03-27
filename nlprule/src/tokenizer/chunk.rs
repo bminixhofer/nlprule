@@ -762,7 +762,7 @@ impl Chunker {
                         break;
                     }
 
-                    if sentence
+                    let contains_nns = sentence
                         .iter()
                         .find(|token| *token.span().char() == char_span)
                         .map(|token| {
@@ -772,8 +772,9 @@ impl Chunker {
                                 .iter()
                                 .any(|tag| tag.pos.as_ref() == "NNS")
                         })
-                        .unwrap_or(false)
-                    {
+                        .unwrap_or(false);
+
+                    if contains_nns {
                         number = "plural";
                     }
                 }

@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use super::engine::composition::PosMatcher;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct POSFilter {
+pub struct PosFilter {
     pub matcher: PosMatcher,
 }
 
-impl POSFilter {
+impl PosFilter {
     fn is_word_data_match(&self, data: &WordData) -> bool {
         self.matcher.is_match(&data.pos)
     }
@@ -41,11 +41,11 @@ impl POSFilter {
 
 #[derive(Serialize, Deserialize)]
 pub enum Disambiguation {
-    Remove(Vec<either::Either<owned::WordData, POSFilter>>),
+    Remove(Vec<either::Either<owned::WordData, PosFilter>>),
     Add(Vec<owned::WordData>),
     Replace(Vec<owned::WordData>),
-    Filter(Vec<Option<either::Either<owned::WordData, POSFilter>>>),
-    Unify(Vec<Vec<POSFilter>>, Vec<Option<POSFilter>>, Vec<bool>),
+    Filter(Vec<Option<either::Either<owned::WordData, PosFilter>>>),
+    Unify(Vec<Vec<PosFilter>>, Vec<Option<PosFilter>>, Vec<bool>),
     Nop,
 }
 
@@ -162,7 +162,7 @@ impl Disambiguation {
                             let finalized: Token = (*token).clone().into_token(tagger);
 
                             for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                                *mask_val = *mask_val && POSFilter::and(filter, finalized.word());
+                                *mask_val = *mask_val && PosFilter::and(filter, finalized.word());
                             }
                         }
                     }
@@ -192,7 +192,7 @@ impl Disambiguation {
                         for token in group.into_iter() {
                             let before = token.word().clone();
 
-                            POSFilter::apply(&to_apply, token.word_mut());
+                            PosFilter::apply(&to_apply, token.word_mut());
 
                             if let Some(disambig) = disambig {
                                 disambig.keep(token.word_mut());

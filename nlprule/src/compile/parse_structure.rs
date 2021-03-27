@@ -644,9 +644,9 @@ fn parse_features(
     pattern: &structure::Pattern,
     unifications: &Option<Vec<structure::Unification>>,
     info: &mut BuildInfo,
-) -> Vec<Vec<POSFilter>> {
+) -> Vec<Vec<PosFilter>> {
     let mut filters = Vec::new();
-    let mut parse_feature = |id: &str| -> Vec<POSFilter> {
+    let mut parse_feature = |id: &str| -> Vec<PosFilter> {
         let unification = unifications
             .as_ref()
             .unwrap()
@@ -955,9 +955,9 @@ impl owned::WordData {
     }
 }
 
-fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> POSFilter {
+fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> PosFilter {
     match postag_regexp.as_deref() {
-        Some("yes") => POSFilter::new(PosMatcher::new(
+        Some("yes") => PosFilter::new(PosMatcher::new(
             Matcher::new_regex(
                 Regex::from_java_regex(&postag, true, true).unwrap(),
                 false,
@@ -965,7 +965,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
             ),
             info,
         )),
-        Some(_) | None => POSFilter::new(PosMatcher::new(
+        Some(_) | None => PosFilter::new(PosMatcher::new(
             Matcher::new_string(either::Left(postag.into()), false, false, true),
             info,
         )),
