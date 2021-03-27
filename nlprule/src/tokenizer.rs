@@ -90,8 +90,8 @@ impl Default for TokenizerLangOptions {
     }
 }
 
-/// An iterator over [IncompleteSentence]s.
-pub struct SentenceIter<'t> {
+/// An iterator over [IncompleteSentence]s. Has the same properties as [SentenceIter].
+pub struct IncompleteSentenceIter<'t> {
     text: &'t str,
     splits: Vec<Range<usize>>,
     tokenizer: &'t Tokenizer,
@@ -99,7 +99,7 @@ pub struct SentenceIter<'t> {
     position: Position,
 }
 
-impl<'t> Iterator for SentenceIter<'t> {
+impl<'t> Iterator for IncompleteSentenceIter<'t> {
     type Item = IncompleteSentence<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -129,6 +129,25 @@ impl<'t> Iterator for SentenceIter<'t> {
         };
 
         sentence
+    }
+}
+
+/// An iterator over [Sentence]s. Has some key properties:
+/// - Preceding whitespace is always included so the first sentence always starts at byte and char index zero.
+/// - There are no gaps between sentences i.e. `sentence[i - 1].span().end() == sentence[i].span().start()`.
+/// - Behavior for trailing whitespace is not defined. Can be included in the last sentence or not be part of any sentence.
+pub struct SentenceIter<'t> {
+    inner: IncompleteSentenceIter<'t>,
+    tokenizer: &'t Tokenizer,
+}
+
+impl<'t> Iterator for SentenceIter<'t> {
+    type Item = Sentence<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|sentence| self.tokenizer.disambiguate(sentence).into_sentence())
     }
 }
 
@@ -329,8 +348,8 @@ impl Tokenizer {
     }
 
     /// Splits the text into sentences and tokenizes each sentence.
-    pub fn sentencize<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
-        SentenceIter {
+    pub fn sentencize<'t>(&'t self, text: &'t str) -> IncompleteSentenceIter<'t> {
+        IncompleteSentenceIter {
             text,
             splits: self.sentencizer.split_ranges(text),
             tokenizer: &self,
@@ -340,8 +359,10 @@ impl Tokenizer {
     }
 
     /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.
-    pub fn pipe<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Sentence<'t>> {
-        self.sentencize(text)
-            .map(move |sentence| self.disambiguate(sentence).into_sentence())
+    pub fn pipe<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
+        SentenceIter {
+            inner: self.sentencize(text),
+            tokenizer: &self,
+        }
     }
 }

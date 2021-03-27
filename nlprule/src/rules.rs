@@ -138,13 +138,10 @@ impl Rules {
         output
             .into_iter()
             .filter_map(|(_, suggestion)| {
-                if mask[suggestion.span().char().start..suggestion.span().char().end]
-                    .iter()
-                    .all(|x| !x)
-                {
-                    mask[suggestion.span().char().start..suggestion.span().char().end]
-                        .iter_mut()
-                        .for_each(|x| *x = true);
+                let span = suggestion.span().clone().lshift(sentence.span().start());
+
+                if mask[span.char().clone()].iter().all(|x| !x) {
+                    mask[span.char().clone()].iter_mut().for_each(|x| *x = true);
                     Some(suggestion)
                 } else {
                     None

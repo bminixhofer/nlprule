@@ -327,7 +327,11 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
             if end < start {
                 return None;
             }
-            let text_before = &sentence.text()[start.byte()..end.byte()];
+
+            let text_before = &sentence.text()[Span::from_positions(start, end)
+                .lshift(sentence.span().start())
+                .byte()
+                .clone()];
 
             // fix e. g. "Super , dass"
             let replacements: Vec<String> = replacements

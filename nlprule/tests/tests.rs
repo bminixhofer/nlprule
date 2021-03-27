@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use lazy_static::lazy_static;
-use nlprule::{rule::id::Category, Rules, Tokenizer};
+use nlprule::{rule::id::Category, types::Position, Rules, Tokenizer};
 use quickcheck_macros::quickcheck;
 
 const TOKENIZER_PATH: &str = "../storage/en_tokenizer.bin";
@@ -39,6 +39,74 @@ fn handles_whitespace_correctly() {
 fn can_tokenize_anything(text: String) -> bool {
     let _: Vec<_> = TOKENIZER.pipe(&text).collect();
     true
+}
+
+#[test]
+fn suggest_indices_are_relative_to_input_text() {
+    let suggestions = RULES.suggest(
+        "I can due his homework for 10€. I can due his homework.",
+        &*TOKENIZER,
+    );
+
+    assert_eq!(*suggestions[0].span().char(), 6..9);
+    assert_eq!(*suggestions[0].span().byte(), 6..9);
+
+    assert_eq!(*suggestions[1].span().char(), 38..41);
+    assert_eq!(
+        *suggestions[1].span().byte(),
+        38 + '€'.len_utf8() - 1..41 + '€'.len_utf8() - 1
+    );
+}
+
+#[test]
+fn sentence_spans_correct() {
+    let text = "A short test. A test with emoji 😊.";
+
+    let sentences: Vec<_> = TOKENIZER.pipe(text).collect();
+    assert_eq!(sentences.len(), 2);
+
+    assert_eq!(*sentences[0].span().char(), 0..14);
+    assert_eq!(*sentences[0].span().byte(), 0..14);
+
+    assert_eq!(*sentences[1].span().char(), 14..34);
+    assert_eq!(*sentences[1].span().byte(), 14..37);
+}
+
+#[test]
+fn token_spans_correct() {
+    let text = "A short test. A test with emoji 😊.";
+
+    let tokens: Vec<_> = TOKENIZER
+        .pipe(text)
+        .map(|x| x.into_iter())
+        .flatten()
+        .collect();
+    assert_eq!(*tokens[0].span().byte(), 0..1);
+    assert_eq!(*tokens[0].span().char(), 0..1);
+
+    assert_eq!(*tokens[2].span().char(), 8..12);
+    assert_eq!(*tokens[2].span().byte(), 8..12);
+
+    assert_eq!(*tokens[tokens.len() - 2].span().char(), 32..33);
+    assert_eq!(*tokens[tokens.len() - 2].span().byte(), 32..36);
+
+    assert_eq!(*tokens[tokens.len() - 1].span().char(), 33..34);
+    assert_eq!(*tokens[tokens.len() - 1].span().byte(), 36..37);
+}
+
+#[quickcheck]
+fn no_gaps_between_sentences(text: String) {
+    let mut prev_pos = Position::default();
+    let mut contains_sentence = false;
+
+    for sentence in TOKENIZER.pipe(&text) {
+        assert_eq!(sentence.span().start(), prev_pos);
+        prev_pos += sentence.span().len();
+
+        contains_sentence = true;
+    }
+
+    assert_eq!(contains_sentence, !text.trim().is_empty());
 }
 
 #[test]

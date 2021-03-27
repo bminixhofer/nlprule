@@ -7,7 +7,7 @@ use std::{
     borrow::Cow,
     collections::{hash_map, HashMap, HashSet},
     fmt,
-    ops::{Add, AddAssign, Range},
+    ops::{Add, AddAssign, Range, Sub},
 };
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
@@ -548,6 +548,17 @@ impl Add for Position {
     }
 }
 
+impl Sub for Position {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            byte: self.byte.saturating_sub(other.byte),
+            char: self.char.saturating_sub(other.char),
+        }
+    }
+}
+
 impl Position {
     /// Gets the byte offset of this position.
     pub fn byte(&self) -> usize {
@@ -615,6 +626,11 @@ impl Span {
         &self.char
     }
 
+    /// Gets the length of this span.
+    pub fn len(&self) -> Position {
+        self.end() - self.start()
+    }
+
     /// Sets the start position.
     pub fn set_start(&mut self, start: Position) {
         self.byte.start = start.byte();
@@ -634,6 +650,17 @@ impl Span {
 
         self.char.start += position.char();
         self.char.end += position.char();
+        self
+    }
+
+    /// Shift the span left by the specified amount.
+    /// Clips at zero if the resulting span would have a negative component.
+    pub fn lshift(mut self, position: Position) -> Self {
+        self.byte.start = self.byte.start.saturating_sub(position.byte());
+        self.byte.end = self.byte.end.saturating_sub(position.byte());
+
+        self.char.start = self.char.start.saturating_sub(position.char());
+        self.char.end = self.char.end.saturating_sub(position.char());
         self
     }
 }
