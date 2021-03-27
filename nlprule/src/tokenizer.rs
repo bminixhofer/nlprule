@@ -15,6 +15,7 @@ use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
+    ops::Range,
     path::Path,
     sync::Arc,
 };
@@ -86,6 +87,48 @@ impl Default for TokenizerLangOptions {
             extra_split_chars: Vec::new(),
             extra_join_regexes: Vec::new(),
         }
+    }
+}
+
+/// An iterator over [IncompleteSentence]s.
+pub struct SentenceIter<'t> {
+    text: &'t str,
+    splits: Vec<Range<usize>>,
+    tokenizer: &'t Tokenizer,
+    index: usize,
+    position: Position,
+}
+
+impl<'t> Iterator for SentenceIter<'t> {
+    type Item = IncompleteSentence<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.splits.len() {
+            return None;
+        }
+
+        let mut range = self.splits[self.index].clone();
+        self.index += 1;
+
+        // as long as the current sentence contains only whitespace, add the next sentence
+        // in practice, this might never happen, but we can not make any assumption about
+        // SRX rule behavior here.
+        while self.text[range.clone()].trim().is_empty() && self.index < self.splits.len() {
+            range.end = self.splits[self.index].end;
+            self.index += 1;
+        }
+
+        let sentence = self
+            .tokenizer
+            .tokenize(&self.text[range.clone()])
+            .map(|x| x.rshift(self.position));
+
+        self.position += Position {
+            char: self.text[range.clone()].chars().count(),
+            byte: range.len(),
+        };
+
+        sentence
     }
 }
 
@@ -248,8 +291,8 @@ impl Tokenizer {
                 let is_sentence_start = i == 0;
                 let is_sentence_end = i == token_strs.len() - 1;
 
-                IncompleteToken {
-                    word: Word::new_with_tags(
+                IncompleteToken::new(
+                    Word::new_with_tags(
                         self.tagger.id_word(trimmed.into()),
                         self.tagger.get_tags_with_options(
                             trimmed,
@@ -257,18 +300,20 @@ impl Tokenizer {
                             None,
                         ),
                     ),
-                    char_span: (char_start, char_start + token_text.chars().count()),
-                    byte_span: (byte_start, byte_start + token_text.len()),
+                    Span::new(
+                        byte_start..byte_start + token_text.len(),
+                        char_start..char_start + token_text.chars().count(),
+                    ),
                     is_sentence_end,
-                    has_space_before: sentence[..byte_start].ends_with(char::is_whitespace),
-                    chunks: Vec::new(),
-                    multiword_data: None,
-                }
+                    sentence[..byte_start].ends_with(char::is_whitespace),
+                    Vec::new(),
+                    None,
+                )
             })
             .collect();
 
         let last_idx = tokens.len() - 1;
-        tokens[last_idx].is_sentence_end = true;
+        *tokens[last_idx].is_sentence_end_mut() = true;
 
         let mut sentence = IncompleteSentence::new(tokens, sentence, &self.tagger);
 
@@ -284,20 +329,19 @@ impl Tokenizer {
     }
 
     /// Splits the text into sentences and tokenizes each sentence.
-    pub fn sentencize<'t>(
-        &'t self,
-        text: &'t str,
-    ) -> impl DoubleEndedIterator<Item = IncompleteSentence<'t>> {
-        self.sentencizer
-            .split(text)
-            .into_iter()
-            .filter_map(move |sentence| self.tokenize(sentence))
+    pub fn sentencize<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
+        SentenceIter {
+            text,
+            splits: self.sentencizer.split_ranges(text),
+            tokenizer: &self,
+            index: 0,
+            position: Position::default(),
+        }
     }
 
     /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.
-    pub fn pipe<'t>(&'t self, text: &'t str) -> impl DoubleEndedIterator<Item = Sentence<'t>> {
+    pub fn pipe<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Sentence<'t>> {
         self.sentencize(text)
-            .into_iter()
             .map(move |sentence| self.disambiguate(sentence).into_sentence())
     }
 }

@@ -9,8 +9,8 @@ use crate::{
 use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::fmt;
+use std::{collections::HashSet, ops::Range};
 
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
@@ -48,7 +48,7 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && POSFilter::and(filter, &token.word);
+                        *mask_val = *mask_val && POSFilter::and(filter, token.word());
                     }
                 }
             }
@@ -94,7 +94,7 @@ pub struct DisambiguationRule {
 }
 
 #[derive(Default)]
-pub(crate) struct Changes(Vec<Vec<HashSet<(usize, usize)>>>);
+pub(crate) struct Changes(Vec<Vec<HashSet<Range<usize>>>>);
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
@@ -133,8 +133,10 @@ impl DisambiguationRule {
             for group_idx in GraphId::range(&self.start, &self.end) {
                 let group = graph.by_id(group_idx);
 
-                let group_byte_spans: HashSet<_> =
-                    group.tokens(sentence).map(|x| x.byte_span).collect();
+                let group_byte_spans: HashSet<_> = group
+                    .tokens(sentence)
+                    .map(|x| x.span().byte().clone())
+                    .collect();
 
                 byte_spans.push(group_byte_spans);
             }
@@ -162,7 +164,7 @@ impl DisambiguationRule {
 
                 while let Some(i) = refs
                     .iter()
-                    .position(|x| group_byte_spans.contains(&x.byte_span))
+                    .position(|x| group_byte_spans.contains(&x.span().byte()))
                 {
                     group.push(refs.remove(i));
                 }
@@ -214,16 +216,16 @@ impl DisambiguationRule {
                 disambiguation::DisambiguationExample::Changed(change) => {
                     let _before = sentence_before
                         .iter()
-                        .find(|x| x.char_span == change.char_span)
+                        .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
                     let after = sentence_after
                         .iter()
-                        .find(|x| x.char_span == change.char_span)
+                        .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
                     let unordered_tags = after
-                        .word
+                        .word()
                         .tags
                         .iter()
                         .map(|x| x.to_owned_word_data())
@@ -236,7 +238,7 @@ impl DisambiguationRule {
                         .iter()
                         .collect::<HashSet<&owned::WordData>>();
 
-                    after.word.text == change.after.text.as_ref_id()
+                    after.word().text == change.after.text.as_ref_id()
                         && unordered_tags == unordered_tags_change
                 }
             };
@@ -311,26 +313,21 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
                     .unwrap_or(0);
 
                 if idx > 0 {
-                    sentence.index(idx - 1).char_span.1
+                    sentence.index(idx - 1).span().end()
                 } else {
-                    start_group.char_span.0
+                    start_group.span.start()
                 }
             } else {
-                start_group.char_span.0
+                start_group.span.start()
             };
-            let end = end_group.char_span.1;
+            let end = end_group.span.end();
 
             // this should never happen, but just return None instead of raising an Error
             // `end` COULD be equal to `start` if the suggestion is to insert text at this position
             if end < start {
                 return None;
             }
-            let text_before: String = sentence
-                .text()
-                .chars()
-                .skip(start)
-                .take(end - start)
-                .collect();
+            let text_before = &sentence.text()[start.byte()..end.byte()];
 
             // fix e. g. "Super , dass"
             let replacements: Vec<String> = replacements
@@ -340,16 +337,14 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
                 .collect();
 
             if !replacements.is_empty() {
-                Some(Suggestion {
-                    message: rule
-                        .message
+                Some(Suggestion::new(
+                    rule.id.to_string(),
+                    rule.message
                         .apply(sentence, &graph, rule.start, rule.end)
                         .expect("Rules must have a message."),
-                    source: rule.id.to_string(),
-                    start,
-                    end,
+                    Span::from_positions(start, end),
                     replacements,
-                })
+                ))
             } else {
                 None
             }

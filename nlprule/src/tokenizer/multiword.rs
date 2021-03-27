@@ -50,11 +50,11 @@ impl MultiwordTagger {
             .enumerate()
             .map(|(i, x)| {
                 start_indices.insert(byte_index, i);
-                byte_index += x.word.text.0.len();
+                byte_index += x.word().text.0.len();
                 end_indices.insert(byte_index, i);
                 byte_index += " ".len();
 
-                x.word.text.0.as_ref()
+                x.word().text.0.as_ref()
             })
             .collect::<Vec<_>>()
             .join(" ");
@@ -66,7 +66,7 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
-                    token.multiword_data = Some(WordData::new(
+                    *token.multiword_data_mut() = Some(WordData::new(
                         tagger.id_word(word.as_str().into()),
                         pos.as_ref_id(),
                     ));

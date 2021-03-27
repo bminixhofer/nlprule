@@ -125,15 +125,24 @@ impl Rules {
             .flatten()
             .collect();
 
-        output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
+        output.sort_by(|(ia, a), (ib, b)| {
+            a.span()
+                .char()
+                .start
+                .cmp(&b.span().char().start)
+                .then_with(|| ib.cmp(ia))
+        });
 
         let mut mask = vec![false; sentence.text().chars().count()];
 
         output
             .into_iter()
             .filter_map(|(_, suggestion)| {
-                if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
-                    mask[suggestion.start..suggestion.end]
+                if mask[suggestion.span().char().start..suggestion.span().char().end]
+                    .iter()
+                    .all(|x| !x)
+                {
+                    mask[suggestion.span().char().start..suggestion.span().char().end]
                         .iter_mut()
                         .for_each(|x| *x = true);
                     Some(suggestion)
@@ -151,16 +160,10 @@ impl Rules {
         }
 
         let mut suggestions = Vec::new();
-        let mut char_offset = 0;
 
         // get suggestions sentence by sentence
         for sentence in tokenizer.pipe(text) {
-            suggestions.extend(self.apply(&sentence).into_iter().map(|mut suggestion| {
-                suggestion.rshift(char_offset);
-                suggestion
-            }));
-
-            char_offset += sentence.text().chars().count();
+            suggestions.extend(self.apply(&sentence));
         }
 
         suggestions
@@ -180,13 +183,13 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     let mut chars: Vec<_> = text.chars().collect();
 
     for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.replacements[0].chars().collect();
+        let replacement: Vec<_> = suggestion.replacements()[0].chars().collect();
         chars.splice(
-            (suggestion.start as isize + offset) as usize
-                ..(suggestion.end as isize + offset) as usize,
+            (suggestion.span().char().start as isize + offset) as usize
+                ..(suggestion.span().char().end as isize + offset) as usize,
             replacement.iter().cloned(),
         );
-        offset = offset + replacement.len() as isize - (suggestion.end - suggestion.start) as isize;
+        offset = offset + replacement.len() as isize - suggestion.span().char().len() as isize;
     }
 
     chars.into_iter().collect()

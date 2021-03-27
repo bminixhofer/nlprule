@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{tokenizer::tag::Tagger, types::*};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -60,14 +62,14 @@ impl Disambiguation {
                     for token in group.into_iter() {
                         match data_or_filter {
                             either::Left(data) => {
-                                token.word.tags.retain(|x| {
+                                token.word_mut().tags.retain(|x| {
                                     !(x.pos == data.pos.as_ref_id()
                                         && (data.lemma.as_ref().is_empty()
                                             || x.lemma == data.lemma.as_ref_id()))
                                 });
                             }
                             either::Right(filter) => {
-                                filter.remove(&mut token.word);
+                                filter.remove(token.word_mut());
                             }
                         }
                     }
@@ -79,28 +81,36 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(limit) => {
                                 for token in group.into_iter() {
-                                    let last = token.word.tags.get(0).map_or_else(
-                                        || token.word.text.clone(),
+                                    let last = token.word().tags.get(0).map_or_else(
+                                        || token.word().text.clone(),
                                         |x| x.lemma.clone(),
                                     );
 
-                                    token.word.tags.retain(|x| x.pos == limit.pos.as_ref_id());
+                                    token
+                                        .word_mut()
+                                        .tags
+                                        .retain(|x| x.pos == limit.pos.as_ref_id());
 
-                                    if token.word.tags.is_empty() {
-                                        token.word.tags.push(WordData::new(
-                                            if retain_last {
-                                                last
-                                            } else {
-                                                token.word.text.clone()
-                                            },
-                                            limit.pos.as_ref_id(),
-                                        ));
+                                    if token.word().tags.is_empty() {
+                                        if retain_last {
+                                            token
+                                                .word_mut()
+                                                .tags
+                                                .push(WordData::new(last, limit.pos.as_ref_id()));
+                                        } else {
+                                            let lemma = token.word().text.clone();
+
+                                            token
+                                                .word_mut()
+                                                .tags
+                                                .push(WordData::new(lemma, limit.pos.as_ref_id()));
+                                        }
                                     }
                                 }
                             }
                             either::Right(filter) => {
                                 for token in group.into_iter() {
-                                    filter.keep(&mut token.word)
+                                    filter.keep(token.word_mut())
                                 }
                             }
                         }
@@ -112,15 +122,15 @@ impl Disambiguation {
                     for token in group.into_iter() {
                         let data = WordData::new(
                             if data.lemma.as_ref().is_empty() {
-                                token.word.text.clone()
+                                token.word().text.clone()
                             } else {
                                 data.lemma.as_ref_id()
                             },
                             data.pos.as_ref_id(),
                         );
 
-                        token.word.tags.push(data);
-                        token.word.tags.retain(|x| !x.pos.as_ref().is_empty());
+                        token.word_mut().tags.push(data);
+                        token.word_mut().tags.retain(|x| !x.pos.as_ref().is_empty());
                     }
                 }
             }
@@ -129,15 +139,15 @@ impl Disambiguation {
                     for token in group.into_iter() {
                         let data = WordData::new(
                             if data.lemma.as_ref().is_empty() {
-                                token.word.text.clone()
+                                token.word().text.clone()
                             } else {
                                 data.lemma.as_ref_id()
                             },
                             data.pos.as_ref_id(),
                         );
 
-                        token.word.tags.clear();
-                        token.word.tags.push(data);
+                        token.word_mut().tags.clear();
+                        token.word_mut().tags.push(data);
                     }
                 }
             }
@@ -152,7 +162,7 @@ impl Disambiguation {
                             let finalized: Token = (*token).clone().into_token(tagger);
 
                             for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                                *mask_val = *mask_val && POSFilter::and(filter, &finalized.word);
+                                *mask_val = *mask_val && POSFilter::and(filter, finalized.word());
                             }
                         }
                     }
@@ -180,16 +190,16 @@ impl Disambiguation {
                 {
                     if *use_mask_val {
                         for token in group.into_iter() {
-                            let before = token.word.clone();
+                            let before = token.word().clone();
 
-                            POSFilter::apply(&to_apply, &mut token.word);
+                            POSFilter::apply(&to_apply, token.word_mut());
 
                             if let Some(disambig) = disambig {
-                                disambig.keep(&mut token.word);
+                                disambig.keep(token.word_mut());
                             }
 
-                            if token.word.tags.is_empty() {
-                                token.word = before;
+                            if token.word().tags.is_empty() {
+                                *token.word_mut() = before;
                             }
                         }
                     }
@@ -203,7 +213,7 @@ impl Disambiguation {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DisambiguationChange {
     pub text: String,
-    pub char_span: (usize, usize),
+    pub char_span: Range<usize>,
     pub before: owned::Word,
     pub after: owned::Word,
 }

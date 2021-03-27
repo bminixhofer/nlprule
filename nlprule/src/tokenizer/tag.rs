@@ -211,23 +211,7 @@ impl Tagger {
         if let Some(token) = self.sent_start.borrow() {
             token
         } else {
-            self.sent_start
-                .fill(Token {
-                    word: Word::new_with_tags(
-                        self.id_word("".into()),
-                        vec![WordData::new(
-                            self.id_word("".into()),
-                            self.id_tag("SENT_START"),
-                        )]
-                        .into_iter()
-                        .collect(),
-                    ),
-                    char_span: (0, 0),
-                    byte_span: (0, 0),
-                    has_space_before: false,
-                    chunks: Vec::new(),
-                })
-                .ok();
+            self.sent_start.fill(Token::sent_start(&self)).ok();
             self.sent_start.borrow().unwrap()
         }
     }

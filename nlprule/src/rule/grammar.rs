@@ -2,16 +2,6 @@ use super::engine::composition::{GraphId, MatchGraph, MatchSentence, PosMatcher}
 use crate::types::*;
 use crate::utils::{self, regex::Regex};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-
-impl std::cmp::PartialEq for Suggestion {
-    fn eq(&self, other: &Suggestion) -> bool {
-        let a: HashSet<&String> = self.replacements.iter().collect();
-        let b: HashSet<&String> = other.replacements.iter().collect();
-
-        a.intersection(&b).count() > 0 && other.start == self.start && other.end == self.end
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Conversion {
@@ -177,14 +167,14 @@ impl Synthesizer {
                 .map(|first_token| {
                     (self.use_titlecase_adjust
                         && first_token
-                            .word
+                            .word()
                             .text
                             .as_ref()
                             .chars()
                             .next()
                             .expect("token must have at least one char")
                             .is_uppercase())
-                        || first_token.byte_span.0 == 0
+                        || first_token.span().byte().start == 0
                 })
                 .unwrap_or(false);
 

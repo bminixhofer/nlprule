@@ -18,6 +18,23 @@ fn can_tokenize_empty_text() {
     assert!(sentences.is_empty());
 }
 
+#[test]
+fn handles_whitespace_correctly() {
+    // preceding whitespace has to be included, trailing whitespace behavior is unspecified
+    let text = "  hello.\ttest.\t\t";
+
+    let mut sentences = TOKENIZER.pipe(text);
+    assert_eq!(
+        &text[sentences.next().unwrap().span().byte().clone()],
+        "  hello.\t"
+    );
+    assert_eq!(
+        &text[sentences.next().unwrap().span().byte().clone()],
+        "test.\t"
+    );
+    assert_eq!(sentences.next(), None);
+}
+
 #[quickcheck]
 fn can_tokenize_anything(text: String) -> bool {
     let _: Vec<_> = TOKENIZER.pipe(&text).collect();

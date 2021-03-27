@@ -745,7 +745,7 @@ impl Chunker {
                     .get(&(byte_start + token.len()))
                     .expect("byte index is at char boundary");
 
-                (*chunk, (char_start, char_end))
+                (*chunk, char_start..char_end)
             })
             .collect();
         let mut chunks = Vec::new();
@@ -764,8 +764,14 @@ impl Chunker {
 
                     if sentence
                         .iter()
-                        .find(|token| token.char_span == char_span)
-                        .map(|token| token.word.tags.iter().any(|tag| tag.pos.as_ref() == "NNS"))
+                        .find(|token| *token.span().char() == char_span)
+                        .map(|token| {
+                            token
+                                .word()
+                                .tags
+                                .iter()
+                                .any(|tag| tag.pos.as_ref() == "NNS")
+                        })
                         .unwrap_or(false)
                     {
                         number = "plural";
@@ -797,8 +803,8 @@ impl Chunker {
         // chunks with exactly the same char span as the input tokens get assigned to the token to match LT
         for token in sentence.iter_mut() {
             for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
-                if *char_span == token.char_span {
-                    token.chunks = (*chunk).clone();
+                if char_span == token.span().char() {
+                    *token.chunks_mut() = (*chunk).clone();
                 }
             }
         }

@@ -22,14 +22,15 @@ impl TokenEngine {
             for i in 0..sentence.len() {
                 for antipattern in &self.antipatterns {
                     if let Some(anti_graph) = antipattern.apply(sentence, i) {
-                        let anti_start = anti_graph.by_index(0).char_span.0;
+                        let anti_start = anti_graph.by_index(0).span.char().start;
                         let anti_end = anti_graph
                             .by_index(anti_graph.groups().len() - 1)
-                            .char_span
-                            .1;
+                            .span
+                            .char()
+                            .end;
 
-                        let rule_start = graph.by_index(0).char_span.0;
-                        let rule_end = graph.by_index(graph.groups().len() - 1).char_span.1;
+                        let rule_start = graph.by_index(0).span.char().start;
+                        let rule_end = graph.by_index(graph.groups().len() - 1).span.char().end;
 
                         if anti_start <= rule_end && rule_start <= anti_end {
                             blocked = true;
@@ -96,8 +97,8 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
                     let start_group = graph.by_id(start_id);
                     let end_group = graph.by_id(end_id);
 
-                    let start = start_group.char_span.0;
-                    let end = end_group.char_span.1;
+                    let start = start_group.span.char().start - sentence.span().char().start;
+                    let end = end_group.span.char().end - sentence.span().char().start;
 
                     if inner.mask[start..end].iter().all(|x| !x) {
                         inner.mask[start..end].iter_mut().for_each(|x| *x = true);
@@ -115,16 +116,18 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 
                 for group in captures.iter() {
                     if let Some(group) = group {
-                        let start = *bi_to_ci
-                            .get(&group.start())
+                        let byte_span = group.start()..group.end();
+
+                        let char_start = *bi_to_ci
+                            .get(&byte_span.start)
                             .expect("byte index is at char boundary");
-                        let end = *bi_to_ci
-                            .get(&group.end())
+                        let char_end = *bi_to_ci
+                            .get(&byte_span.end)
                             .expect("byte index is at char boundary");
 
-                        groups.push(Group::new((start, end)));
+                        groups.push(Group::new(Span::new(byte_span, char_start..char_end)));
                     } else {
-                        groups.push(Group::new((0, 0)));
+                        groups.push(Group::new(Span::default()));
                     }
                 }
 

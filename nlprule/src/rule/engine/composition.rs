@@ -62,9 +62,9 @@ impl Matcher {
                         .next()
                         .map_or(false, |token| {
                             if case_sensitive {
-                                token.word.text.as_ref() == input
+                                token.word().text.as_ref() == input
                             } else {
-                                UniCase::new(token.word.text.as_ref()) == UniCase::new(input)
+                                UniCase::new(token.word().text.as_ref()) == UniCase::new(input)
                             }
                         })
                 }
@@ -193,7 +193,7 @@ pub mod concrete {
             let (sentence, _) = context;
 
             self.matcher
-                .is_match(&sentence.index(position).word.text, Some(context), None)
+                .is_match(&sentence.index(position).word().text, Some(context), None)
         }
     }
 
@@ -207,7 +207,7 @@ pub mod concrete {
             let (sentence, _) = context;
 
             self.matcher
-                .is_slice_match(&sentence.index(position).chunks, Some(context), None)
+                .is_slice_match(&sentence.index(position).chunks(), Some(context), None)
         }
     }
 
@@ -220,7 +220,7 @@ pub mod concrete {
         fn is_match(&self, context: Context, position: usize) -> bool {
             let (sentence, _) = context;
 
-            sentence.index(position).has_space_before == self.value
+            sentence.index(position).has_space_before() == self.value
         }
     }
 
@@ -233,7 +233,7 @@ pub mod concrete {
     impl Atomable for WordDataAtom {
         fn is_match(&self, context: Context, position: usize) -> bool {
             let (sentence, _) = context;
-            let tags = &sentence.index(position).word.tags;
+            let tags = &sentence.index(position).word().tags;
 
             self.matcher
                 .is_match(&tags, Some(context), Some(self.case_sensitive))
@@ -313,37 +313,37 @@ impl Atomable for OffsetAtom {
 
 #[derive(Debug, Default, Clone)]
 pub struct Group {
-    pub char_span: (usize, usize),
+    pub span: Span,
 }
 
 impl Group {
-    pub fn new(char_span: (usize, usize)) -> Self {
-        Group { char_span }
+    pub fn new(span: Span) -> Self {
+        Group { span }
     }
 
     pub fn tokens<'a, 't>(
         &'a self,
         sentence: &'t MatchSentence,
     ) -> impl DoubleEndedIterator<Item = &'t Token<'t>> {
-        let start = self.char_span.0;
-        let end = self.char_span.1;
+        let start = self.span.char().start;
+        let end = self.span.char().end;
 
         sentence.iter().filter(move |x| {
-            x.char_span.1 > x.char_span.0 // special tokens with zero range (e. g. SENT_START) can not be part of groups
-                && x.char_span.0 >= start
-                && x.char_span.1 <= end
+            x.span().char().end > x.span().char().start // special tokens with zero range (e. g. SENT_START) can not be part of groups
+                && x.span().char().start >= start
+                && x.span().char().end <= end
         })
     }
 
     pub fn text<'a>(&self, text: &'a str) -> &'a str {
-        if self.char_span.0 >= self.char_span.1 {
+        if self.span.char().start >= self.span.char().end {
             return "";
         }
 
         let mut char_indices: Vec<_> = text.char_indices().map(|(i, _)| i).collect();
         char_indices.push(text.len());
 
-        &text[char_indices[self.char_span.0]..char_indices[self.char_span.1]]
+        &text[char_indices[self.span.char().start]..char_indices[self.span.char().end]]
     }
 }
 
@@ -396,6 +396,10 @@ impl<'t> MatchSentence<'t> {
     pub fn tagger(&self) -> &'t Tagger {
         self.sentence.tagger()
     }
+
+    pub fn span(&self) -> &Span {
+        self.sentence.span()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -445,7 +449,7 @@ impl<'t> MatchGraph<'t> {
         let mut start = self
             .groups
             .iter()
-            .find_map(|x| x.tokens(&sentence).next().map(|token| token.char_span.0))
+            .find_map(|x| x.tokens(&sentence).next().map(|token| token.span().start()))
             .expect("graph must contain at least one token");
 
         let mut end = self
@@ -455,7 +459,7 @@ impl<'t> MatchGraph<'t> {
             .find_map(|x| {
                 x.tokens(&sentence)
                     .next_back()
-                    .map(|token| token.char_span.1)
+                    .map(|token| token.span().end())
             })
             .expect("graph must contain at least one token");
 
@@ -467,19 +471,19 @@ impl<'t> MatchGraph<'t> {
 
         for (group, tokens) in self.groups.iter_mut().zip(group_tokens.iter()) {
             if !tokens.is_empty() {
-                group.char_span.0 = tokens[0].char_span.0;
-                group.char_span.1 = tokens[tokens.len() - 1].char_span.1;
-                start = tokens[tokens.len() - 1].char_span.1;
+                group.span.set_start(tokens[0].span().start());
+                group.span.set_end(tokens[tokens.len() - 1].span().end());
+                start = tokens[tokens.len() - 1].span().end();
             } else {
-                group.char_span.1 = start;
+                group.span.set_end(start);
             }
         }
 
         for (group, tokens) in self.groups.iter_mut().zip(group_tokens.iter()).rev() {
             if !tokens.is_empty() {
-                end = tokens[0].char_span.0;
+                end = tokens[0].span().start();
             } else {
-                group.char_span.0 = end;
+                group.span.set_start(end);
             }
         }
     }
@@ -560,13 +564,15 @@ impl Composition {
             }
 
             if part.atom.is_match((sentence, &graph), position) {
-                let mut group = &mut graph.groups[cur_atom_idx + 1];
+                let group = &mut graph.groups[cur_atom_idx + 1];
 
                 // set the group beginning if the char end was zero (i. e. the group was empty)
-                if group.char_span.1 == 0 {
-                    group.char_span.0 = sentence.index(position).char_span.0;
+                if group.span.char().end == 0 {
+                    group
+                        .span
+                        .set_start(sentence.index(position).span().start());
                 }
-                group.char_span.1 = sentence.index(position).char_span.1;
+                group.span.set_end(sentence.index(position).span().end());
 
                 position += 1;
                 cur_count += 1;
