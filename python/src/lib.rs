@@ -185,7 +185,7 @@ impl PyToken {
 
     #[getter]
     fn span(&self) -> (usize, usize) {
-        self.token.char_span
+        (self.token.span.char().start, self.token.span.char().end)
     }
 
     #[getter]
@@ -259,18 +259,18 @@ struct PySuggestion {
 impl PySuggestion {
     #[getter]
     fn start(&self) -> usize {
-        self.suggestion.start
+        self.suggestion.span().char().start
     }
 
     #[getter]
     fn end(&self) -> usize {
-        self.suggestion.end
+        self.suggestion.span().char().end
     }
 
     #[getter]
     fn replacements(&self) -> Vec<&str> {
         self.suggestion
-            .replacements
+            .replacements()
             .iter()
             .map(|x| x.as_str())
             .collect()
@@ -278,12 +278,12 @@ impl PySuggestion {
 
     #[getter]
     fn source(&self) -> &str {
-        &self.suggestion.source
+        self.suggestion.source()
     }
 
     #[getter]
     fn message(&self) -> &str {
-        &self.suggestion.message
+        self.suggestion.message()
     }
 }
 
@@ -675,13 +675,7 @@ impl PyRules {
             .map(|x| {
                 let x = x.borrow(py);
 
-                Suggestion {
-                    source: x.source().to_string(),
-                    message: x.message().to_string(),
-                    replacements: x.replacements().iter().map(|x| x.to_string()).collect(),
-                    start: x.start(),
-                    end: x.end(),
-                }
+                x.suggestion.clone()
             })
             .collect();
 

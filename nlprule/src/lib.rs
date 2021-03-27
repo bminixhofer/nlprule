@@ -30,11 +30,11 @@
 //!
 //! let text = "She was not been here since Monday.";
 //!
-//! let suggestion = rules.suggest(text, &tokenizer).remove(0);
-//! assert_eq!(suggestions.span().char(), 4..16);
-//! assert_eq!(suggestions.replacements(), vec!["was not", "has not been"]);
-//! assert_eq!(suggestions.source(), "GRAMMAR/WAS_BEEN/1");
-//! assert_eq!(suggestions.message(), "Did you mean was not or has not been?");
+//! let suggestions = rules.suggest(text, &tokenizer);
+//! assert_eq!(*suggestions[0].span().char(), 4usize..16);
+//! assert_eq!(suggestions[0].replacements(), vec!["was not", "has not been"]);
+//! assert_eq!(suggestions[0].source(), "GRAMMAR/WAS_BEEN/1");
+//! assert_eq!(suggestions[0].message(), "Did you mean was not or has not been?");
 //!
 //! let corrected = apply_suggestions(text, &suggestions);
 //!
