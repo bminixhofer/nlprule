@@ -171,9 +171,8 @@ impl Synthesizer {
                             .text
                             .as_ref()
                             .chars()
-                            .next()
-                            .expect("token must have at least one char")
-                            .is_uppercase())
+                            .next() // a word is expected to always have at least one char, but be defensive here
+                            .map_or(false, char::is_uppercase))
                         || first_token.span().byte().start == 0
                 })
                 .unwrap_or(false);

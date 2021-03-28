@@ -302,7 +302,11 @@ impl Tokenizer {
             .enumerate()
             .filter(|(_, token_text)| !token_text.trim().is_empty())
             .map(|(i, token_text)| {
-                let byte_start = token_text.as_ptr() as usize - sentence.as_ptr() as usize;
+                let token_ptr = token_text.as_ptr() as usize;
+                let sentence_ptr = sentence.as_ptr() as usize;
+
+                debug_assert!(token_ptr >= sentence_ptr); // see https://stackoverflow.com/q/38268529
+                let byte_start = token_ptr - sentence_ptr;
                 let char_start = sentence[..byte_start].chars().count();
 
                 let trimmed = token_text.trim();

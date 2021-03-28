@@ -144,32 +144,34 @@ impl Engine {
         start: GraphId,
         end: GraphId,
     ) -> EngineMatches<'a, 't> {
+        let inner = match &self {
+            Engine::Token(engine) => InnerMatches::Token(TokenMatches {
+                engine,
+                index: 0,
+                mask: vec![false; sentence.text().chars().count()],
+            }),
+            Engine::Text(regex, id_to_idx) => {
+                let mut bi_to_ci: DefaultHashMap<usize, usize> = sentence
+                    .text()
+                    .char_indices()
+                    .enumerate()
+                    .map(|(ci, (bi, _))| (bi, ci))
+                    .collect();
+                bi_to_ci.insert(sentence.text().len(), bi_to_ci.len());
+
+                InnerMatches::Text(TextMatches {
+                    byte_idx_to_char_idx: bi_to_ci,
+                    id_to_idx,
+                    captures: regex.captures_iter(sentence.text()),
+                })
+            }
+        };
+
         EngineMatches {
             sentence,
             start,
             end,
-            inner: match &self {
-                Engine::Token(engine) => InnerMatches::Token(TokenMatches {
-                    engine,
-                    index: 0,
-                    mask: vec![false; sentence.text().chars().count()],
-                }),
-                Engine::Text(regex, id_to_idx) => {
-                    let mut bi_to_ci: DefaultHashMap<usize, usize> = sentence
-                        .text()
-                        .char_indices()
-                        .enumerate()
-                        .map(|(ci, (bi, _))| (bi, ci))
-                        .collect();
-                    bi_to_ci.insert(sentence.text().len(), bi_to_ci.len());
-
-                    InnerMatches::Text(TextMatches {
-                        byte_idx_to_char_idx: bi_to_ci,
-                        id_to_idx,
-                        captures: regex.captures_iter(sentence.text()),
-                    })
-                }
-            },
+            inner,
         }
     }
 }
