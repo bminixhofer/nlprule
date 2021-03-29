@@ -30,7 +30,8 @@ use tag::Tagger;
 
 use crate::rule::DisambiguationRule;
 
-// see https://stackoverflow.com/a/40296745
+/// Split a text at the points where the given function is true.
+/// Keeps the separators. See https://stackoverflow.com/a/40296745.
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
 where
     F: Fn(char) -> bool,
@@ -241,7 +242,10 @@ impl Tokenizer {
         self.disambiguate_up_to_id(sentence, None)
     }
 
-    fn get_token_strs<'t>(&self, text: &'t str) -> Vec<&'t str> {
+    fn get_token_ranges<'t>(
+        &self,
+        text: &'t str,
+    ) -> impl ExactSizeIterator<Item = Range<usize>> + 't {
         let mut tokens = Vec::new();
 
         let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
@@ -285,7 +289,13 @@ impl Tokenizer {
         }
 
         tokens.extend(split_text(&text[prev..text.len()]));
-        tokens
+        tokens.into_iter().map(move |token| {
+            let byte_start = (token.as_ptr() as usize)
+                .checked_sub(text.as_ptr() as usize)
+                .expect("Each token str is a slice of the text str.");
+
+            byte_start..byte_start + token.len()
+        })
     }
 
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
@@ -295,30 +305,26 @@ impl Tokenizer {
             return None;
         }
 
-        let token_strs = self.get_token_strs(sentence);
+        let token_strs = self.get_token_ranges(sentence);
+        let n_token_strs = token_strs.len();
 
         let mut tokens: Vec<_> = token_strs
-            .iter()
             .enumerate()
-            .filter(|(_, token_text)| !token_text.trim().is_empty())
-            .map(|(i, token_text)| {
-                let token_ptr = token_text.as_ptr() as usize;
-                let sentence_ptr = sentence.as_ptr() as usize;
-
-                debug_assert!(token_ptr >= sentence_ptr); // see https://stackoverflow.com/q/38268529
-                let byte_start = token_ptr - sentence_ptr;
+            .filter(|(_, range)| !sentence[range.clone()].trim().is_empty())
+            .map(|(i, range)| {
+                let byte_start = range.start;
                 let char_start = sentence[..byte_start].chars().count();
 
-                let trimmed = token_text.trim();
+                let token_text = sentence[range].trim();
 
                 let is_sentence_start = i == 0;
-                let is_sentence_end = i == token_strs.len() - 1;
+                let is_sentence_end = i == n_token_strs - 1;
 
                 IncompleteToken::new(
                     Word::new_with_tags(
-                        self.tagger.id_word(trimmed.into()),
+                        self.tagger.id_word(token_text.into()),
                         self.tagger.get_tags_with_options(
-                            trimmed,
+                            token_text,
                             if is_sentence_start { Some(true) } else { None },
                             None,
                         ),

@@ -5,6 +5,7 @@ use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
+    cmp::Ordering,
     collections::{hash_map, HashMap, HashSet},
     fmt,
     ops::{Add, AddAssign, Range, Sub},
@@ -535,12 +536,24 @@ impl<'t> Token<'t> {
 
 /// A position in a text. Determined by a byte and char index.
 /// Can be an absolute position (offset relative to zero) or a position delta (offset relative to some other position).
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Position {
     /// The byte offset.
     pub byte: usize,
     /// The char offset.
     pub char: usize,
+}
+
+impl PartialOrd for Position {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let byte_order = self.byte.cmp(&other.byte);
+        // for positions to be comparable byte and char must both be smaller / larger / equal
+        if byte_order == self.char.cmp(&other.char) {
+            Some(byte_order)
+        } else {
+            None
+        }
+    }
 }
 
 impl AddAssign for Position {
