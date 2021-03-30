@@ -2,8 +2,7 @@
 
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{rule::id::Selector, tokenizer::Tokenizer};
-use crate::{rule::Rule, Error};
+use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, tokenizer::Tokenizer, Error};
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -105,11 +104,9 @@ impl Rules {
         }
     }
 
-    /// Compute the suggestions for the given tokens by checking all rules.
-    pub fn apply(&self, tokens: &[Token], tokenizer: &Tokenizer) -> Vec<Suggestion> {
-        if tokens.is_empty() {
-            return Vec::new();
-        }
+    /// Compute the suggestions for the given sentence by checking all rules.
+    pub fn apply(&self, sentence: &Sentence) -> Vec<Suggestion> {
+        let sentence = MatchSentence::new(sentence);
 
         let mut output: Vec<(usize, Suggestion)> = self
             .rules
@@ -119,7 +116,7 @@ impl Rules {
             .map(|(i, rule)| {
                 let mut output = Vec::new();
 
-                for suggestion in rule.apply(tokens, tokenizer) {
+                for suggestion in rule.apply(&sentence) {
                     output.push((i, suggestion));
                 }
 
@@ -128,17 +125,23 @@ impl Rules {
             .flatten()
             .collect();
 
-        output.sort_by(|(ia, a), (ib, b)| a.start.cmp(&b.start).then_with(|| ib.cmp(ia)));
+        output.sort_by(|(ia, a), (ib, b)| {
+            a.span()
+                .char()
+                .start
+                .cmp(&b.span().char().start)
+                .then_with(|| ib.cmp(ia))
+        });
 
-        let mut mask = vec![false; tokens[0].sentence.chars().count()];
+        let mut mask = vec![false; sentence.text().chars().count()];
 
         output
             .into_iter()
             .filter_map(|(_, suggestion)| {
-                if mask[suggestion.start..suggestion.end].iter().all(|x| !x) {
-                    mask[suggestion.start..suggestion.end]
-                        .iter_mut()
-                        .for_each(|x| *x = true);
+                let span = suggestion.span().clone().lshift(sentence.span().start());
+
+                if mask[span.char().clone()].iter().all(|x| !x) {
+                    mask[span.char().clone()].iter_mut().for_each(|x| *x = true);
                     Some(suggestion)
                 } else {
                     None
@@ -154,24 +157,10 @@ impl Rules {
         }
 
         let mut suggestions = Vec::new();
-        let mut char_offset = 0;
 
         // get suggestions sentence by sentence
-        for tokens in tokenizer.pipe(text) {
-            if tokens.is_empty() {
-                continue;
-            }
-
-            suggestions.extend(
-                self.apply(&tokens, tokenizer)
-                    .into_iter()
-                    .map(|mut suggestion| {
-                        suggestion.rshift(char_offset);
-                        suggestion
-                    }),
-            );
-
-            char_offset += tokens[0].sentence.chars().count();
+        for sentence in tokenizer.pipe(text) {
+            suggestions.extend(self.apply(&sentence));
         }
 
         suggestions
@@ -191,13 +180,13 @@ pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
     let mut chars: Vec<_> = text.chars().collect();
 
     for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.replacements[0].chars().collect();
+        let replacement: Vec<_> = suggestion.replacements()[0].chars().collect();
         chars.splice(
-            (suggestion.start as isize + offset) as usize
-                ..(suggestion.end as isize + offset) as usize,
+            (suggestion.span().char().start as isize + offset) as usize
+                ..(suggestion.span().char().end as isize + offset) as usize,
             replacement.iter().cloned(),
         );
-        offset = offset + replacement.len() as isize - (suggestion.end - suggestion.start) as isize;
+        offset = offset + replacement.len() as isize - suggestion.span().char().len() as isize;
     }
 
     chars.into_iter().collect()

@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::types::{DefaultHashMap, DefaultHasher};
-
-use super::IncompleteToken;
+use crate::types::{DefaultHashMap, DefaultHasher, IncompleteSentence};
 
 fn softmax(vec: &mut Vec<f32>) {
     for x in vec.iter_mut() {
@@ -711,13 +709,8 @@ pub struct Chunker {
 
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
-    pub fn apply(&self, tokens: &mut Vec<IncompleteToken>) {
-        if tokens.is_empty() {
-            return;
-        }
-
-        // replacements must not change char indices
-        let text = tokens[0].sentence.replace('’', "\'");
+    pub fn apply(&self, sentence: &mut IncompleteSentence) {
+        let text = sentence.text().replace('’', "\'");
 
         let mut bi_to_ci: DefaultHashMap<usize, usize> = text
             .char_indices()
@@ -752,7 +745,7 @@ impl Chunker {
                     .get(&(byte_start + token.len()))
                     .expect("byte index is at char boundary");
 
-                (*chunk, (char_start, char_end))
+                (*chunk, char_start..char_end)
             })
             .collect();
         let mut chunks = Vec::new();
@@ -769,12 +762,19 @@ impl Chunker {
                         break;
                     }
 
-                    if tokens
+                    let contains_nns = sentence
                         .iter()
-                        .find(|token| token.char_span == char_span)
-                        .map(|token| token.word.tags.iter().any(|tag| tag.pos.as_ref() == "NNS"))
-                        .unwrap_or(false)
-                    {
+                        .find(|token| *token.span().char() == char_span)
+                        .map(|token| {
+                            token
+                                .word()
+                                .tags
+                                .iter()
+                                .any(|tag| tag.pos.as_ref() == "NNS")
+                        })
+                        .unwrap_or(false);
+
+                    if contains_nns {
                         number = "plural";
                     }
                 }
@@ -802,10 +802,10 @@ impl Chunker {
         }
 
         // chunks with exactly the same char span as the input tokens get assigned to the token to match LT
-        for token in tokens.iter_mut() {
+        for token in sentence.iter_mut() {
             for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
-                if *char_span == token.char_span {
-                    token.chunks = (*chunk).clone();
+                if char_span == token.span().char() {
+                    *token.chunks_mut() = (*chunk).clone();
                 }
             }
         }

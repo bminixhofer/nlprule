@@ -66,9 +66,9 @@ pub enum Error {
     #[error("serialization error")]
     Serialization(#[from] bincode::Error),
     #[error("JSON deserialization error")]
-    JSON(#[from] serde_json::Error),
+    Json(#[from] serde_json::Error),
     #[error("error loading SRX")]
-    SRX(#[from] srx::Error),
+    Srx(#[from] srx::Error),
     #[error("language options do not exist for '{lang_code}'")]
     LanguageOptionsDoNotExist { lang_code: String },
     #[error("regex syntax error: {0}")]

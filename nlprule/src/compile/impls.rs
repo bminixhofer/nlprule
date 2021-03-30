@@ -12,13 +12,13 @@ use std::{
 
 use crate::{
     rule::{
-        disambiguation::POSFilter,
+        disambiguation::PosFilter,
         engine::{
             composition::{GraphId, Matcher, PosMatcher, TextMatcher},
             Engine,
         },
         id::Category,
-        DisambiguationRule, MatchGraph, Rule,
+        DisambiguationRule, Rule,
     },
     rules::{Rules, RulesLangOptions, RulesOptions},
     tokenizer::{
@@ -167,6 +167,7 @@ impl Tagger {
             word_store,
             tag_store,
             lang_options,
+            ..Default::default()
         })
     }
 }
@@ -203,8 +204,6 @@ impl MultiwordTagger {
 
 impl TextMatcher {
     pub(in crate::compile) fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
-        let graph = MatchGraph::default();
-
         // can not cache a matcher that depends on the graph
         let set = if matcher.graph_id().is_some() {
             None
@@ -223,7 +222,7 @@ impl TextMatcher {
                 let set: DefaultHashSet<_> = data
                     .into_maybe_par_iter()
                     .filter_map(|(word, id)| {
-                        if matcher.is_match(word.as_str(), &graph, None) {
+                        if matcher.is_match(word.as_str(), None, None) {
                             Some(*id)
                         } else {
                             None
@@ -249,10 +248,9 @@ impl TextMatcher {
 impl PosMatcher {
     pub(in crate::compile) fn new(matcher: Matcher, info: &mut BuildInfo) -> Self {
         let mut mask = vec![false; info.tagger().tag_store().len()];
-        let graph = MatchGraph::default();
 
         for (word, id) in info.tagger().tag_store().iter() {
-            mask[id.0 as usize] = matcher.is_match(word.as_str(), &graph, None);
+            mask[id.0 as usize] = matcher.is_match(word.as_str(), None, None);
         }
 
         PosMatcher { mask }
@@ -507,9 +505,9 @@ impl chunk::Chunker {
     }
 }
 
-impl POSFilter {
+impl PosFilter {
     pub(in crate::compile) fn new(matcher: PosMatcher) -> Self {
-        POSFilter { matcher }
+        PosFilter { matcher }
     }
 }
 

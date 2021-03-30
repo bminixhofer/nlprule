@@ -38,7 +38,7 @@ def test_sentencization_sane(tokenizer_and_rules):
         "e.g. U.K. and Mr. do not split. SRX is a rule-based format."
     )
     assert (sentences[0][-2].text, sentences[0][-1].text) == ("split", ".")
-    assert (sentences[1][1].text, sentences[1][2].text) == ("SRX", "is")
+    assert (sentences[1][0].text, sentences[1][1].text) == ("SRX", "is")
 
 
 def test_suggest(tokenizer_and_rules):

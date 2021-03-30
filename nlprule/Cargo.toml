@@ -27,7 +27,7 @@ fst = "0.4"
 fs-err = "2.5"
 aho-corasick = "0.7"
 half = { version = "1.7", features = ["serde"] }
-srx = { version = "^0.1.2", features = ["serde"] }
+srx = { version = "^0.1.3", features = ["serde"] }
 lazycell = "1"
 cfg-if = "1"
 
@@ -70,7 +70,15 @@ regex-all-test = ["regex-onig", "regex-fancy"]
 
 # needed for the bin test targets and to compile nlprule binaries, you'll usually not need these
 bin = ["clap", "env_logger"]
-compile = ["regex-syntax", "serde-xml-rs", "xml-rs", "roxmltree", "serde_json", "srx/from_xml", "regex-all-test"]
+compile = [
+    "regex-syntax",
+    "serde-xml-rs",
+    "xml-rs",
+    "roxmltree",
+    "serde_json",
+    "srx/from_xml",
+    "regex-all-test",
+]
 
 [[bin]]
 name = "compile"

@@ -197,11 +197,11 @@ pub struct Category {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct XMLString {
+pub struct XmlString {
     pub text: String,
 }
 
-impl std::ops::Deref for XMLString {
+impl std::ops::Deref for XmlString {
     type Target = String;
 
     fn deref(&self) -> &Self::Target {
@@ -209,18 +209,18 @@ impl std::ops::Deref for XMLString {
     }
 }
 
-impl std::convert::Into<String> for XMLString {
-    fn into(self) -> String {
-        self.text
+impl From<XmlString> for String {
+    fn from(data: XmlString) -> String {
+        data.text
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct XMLText {
-    pub text: XMLString,
+pub struct XmlText {
+    pub text: XmlString,
 }
 
-impl std::ops::Deref for XMLText {
+impl std::ops::Deref for XmlText {
     type Target = String;
 
     fn deref(&self) -> &Self::Target {
@@ -228,9 +228,9 @@ impl std::ops::Deref for XMLText {
     }
 }
 
-impl std::convert::Into<String> for XMLText {
-    fn into(self) -> String {
-        self.text.into()
+impl From<XmlText> for String {
+    fn from(data: XmlText) -> String {
+        data.text.into()
     }
 }
 
@@ -242,7 +242,7 @@ pub struct Match {
     #[serde(rename = "postag_regexp")]
     pub postag_regex: Option<String>,
     pub postag_replace: Option<String>,
-    pub text: Option<XMLString>,
+    pub text: Option<XmlString>,
     pub include_skipped: Option<String>,
     pub case_conversion: Option<String>,
     pub regexp_match: Option<String>,
@@ -253,7 +253,7 @@ pub struct Match {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum SuggestionPart {
     Match(Match),
-    Text(XMLString),
+    Text(XmlString),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,7 +268,7 @@ pub struct Suggestion {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum MessagePart {
     Suggestion(Suggestion),
-    Text(XMLString),
+    Text(XmlString),
     Match(Match),
 }
 
@@ -283,14 +283,14 @@ pub struct Message {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExampleMarker {
-    pub text: XMLString,
+    pub text: XmlString,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum ExamplePart {
     Marker(ExampleMarker),
-    Text(XMLString),
+    Text(XmlString),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -318,7 +318,7 @@ pub struct Exception {
     pub negate: Option<String>,
     pub negate_pos: Option<String>,
     pub scope: Option<String>,
-    pub text: Option<XMLString>,
+    pub text: Option<XmlString>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -326,7 +326,7 @@ pub struct Exception {
 #[serde(deny_unknown_fields)]
 #[allow(clippy::large_enum_variant)]
 pub enum TokenPart {
-    Text(XMLString),
+    Text(XmlString),
     Exception(Exception),
     #[serde(rename = "match")]
     Sub(Sub),
@@ -474,7 +474,7 @@ pub struct Pattern {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Regex {
-    pub text: XMLString,
+    pub text: XmlString,
     pub case_sensitive: Option<String>,
     pub mark: Option<String>,
 }
@@ -494,8 +494,8 @@ pub struct Rule {
     pub examples: Vec<Example>,
     pub id: Option<String>,
     pub name: Option<String>,
-    pub short: Option<XMLText>,
-    pub url: Option<XMLText>,
+    pub short: Option<XmlText>,
+    pub url: Option<XmlText>,
     pub default: Option<String>,
     pub filter: Option<Filter>,
     #[serde(rename = "__unused_unifications")]
@@ -510,8 +510,8 @@ pub struct RuleGroup {
     pub antipatterns: Option<Vec<Pattern>>,
     pub default: Option<String>,
     pub name: String,
-    pub short: Option<XMLText>,
-    pub url: Option<XMLText>,
+    pub short: Option<XmlText>,
+    pub url: Option<XmlText>,
     #[serde(rename = "rule")]
     pub rules: Vec<Rule>,
 }

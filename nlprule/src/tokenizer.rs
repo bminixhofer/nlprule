@@ -6,6 +6,7 @@
 
 use crate::{
     rule::id::{Index, Selector},
+    rule::MatchSentence,
     types::*,
     utils::{parallelism::MaybeParallelRefIterator, regex::Regex},
     Error,
@@ -14,6 +15,7 @@ use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read},
+    ops::Range,
     path::Path,
     sync::Arc,
 };
@@ -28,7 +30,8 @@ use tag::Tagger;
 
 use crate::rule::DisambiguationRule;
 
-// see https://stackoverflow.com/a/40296745
+/// Split a text at the points where the given function is true.
+/// Keeps the separators. See https://stackoverflow.com/a/40296745.
 fn split<F>(text: &str, split_func: F) -> Vec<&str>
 where
     F: Fn(char) -> bool,
@@ -47,19 +50,6 @@ where
     }
 
     result
-}
-
-/// *Finalizes* the tokens by e. g. adding a specific UNKNOWN part-of-speech tag.
-/// After finalization grammatical error correction rules can be used on the tokens.
-pub fn finalize(tokens: Vec<DisambiguatedToken>) -> Vec<Token> {
-    if tokens.is_empty() {
-        return Vec::new();
-    }
-
-    let mut finalized = vec![Token::sent_start(tokens[0].0.sentence, tokens[0].0.tagger)];
-    finalized.extend(tokens.into_iter().map(|x| x.0.into()));
-
-    finalized
 }
 
 /// Options for a tokenizer.
@@ -98,6 +88,67 @@ impl Default for TokenizerLangOptions {
             extra_split_chars: Vec::new(),
             extra_join_regexes: Vec::new(),
         }
+    }
+}
+
+/// An iterator over [IncompleteSentence]s. Has the same properties as [SentenceIter].
+pub struct IncompleteSentenceIter<'t> {
+    text: &'t str,
+    splits: Vec<Range<usize>>,
+    tokenizer: &'t Tokenizer,
+    index: usize,
+    position: Position,
+}
+
+impl<'t> Iterator for IncompleteSentenceIter<'t> {
+    type Item = IncompleteSentence<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.splits.len() {
+            return None;
+        }
+
+        let mut range = self.splits[self.index].clone();
+        self.index += 1;
+
+        // as long as the current sentence contains only whitespace, add the next sentence
+        // in practice, this might never happen, but we can not make any assumption about
+        // SRX rule behavior here.
+        while self.text[range.clone()].trim().is_empty() && self.index < self.splits.len() {
+            range.end = self.splits[self.index].end;
+            self.index += 1;
+        }
+
+        let sentence = self
+            .tokenizer
+            .tokenize(&self.text[range.clone()])
+            .map(|x| x.rshift(self.position));
+
+        self.position += Position {
+            char: self.text[range.clone()].chars().count(),
+            byte: range.len(),
+        };
+
+        sentence
+    }
+}
+
+/// An iterator over [Sentence]s. Has some key properties:
+/// - Preceding whitespace is always included so the first sentence always starts at byte and char index zero.
+/// - There are no gaps between sentences i.e. `sentence[i - 1].span().end() == sentence[i].span().start()`.
+/// - Behavior for trailing whitespace is not defined. Can be included in the last sentence or not be part of any sentence.
+pub struct SentenceIter<'t> {
+    inner: IncompleteSentenceIter<'t>,
+    tokenizer: &'t Tokenizer,
+}
+
+impl<'t> Iterator for SentenceIter<'t> {
+    type Item = Sentence<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|sentence| self.tokenizer.disambiguate(sentence).into_sentence())
     }
 }
 
@@ -149,25 +200,23 @@ impl Tokenizer {
 
     pub(crate) fn disambiguate_up_to_id<'t>(
         &'t self,
-        mut tokens: Vec<IncompleteToken<'t>>,
+        mut sentence: IncompleteSentence<'t>,
         id: Option<&Index>,
-    ) -> Vec<DisambiguatedToken<'t>> {
-        if tokens.is_empty() {
-            return Vec::new();
-        }
-
+    ) -> IncompleteSentence<'t> {
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == *id).unwrap()
         });
         let mut i = 0;
 
         while i < n {
-            let finalized = finalize(tokens.iter().cloned().map(DisambiguatedToken).collect());
+            let complete_sentence = sentence.clone().into_sentence();
+            let match_sentence = MatchSentence::new(&complete_sentence);
+
             let result = self.rules[i..n]
                 .maybe_par_iter()
                 .enumerate()
                 .filter_map(|(j, rule)| {
-                    let changes = rule.apply(&finalized, &self);
+                    let changes = rule.apply(&match_sentence);
                     if changes.is_empty() {
                         None
                     } else {
@@ -177,26 +226,26 @@ impl Tokenizer {
                 .find_first(|_| true);
 
             if let Some((index, changes)) = result {
-                self.rules[index].change(&mut tokens, &self, changes);
+                self.rules[index].change(&mut sentence, &self, changes);
                 i = index + 1;
             } else {
                 i = n;
             }
         }
 
-        tokens.into_iter().map(DisambiguatedToken).collect()
+        sentence
     }
 
     /// Apply rule-based disambiguation to the tokens.
     /// This does not change the number of tokens, but can change the content arbitrarily.
-    pub fn disambiguate<'t>(
-        &'t self,
-        tokens: Vec<IncompleteToken<'t>>,
-    ) -> Vec<DisambiguatedToken<'t>> {
-        self.disambiguate_up_to_id(tokens, None)
+    pub fn disambiguate<'t>(&'t self, sentence: IncompleteSentence<'t>) -> IncompleteSentence<'t> {
+        self.disambiguate_up_to_id(sentence, None)
     }
 
-    fn get_token_strs<'t>(&self, text: &'t str) -> Vec<&'t str> {
+    fn get_token_ranges<'t>(
+        &self,
+        text: &'t str,
+    ) -> impl ExactSizeIterator<Item = Range<usize>> + 't {
         let mut tokens = Vec::new();
 
         let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
@@ -240,80 +289,90 @@ impl Tokenizer {
         }
 
         tokens.extend(split_text(&text[prev..text.len()]));
-        tokens
+        tokens.into_iter().map(move |token| {
+            let byte_start = (token.as_ptr() as usize)
+                .checked_sub(text.as_ptr() as usize)
+                .expect("Each token str is a slice of the text str.");
+
+            byte_start..byte_start + token.len()
+        })
     }
 
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
     // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
-    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Vec<IncompleteToken<'t>> {
-        let mut current_char = 0;
-        let token_strs = self.get_token_strs(sentence);
-        let mut tokens: Vec<_> = token_strs
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
-                let char_start = current_char;
-                let ptr = x.as_ptr() as usize;
-                current_char += x.chars().count();
+    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Option<IncompleteSentence<'t>> {
+        if sentence.trim().is_empty() {
+            return None;
+        }
 
-                let byte_start = ptr - sentence.as_ptr() as usize;
-                let trimmed = x.trim();
+        let token_strs = self.get_token_ranges(sentence);
+        let n_token_strs = token_strs.len();
+
+        let mut tokens: Vec<_> = token_strs
+            .enumerate()
+            .filter(|(_, range)| !sentence[range.clone()].trim().is_empty())
+            .map(|(i, range)| {
+                let byte_start = range.start;
+                let char_start = sentence[..byte_start].chars().count();
+
+                let token_text = sentence[range].trim();
 
                 let is_sentence_start = i == 0;
-                let is_sentence_end = i == token_strs.len() - 1;
+                let is_sentence_end = i == n_token_strs - 1;
 
-                IncompleteToken {
-                    word: Word::new_with_tags(
-                        self.tagger.id_word(trimmed.into()),
+                IncompleteToken::new(
+                    Word::new_with_tags(
+                        self.tagger.id_word(token_text.into()),
                         self.tagger.get_tags_with_options(
-                            trimmed,
+                            token_text,
                             if is_sentence_start { Some(true) } else { None },
                             None,
                         ),
                     ),
-                    char_span: (char_start, current_char),
-                    byte_span: (byte_start, byte_start + x.len()),
+                    Span::new(
+                        byte_start..byte_start + token_text.len(),
+                        char_start..char_start + token_text.chars().count(),
+                    ),
                     is_sentence_end,
-                    has_space_before: sentence[..byte_start].ends_with(char::is_whitespace),
-                    chunks: Vec::new(),
-                    multiword_data: None,
-                    sentence,
-                    tagger: self.tagger.as_ref(),
-                }
+                    sentence[..byte_start].ends_with(char::is_whitespace),
+                    Vec::new(),
+                    None,
+                )
             })
-            .filter(|token| !token.word.text.as_ref().is_empty())
             .collect();
 
-        if !tokens.is_empty() {
-            let last_idx = tokens.len() - 1;
-            tokens[last_idx].is_sentence_end = true;
+        let last_idx = tokens.len() - 1;
+        *tokens[last_idx].is_sentence_end_mut() = true;
 
-            if let Some(chunker) = &self.chunker {
-                chunker.apply(&mut tokens);
-            }
+        let mut sentence = IncompleteSentence::new(tokens, sentence, &self.tagger);
 
-            if let Some(multiword_tagger) = &self.multiword_tagger {
-                multiword_tagger.apply(&mut tokens, &self.tagger);
-            }
+        if let Some(chunker) = &self.chunker {
+            chunker.apply(&mut sentence);
         }
 
-        tokens
+        if let Some(multiword_tagger) = &self.multiword_tagger {
+            multiword_tagger.apply(&mut sentence);
+        }
+
+        Some(sentence)
     }
 
     /// Splits the text into sentences and tokenizes each sentence.
-    pub fn sentencize<'t>(&'t self, text: &'t str) -> Vec<Vec<IncompleteToken<'t>>> {
-        self.sentencizer
-            .split(text)
-            .into_iter()
-            .map(|sentence| self.tokenize(sentence))
-            .collect()
+    pub fn sentencize<'t>(&'t self, text: &'t str) -> IncompleteSentenceIter<'t> {
+        IncompleteSentenceIter {
+            text,
+            splits: self.sentencizer.split_ranges(text),
+            tokenizer: &self,
+            index: 0,
+            position: Position::default(),
+        }
     }
 
     /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.
-    pub fn pipe<'t>(&'t self, text: &'t str) -> Vec<Vec<Token<'t>>> {
-        self.sentencize(text)
-            .into_iter()
-            .map(|tokens| finalize(self.disambiguate(tokens)))
-            .collect()
+    pub fn pipe<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
+        SentenceIter {
+            inner: self.sentencize(text),
+            tokenizer: &self,
+        }
     }
 }

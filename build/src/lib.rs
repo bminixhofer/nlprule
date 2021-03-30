@@ -24,7 +24,7 @@ pub enum Error {
     #[error("Failed to validate {1:?} binary for lang {0}")]
     ValidationFailed(String, Binary, #[source] nlprule::Error),
     #[error(transparent)]
-    IOError(#[from] io::Error),
+    IoError(#[from] io::Error),
     #[error(transparent)]
     ZipError(#[from] ZipError),
     #[error("error postprocessing binaries: {0}")]

@@ -1,5 +1,4 @@
-use crate::rule::{engine::composition::GraphId, MatchGraph};
-use crate::tokenizer::Tokenizer;
+use crate::rule::{engine::composition::GraphId, MatchGraph, MatchSentence};
 use crate::utils::regex::Regex;
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,7 @@ pub enum Filter {
 
 #[enum_dispatch(Filter)]
 pub trait Filterable {
-    fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool;
+    fn keep(&self, sentence: &MatchSentence, graph: &MatchGraph) -> bool;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -25,10 +24,10 @@ pub struct NoDisambiguationEnglishPartialPosTagFilter {
 }
 
 impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
-    fn keep(&self, graph: &MatchGraph, tokenizer: &Tokenizer) -> bool {
-        graph.by_id(self.id).tokens(graph.tokens()).all(|token| {
-            if let Some(captures) = self.regexp.captures(&token.word.text.as_ref()) {
-                let tags = tokenizer
+    fn keep(&self, sentence: &MatchSentence, graph: &MatchGraph) -> bool {
+        graph.by_id(self.id).tokens(sentence).all(|token| {
+            if let Some(captures) = self.regexp.captures(&token.word().text.as_ref()) {
+                let tags = sentence
                     .tagger()
                     .get_tags(&captures.get(1).unwrap().as_str());
 

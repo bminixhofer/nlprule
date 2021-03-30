@@ -23,6 +23,6 @@ fn main() {
 
     let tokens = tokenizer.pipe(&opts.text);
 
-    println!("Tokens: {:#?}", tokens);
+    println!("Tokens: {:#?}", tokens.collect::<Vec<_>>());
     println!("Suggestions: {:#?}", rules.suggest(&opts.text, &tokenizer));
 }

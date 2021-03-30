@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use super::{structure, Error};
 use crate::{tokenizer::tag::Tagger, types::*};
@@ -644,9 +644,9 @@ fn parse_features(
     pattern: &structure::Pattern,
     unifications: &Option<Vec<structure::Unification>>,
     info: &mut BuildInfo,
-) -> Vec<Vec<POSFilter>> {
+) -> Vec<Vec<PosFilter>> {
     let mut filters = Vec::new();
-    let mut parse_feature = |id: &str| -> Vec<POSFilter> {
+    let mut parse_feature = |id: &str| -> Vec<PosFilter> {
         let unification = unifications
             .as_ref()
             .unwrap()
@@ -812,16 +812,19 @@ impl Rule {
             }
 
             let mut texts = Vec::new();
-            let mut char_length = 0;
             let mut suggestion: Option<Suggestion> = None;
 
             for part in &example.parts {
                 match part {
                     structure::ExamplePart::Text(text) => {
                         texts.push(text.as_str());
-                        char_length += text.chars().count();
                     }
                     structure::ExamplePart::Marker(marker) => {
+                        let (bytes_before, chars_before) =
+                            texts.iter().fold((0, 0), |acc, text| {
+                                (acc.0 + text.len(), acc.1 + text.chars().count())
+                            });
+
                         if suggestion.is_some() {
                             return Err(Error::Unexpected(
                                 "example must have one or zero markers".into(),
@@ -829,13 +832,12 @@ impl Rule {
                         }
 
                         texts.push(marker.text.as_str());
-                        let length = marker.text.chars().count();
 
                         if let Some(correction_text) = &example.correction {
                             let mut replacements: Vec<_> =
                                 correction_text.split('|').map(|x| x.to_string()).collect();
 
-                            replacements = if char_length == 0 {
+                            replacements = if chars_before == 0 {
                                 // title case if at start
                                 replacements
                                     .into_iter()
@@ -847,16 +849,16 @@ impl Rule {
                                 replacements
                             };
 
-                            suggestion = Some(Suggestion {
-                                source: "_Test".to_string(),
-                                message: "_Test".to_string(),
-                                start: char_length,
-                                end: char_length + length,
+                            suggestion = Some(Suggestion::new(
+                                "_Test".into(),
+                                "_Test".into(),
+                                Span::new(
+                                    bytes_before..bytes_before + marker.text.len(),
+                                    chars_before..chars_before + marker.text.chars().count(),
+                                ),
                                 replacements,
-                            });
+                            ));
                         }
-
-                        char_length += marker.text.chars().count();
                     }
                 }
             }
@@ -953,9 +955,9 @@ impl owned::WordData {
     }
 }
 
-fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> POSFilter {
+fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> PosFilter {
     match postag_regexp.as_deref() {
-        Some("yes") => POSFilter::new(PosMatcher::new(
+        Some("yes") => PosFilter::new(PosMatcher::new(
             Matcher::new_regex(
                 Regex::from_java_regex(&postag, true, true).unwrap(),
                 false,
@@ -963,7 +965,7 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
             ),
             info,
         )),
-        Some(_) | None => POSFilter::new(PosMatcher::new(
+        Some(_) | None => PosFilter::new(PosMatcher::new(
             Matcher::new_string(either::Left(postag.into()), false, false, true),
             info,
         )),
@@ -1221,7 +1223,7 @@ impl DisambiguationRule {
         if let Some(examples_structure) = data.examples.as_ref() {
             for example in examples_structure {
                 let mut texts = Vec::new();
-                let mut char_span: Option<(usize, usize)> = None;
+                let mut char_span: Option<Range<usize>> = None;
                 let mut char_length = 0;
 
                 for part in &example.parts {
@@ -1240,8 +1242,7 @@ impl DisambiguationRule {
                             texts.push(marker.text.as_str());
                             let length = marker.text.chars().count();
 
-                            char_span = Some((char_length, char_length + length));
-
+                            char_span = Some(char_length..char_length + length);
                             char_length += marker.text.chars().count();
                         }
                     }
