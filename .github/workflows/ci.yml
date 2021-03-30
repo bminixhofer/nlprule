@@ -38,7 +38,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --target wasm32-unknown-unknown --no-default-features --features regex-fancy
+          args: --target wasm32-unknown-unknown --no-default-features --features regex-fancy -p nlprule
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
         if: matrix.lang == 'en' # only need to run this once
