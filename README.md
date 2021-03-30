@@ -57,7 +57,6 @@ for sentence in tokenizer.pipe("A brief example is shown."):
             repr(token.chunks).ljust(24),
         )
 # prints:
-# ''         (0, 0)     ['SENT_START']           []                       []                      
 # 'A'        (0, 1)     ['DT']                   ['A', 'a']               ['B-NP-singular']       
 # 'brief'    (2, 7)     ['JJ']                   ['brief']                ['I-NP-singular']       
 # 'example'  (8, 15)    ['NN:UN']                ['example']              ['E-NP-singular']       
@@ -143,11 +142,11 @@ fn main() {
 
 ## Comparison to LanguageTool
 
-|         | \|Disambiguation rules\| | \|Grammar rules\| | LT version   | nlprule time | LanguageTool time |
-|---------|--------------------------|-------------------|--------------|--------------|-------------------|
-| English | 843 (100%)               | 3725 (~ 85%)      | 5.2          | 1            | 1.7 - 2.0         |
-| German  | 486 (100%)               | 2970 (~ 90%)      | 5.2          | 1            | 2.4 - 2.8         |
-| Spanish | *Experimental support. Not fully tested yet.*
+|         | \|Disambiguation rules\|                      | \|Grammar rules\| | LT version | nlprule time | LanguageTool time |
+| ------- | --------------------------------------------- | ----------------- | ---------- | ------------ | ----------------- |
+| English | 843 (100%)                                    | 3725 (~ 85%)      | 5.2        | 1            | 1.7 - 2.0         |
+| German  | 486 (100%)                                    | 2970 (~ 90%)      | 5.2        | 1            | 2.4 - 2.8         |
+| Spanish | *Experimental support. Not fully tested yet.* |
 
 See the [benchmark issue](https://github.com/bminixhofer/nlprule/issues/6) for details.
 

@@ -360,7 +360,6 @@ impl PyTokenizer {
     /// Returns:
     ///     tokens (Union[List[List[Token]], List[List[List[Token]]]]):
     ///         The analyzed tokens. A list of lists of tokens. The outer list corresponds to a sentence. Batched if the input is batched.
-    ///         NB: a special SENT_START token is always inserted as the first token in each sentence, otherwise tokens mostly correspond to words.
     #[text_signature = "(text_or_texts)"]
     fn pipe(&self, py: Python, text_or_texts: PyObject) -> PyResult<PyObject> {
         text_guard(py, text_or_texts, |text| {
