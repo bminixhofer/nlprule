@@ -5,7 +5,9 @@
 //! - A [Tokenizer][tokenizer::Tokenizer] to split a text into tokens and analyze it by chunking, lemmatizing and part-of-speech tagging. Can also be used independently of the grammatical rules.
 //! - A [Rules][rules::Rules] structure containing a set of grammatical error correction rules.
 //!
-//! # Example: correct a text
+//! # Examples
+//!
+//! Correct a text:
 //!
 //! ```no_run
 //! use nlprule::{Tokenizer, Rules};
@@ -20,7 +22,7 @@
 //! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
-//! # Example: get suggestions and correct a text
+//! Get suggestions and correct a text:
 //!
 //! ```no_run
 //! use nlprule::{Tokenizer, Rules, types::Suggestion, rules::apply_suggestions};
@@ -42,11 +44,28 @@
 //! # Ok::<(), nlprule::Error>(())
 //! ```
 //!
-//! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
+//! Tokenize & analyze a text:
 //!
-//! # The 't lifetime
-//! By convention the lifetime `'t` in this crate is the lifetime of the input text.
-//! Almost all structures with a lifetime are bound to this lifetime.
+//! ```no_run
+//! use nlprule::Tokenizer;
+//!
+//! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
+//!
+//! let text = "A brief example is shown.";
+//!
+//! // returns an iterator over sentences
+//! let sentence = tokenizer.pipe(text).next().expect("`text` contains one sentence.");
+//!
+//! println!("{:#?}", sentence);
+//! assert_eq!(sentence.tokens()[1].word().text.as_ref(), "brief");
+//! assert_eq!(sentence.tokens()[1].word().tags[0].pos.as_ref(), "JJ");
+//! assert_eq!(sentence.tokens()[1].chunks(), vec!["I-NP-singular"]);
+//! // some other information like char / byte span, lemmas etc. is also set!
+//! # Ok::<(), nlprule::Error>(())
+//! ```
+//! ---
+//! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
+
 #![warn(missing_docs)]
 use std::io;
 
@@ -67,10 +86,12 @@ pub use tokenizer::Tokenizer;
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("i/o error: {0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
-    #[error("deserialization error: {0}")]
+    #[error(transparent)]
     Deserialization(#[from] bincode::Error),
+    #[error(transparent)]
+    IdError(#[from] rule::id::Error),
 }
 
 /// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.

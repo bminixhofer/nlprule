@@ -11,6 +11,38 @@
 //! ```
 //!
 //! The [Category], [Group] and [Index] structs provide a way to identify these layers.
+//!
+//! # Examples
+//!
+//! Select individal rules:
+//!
+//! ```no_run
+//! use nlprule::{Tokenizer, Rules, rule::id::Category};
+//! use std::convert::TryInto;
+//!
+//! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
+//! let mut rules = Rules::new("path/to/en_rules.bin")?;
+//!
+//! // disable rules named "confusion_due_do" in category "confused_words"
+//! rules
+//!    .select_mut(
+//!        &Category::new("confused_words")
+//!            .join("confusion_due_do")
+//!            .into(),
+//!    )
+//!    .for_each(|rule| rule.disable());
+//!
+//! // disable all grammar rules
+//! rules
+//!    .select_mut(&Category::new("grammar").into())
+//!    .for_each(|rule| rule.disable());
+//!
+//! // a string syntax where slashes are the separator is also supported
+//! rules
+//!    .select_mut(&"confused_words/confusion_due_do".try_into()?)
+//!    .for_each(|rule| rule.enable());
+//! # Ok::<(), nlprule::Error>(())
+//! ```
 
 use serde::{Deserialize, Serialize};
 use std::{

@@ -584,18 +584,6 @@ impl Sub for Position {
     }
 }
 
-impl Position {
-    /// Gets the byte offset of this position.
-    pub fn byte(&self) -> usize {
-        self.byte
-    }
-
-    /// Gets the char offset of this position.
-    pub fn char(&self) -> usize {
-        self.char
-    }
-}
-
 /// A span in a text determined by start (inclusive) and end (exclusive) position.
 /// The start must always be greater than or equal to the end.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -615,8 +603,8 @@ impl Span {
         );
 
         Span {
-            byte: start.byte()..end.byte(),
-            char: start.char()..end.char(),
+            byte: start.byte..end.byte,
+            char: start.char..end.char,
         }
     }
 
@@ -663,34 +651,34 @@ impl Span {
 
     /// Sets the start position.
     pub fn set_start(&mut self, start: Position) {
-        self.byte.start = start.byte();
-        self.char.start = start.char();
+        self.byte.start = start.byte;
+        self.char.start = start.char;
     }
 
     /// Sets the end position.
     pub fn set_end(&mut self, end: Position) {
-        self.byte.end = end.byte();
-        self.char.end = end.char();
+        self.byte.end = end.byte;
+        self.char.end = end.char;
     }
 
     /// Shift the span right by the specified amount.
     pub fn rshift(mut self, position: Position) -> Self {
-        self.byte.start += position.byte();
-        self.byte.end += position.byte();
+        self.byte.start += position.byte;
+        self.byte.end += position.byte;
 
-        self.char.start += position.char();
-        self.char.end += position.char();
+        self.char.start += position.char;
+        self.char.end += position.char;
         self
     }
 
     /// Shift the span left by the specified amount.
     /// Clips at zero if the resulting span would have a negative component.
     pub fn lshift(mut self, position: Position) -> Self {
-        self.byte.start = self.byte.start.saturating_sub(position.byte());
-        self.byte.end = self.byte.end.saturating_sub(position.byte());
+        self.byte.start = self.byte.start.saturating_sub(position.byte);
+        self.byte.end = self.byte.end.saturating_sub(position.byte);
 
-        self.char.start = self.char.start.saturating_sub(position.char());
-        self.char.end = self.char.end.saturating_sub(position.char());
+        self.char.start = self.char.start.saturating_sub(position.char);
+        self.char.end = self.char.end.saturating_sub(position.char);
         self
     }
 }
