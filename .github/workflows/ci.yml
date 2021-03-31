@@ -144,7 +144,7 @@ jobs:
          
           # remove potentially cached wheels
           rm target/wheels/* || true
-          bash scripts/maturin.sh build --interpreter python --release --manylinux 1
+          bash scripts/maturin.sh build --interpreter python --release --manylinux 2014
 
           pip install $(ls target/wheels/* | head -n1)
           pytest python/test.py -s
