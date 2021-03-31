@@ -366,9 +366,8 @@ impl PyTokenizer {
             let tokens = self
                 .tokenizer
                 .pipe(&text)
-                .into_iter()
-                .map(|tokens| {
-                    tokens
+                .map(|sentence| {
+                    sentence
                         .into_iter()
                         .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
                         .collect::<PyResult<Vec<_>>>()
