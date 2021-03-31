@@ -147,6 +147,7 @@ jobs:
           bash scripts/maturin.sh build --interpreter python --release --manylinux 2014
 
           python -m pip install $(ls target/wheels/* | head -n1)
+          python python/test.py # check if import works
           python -m pytest python/test.py -s
         shell: bash
       - name: Upload wheel as artifact
