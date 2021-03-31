@@ -37,7 +37,7 @@
     {
         "os": "windows-latest",
         "python-version": "3.6",
-        "runOnEvent": "always"
+        "runOnEvent": "release"
     },
     {
         "os": "macos-latest",
