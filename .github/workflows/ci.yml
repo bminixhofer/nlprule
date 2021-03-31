@@ -139,14 +139,14 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build and Test
         run: |
+          python -m venv venv
+          . venv/bin/activate || . venv/Scripts/activate
           python -m pip install --upgrade pip
           python -m pip install maturin==0.9.4 pytest==6.1.2
-         
-          # remove potentially cached wheels
-          rm target/wheels/* || true
-          bash scripts/maturin.sh build --interpreter python --release --manylinux 2014
 
-          python -m pip install $(ls target/wheels/* | head -n1)
+          bash scripts/maturin.sh build --interpreter python --release --manylinux 2014
+          bash scripts/maturin.sh develop --release
+
           python python/test.py # check if import works
           python -m pytest python/test.py -s
         shell: bash
