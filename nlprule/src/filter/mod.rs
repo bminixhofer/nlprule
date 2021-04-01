@@ -4,7 +4,7 @@ use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 
 #[enum_dispatch]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Filter {
     NoDisambiguationEnglishPartialPosTagFilter,
 }
@@ -14,7 +14,7 @@ pub trait Filterable {
     fn keep(&self, sentence: &MatchSentence, graph: &MatchGraph) -> bool;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NoDisambiguationEnglishPartialPosTagFilter {
     pub(crate) id: GraphId,
     pub(crate) regexp: Regex,

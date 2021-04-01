@@ -7,7 +7,7 @@ pub mod composition;
 
 use composition::{Composition, GraphId, Group, MatchGraph, MatchSentence};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TokenEngine {
     pub(crate) composition: Composition,
     pub(crate) antipatterns: Vec<Composition>,
@@ -52,7 +52,7 @@ impl TokenEngine {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Engine {
     Token(TokenEngine),
     // regex with the `fancy_regex` backend is large on the stack

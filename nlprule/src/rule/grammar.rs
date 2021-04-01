@@ -3,7 +3,7 @@ use crate::types::*;
 use crate::utils::{self, regex::Regex};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Conversion {
     Nop,
     AllLower,
@@ -25,7 +25,7 @@ impl Conversion {
 }
 
 /// An example associated with a [Rule][crate::rule::Rule].
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Example {
     pub(crate) text: String,
     pub(crate) suggestion: Option<Suggestion>,
@@ -45,7 +45,7 @@ impl Example {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PosReplacer {
     pub(crate) matcher: PosMatcher,
 }
@@ -85,7 +85,7 @@ impl PosReplacer {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Match {
     pub(crate) id: GraphId,
     pub(crate) conversion: Conversion,
@@ -118,14 +118,14 @@ impl Match {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SynthesizerPart {
     Text(String),
     // Regex with the `fancy_regex` backend is large on the stack
     Match(Box<Match>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Synthesizer {
     pub(crate) use_titlecase_adjust: bool,
     pub(crate) parts: Vec<SynthesizerPart>,

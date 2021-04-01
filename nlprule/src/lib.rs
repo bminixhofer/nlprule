@@ -88,8 +88,9 @@ pub use tokenizer::Tokenizer;
 pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// (De)serialization error. Can have occured during deserialization or during serialization.
     #[error(transparent)]
-    Deserialization(#[from] bincode::Error),
+    Serialization(#[from] bincode::Error),
     #[error(transparent)]
     IdError(#[from] rule::id::Error),
 }

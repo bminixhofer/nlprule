@@ -6,13 +6,10 @@ use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, tokenizer::Toke
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
+    iter::FromIterator,
     path::Path,
 };
-
-/// Options for a rule set.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RulesOptions {}
 
 /// Language-dependent options for a rule set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +38,6 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
-    pub(crate) options: RulesOptions,
 }
 
 impl Rules {
@@ -51,31 +47,19 @@ impl Rules {
     /// - If the file can not be opened.
     /// - If the file content can not be deserialized to a rules set.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
-        Rules::new_with_options(p, RulesOptions::default())
-    }
-
-    /// Creates a new rule set with options. See [new][Rules::new].
-    pub fn new_with_options<P: AsRef<Path>>(p: P, options: RulesOptions) -> Result<Self, Error> {
         let reader = BufReader::new(File::open(p.as_ref())?);
-        let mut rules: Rules = bincode::deserialize_from(reader)?;
-
-        rules.options = options;
+        let rules: Rules = bincode::deserialize_from(reader)?;
         Ok(rules)
-    }
-
-    /// Gets the options of this rule set.
-    pub fn options(&self) -> &RulesOptions {
-        &self.options
-    }
-
-    /// Gets the options of this rule set (mutable).
-    pub fn options_mut(&mut self) -> &mut RulesOptions {
-        &mut self.options
     }
 
     /// Creates a new rules set from a reader.
     pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// Serializes this rules set to a writer.
+    pub fn to_writer<W: Write>(&self, writer: W) -> Result<(), Error> {
+        Ok(bincode::serialize_into(writer, &self)?)
     }
 
     /// All rules ordered by priority.
@@ -221,5 +205,23 @@ impl<'a> Iterator for RulesIterMut<'a> {
 
         self.inner
             .find(|rule| selector.map_or(true, |s| s.is_match(rule.id())))
+    }
+}
+
+impl IntoIterator for Rules {
+    type Item = Rule;
+    type IntoIter = std::vec::IntoIter<Rule>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.rules.into_iter()
+    }
+}
+
+impl<R> FromIterator<R> for Rules
+where
+    R: Into<Rule>,
+{
+    fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
+        let rules: Vec<Rule> = iter.into_iter().map(|x| x.into()).collect();
+        Self { rules }
     }
 }

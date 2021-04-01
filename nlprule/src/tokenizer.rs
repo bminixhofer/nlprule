@@ -14,7 +14,7 @@ use crate::{
 use fs_err::File;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
     ops::Range,
     path::Path,
     sync::Arc,
@@ -153,7 +153,7 @@ impl<'t> Iterator for SentenceIter<'t> {
 }
 
 /// The complete Tokenizer doing tagging, chunking and disambiguation.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Tokenizer {
     pub(crate) rules: Vec<DisambiguationRule>,
     pub(crate) chunker: Option<Chunker>,
@@ -177,6 +177,11 @@ impl Tokenizer {
     /// Creates a new tokenizer from a reader.
     pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// Serializes this rules set to a writer.
+    pub fn to_writer<W: Write>(&self, writer: W) -> Result<(), Error> {
+        Ok(bincode::serialize_into(writer, &self)?)
     }
 
     /// Gets all disambigation rules in the order they are applied.

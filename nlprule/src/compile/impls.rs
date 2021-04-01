@@ -20,7 +20,7 @@ use crate::{
         id::Category,
         DisambiguationRule, Rule,
     },
-    rules::{Rules, RulesLangOptions, RulesOptions},
+    rules::{Rules, RulesLangOptions},
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
@@ -353,10 +353,7 @@ impl Rules {
             );
         }
 
-        Rules {
-            rules,
-            options: RulesOptions::default(),
-        }
+        Rules { rules }
     }
 }
 

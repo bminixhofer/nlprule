@@ -28,7 +28,7 @@ impl From<MultiwordTaggerFields> for MultiwordTagger {
 ///
 /// They key difference to the [Tagger][crate::tokenizer::tag::Tagger] is that this tagger looks at sequences of tokens
 /// instead of at one token at a time.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(from = "MultiwordTaggerFields")]
 pub struct MultiwordTagger {
     #[serde(skip)]
