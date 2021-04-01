@@ -39,7 +39,7 @@ impl PosFilter {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Disambiguation {
     Remove(Vec<either::Either<owned::WordData, PosFilter>>),
     Add(Vec<owned::WordData>),
@@ -210,7 +210,7 @@ impl Disambiguation {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DisambiguationChange {
     pub text: String,
     pub char_span: Range<usize>,
@@ -218,7 +218,7 @@ pub struct DisambiguationChange {
     pub after: owned::Word,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DisambiguationExample {
     Unchanged(String),
     Changed(DisambiguationChange),

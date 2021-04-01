@@ -303,7 +303,7 @@ impl Model {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct MaxentTokenizer {
     pub(crate) model: Model,
 }
@@ -433,7 +433,7 @@ impl MaxentTokenizer {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct MaxentPosTagger {
     pub(crate) model: Model,
     pub(crate) tagdict: DefaultHashMap<String, Vec<String>>,
@@ -559,7 +559,7 @@ impl MaxentPosTagger {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct MaxentChunker {
     pub(crate) model: Model,
 }
@@ -700,7 +700,7 @@ impl MaxentChunker {
 
 /// Predicts noun chunks and verb chunks through a [Maximum Entropy Model](https://www.aclweb.org/anthology/W00-0729.pdf).
 /// Grammatical number (i. e. singular and plural) is also assigned through the part-of-speech tags of the tokens.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Chunker {
     pub(crate) token_model: MaxentTokenizer,
     pub(crate) pos_model: MaxentPosTagger,

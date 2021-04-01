@@ -27,7 +27,7 @@ pub mod owned {
     use super::*;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
     /// See [super::WordId].
     pub struct WordId(pub(crate) String, pub(crate) Option<WordIdInt>);
 
@@ -45,7 +45,7 @@ pub mod owned {
     }
 
     /// See [super::PosId].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
     pub struct PosId(pub(crate) String, pub(crate) PosIdInt);
 
     impl PosId {
@@ -62,7 +62,7 @@ pub mod owned {
     }
 
     /// See [super::WordData].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
     #[allow(missing_docs)]
     pub struct WordData {
         pub lemma: WordId,
@@ -77,7 +77,7 @@ pub mod owned {
     }
 
     /// See [super::Word].
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
     #[allow(missing_docs)]
     pub struct Word {
         pub text: WordId,
@@ -85,7 +85,7 @@ pub mod owned {
     }
 
     /// See [super::Token].
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
     #[allow(missing_docs)]
     pub struct Token {
         pub word: Word,
@@ -586,7 +586,7 @@ impl Sub for Position {
 
 /// A span in a text determined by start (inclusive) and end (exclusive) position.
 /// The start must always be greater than or equal to the end.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Span {
     byte: Range<usize>,
     char: Range<usize>,

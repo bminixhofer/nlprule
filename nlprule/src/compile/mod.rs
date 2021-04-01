@@ -61,17 +61,19 @@ impl BuildFilePaths {
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("input/output error")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("serialization error")]
+    #[error(transparent)]
     Serialization(#[from] bincode::Error),
-    #[error("JSON deserialization error")]
+    #[error(transparent)]
+    NlpruleError(#[from] crate::Error),
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error("error loading SRX")]
+    #[error(transparent)]
     Srx(#[from] srx::Error),
     #[error("language options do not exist for '{lang_code}'")]
     LanguageOptionsDoNotExist { lang_code: String },
-    #[error("regex syntax error: {0}")]
+    #[error(transparent)]
     RegexSyntax(#[from] regex_syntax::ast::Error),
     #[error("regex compilation error: {0}")]
     Regex(Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -79,17 +81,17 @@ pub enum Error {
     Unexpected(String),
     #[error("feature not implemented: {0}")]
     Unimplemented(String),
-    #[error("error parsing to integer: {0}")]
+    #[error(transparent)]
     ParseError(#[from] ParseIntError),
-    #[error("unknown error")]
+    #[error("unknown error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 /// Compiles the binaries from a build directory.
 pub fn compile(
     build_dir: impl AsRef<Path>,
-    mut rules_dest: impl io::Write,
-    mut tokenizer_dest: impl io::Write,
+    rules_dest: impl io::Write,
+    tokenizer_dest: impl io::Write,
 ) -> Result<(), Error> {
     let paths = BuildFilePaths::new(&build_dir);
 
@@ -185,12 +187,11 @@ pub fn compile(
         srx::SRX::from_str(&fs::read_to_string(&paths.srx_path)?)?.language_rules(lang_code),
         tokenizer_lang_options,
     )?;
-
-    bincode::serialize_into(&mut tokenizer_dest, &tokenizer)?;
+    tokenizer.to_writer(tokenizer_dest)?;
 
     info!("Creating grammar rules.");
     let rules = Rules::from_xml(&paths.grammar_path, &mut build_info, rules_lang_options);
-    bincode::serialize_into(&mut rules_dest, &rules)?;
+    rules.to_writer(rules_dest)?;
 
     // we need to write the regex cache after building the rules, otherwise it isn't fully populated
     let f = BufWriter::new(File::create(&paths.regex_cache_path)?);
