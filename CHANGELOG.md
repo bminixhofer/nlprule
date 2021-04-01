@@ -1,4 +1,9 @@
-# 0.5.0
+# 0.5.2
+
+- Restore `FromIterator` and `IntoIterator` impl on `Rules` (#58, thanks @drahnr!)
+- Add `Clone` derives on `Tokenizer` and `Rules` (and, accordingly, on their fields)
+
+# 0.5.1
 
 ## Breaking changes
 
@@ -37,7 +42,7 @@ rules
 // a string syntax where slashes are the separator is also supported
 rules
     .select_mut(&"confused_words/confusion_due_do".try_into()?)
-   .for_each(|rule| rule.enable());
+    .for_each(|rule| rule.enable());
 ```
 
 # 0.4.6
