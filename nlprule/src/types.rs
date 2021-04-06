@@ -1,26 +1,20 @@
 //! Fundamental types used by this crate.
 
 use crate::tokenizer::tag::Tagger;
+pub use crate::tokenizer::tag::{PosId, WordId};
+pub(crate) use crate::tokenizer::tag::{PosIdInt, SpecialPos, WordIdInt};
 use derivative::Derivative;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     cmp::Ordering,
     collections::{hash_map, HashMap, HashSet},
-    fmt,
     ops::{Add, AddAssign, Range, Sub},
 };
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct WordIdInt(pub u32);
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct PosIdInt(pub u16);
 
 /// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
 pub mod owned {
@@ -51,7 +45,7 @@ pub mod owned {
     impl PosId {
         /// Gets this ID as a reference ID.
         pub fn as_ref_id(&self) -> super::PosId {
-            super::PosId(self.0.as_str(), self.1)
+            super::PosId::regular(self.0.as_str(), self.1)
         }
     }
 
@@ -164,7 +158,7 @@ impl<'t> IncompleteSentence<'t> {
             tokens: self
                 .tokens
                 .into_iter()
-                .map(|token| token.into_token(tagger))
+                .map(|token| token.into_token())
                 .collect(),
             span: self.span,
         }
@@ -242,65 +236,6 @@ impl<'t> Sentence<'t> {
     }
 }
 
-/// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
-#[derive(Clone, PartialEq)]
-pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
-
-impl<'t> fmt::Debug for WordId<'t> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id_str = if let Some(id) = self.1 {
-            id.0.to_string()
-        } else {
-            "none".into()
-        };
-
-        write!(f, "{:?}<id={}>", self.0, id_str)
-    }
-}
-
-impl<'t> WordId<'t> {
-    pub(crate) fn to_owned_id(&self) -> owned::WordId {
-        owned::WordId(self.0.to_string(), self.1)
-    }
-
-    pub(crate) fn id(&self) -> &Option<WordIdInt> {
-        &self.1
-    }
-}
-
-impl<'t> AsRef<str> for WordId<'t> {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-/// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
-#[derive(Clone, Copy, PartialEq)]
-pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
-
-impl<'t> fmt::Debug for PosId<'t> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}<id={}>", self.0, self.1 .0)
-    }
-}
-
-impl<'t> PosId<'t> {
-    /// Converts this ID to an owned ID.
-    pub fn to_owned_id(&self) -> owned::PosId {
-        owned::PosId(self.0.to_string(), self.1)
-    }
-
-    pub(crate) fn id(&self) -> &PosIdInt {
-        &self.1
-    }
-}
-
-impl<'t> AsRef<str> for PosId<'t> {
-    fn as_ref(&self) -> &str {
-        self.0
-    }
-}
-
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
@@ -375,7 +310,7 @@ impl<'t> Word<'t> {
 
     /// Gets the word text as string.
     pub fn as_str(&'t self) -> &'t str {
-        self.text.as_ref()
+        self.text.as_str()
     }
 
     /// Removes all non-frozen tags.
@@ -430,22 +365,26 @@ impl<'t> IncompleteToken<'t> {
     }
 
     /// Converts this incomplete token to a complete token.
-    pub fn into_token(self, tagger: &'t Tagger) -> Token {
+    pub fn into_token(self) -> Token<'t> {
         let mut word = self.word.clone();
 
-        word.tags
-            .push(WordData::new(self.word.text.clone(), tagger.id_tag("")));
+        word.tags.push(WordData::new(
+            self.word.text.clone(),
+            PosId::special(SpecialPos::None),
+        ));
 
-        if word.tags.iter().all(|x| x.pos.0.is_empty()) {
+        if word.tags.iter().all(|x| x.pos.as_str().is_empty()) {
             word.tags.push(WordData::new(
                 self.word.text.clone(),
-                tagger.id_tag("UNKNOWN"),
+                PosId::special(SpecialPos::Unknown),
             ));
         }
 
         if self.is_sentence_end {
-            word.tags
-                .push(WordData::new(self.word.text, tagger.id_tag("SENT_END")));
+            word.tags.push(WordData::new(
+                self.word.text,
+                PosId::special(SpecialPos::SentEnd),
+            ));
         }
 
         Token {
@@ -514,6 +453,25 @@ pub struct Token<'t> {
     chunks: Vec<String>,
 }
 
+lazy_static! {
+    static ref SENT_START: Token<'static> = {
+        Token {
+            word: Word::new(
+                WordId::empty(),
+                vec![WordData::new(
+                    WordId::empty(),
+                    PosId::special(SpecialPos::SentStart),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            span: Span::default(),
+            has_space_before: false,
+            chunks: Vec::new(),
+        }
+    };
+}
+
 impl<'t> Token<'t> {
     /// Converts this token to an owned equivalent.
     pub fn to_owned_token(&self) -> owned::Token {
@@ -545,21 +503,8 @@ impl<'t> Token<'t> {
         &self.chunks
     }
 
-    pub(crate) fn sent_start(tagger: &Tagger) -> Token<'static> {
-        Token {
-            word: Word::new(
-                tagger.id_word("".into()),
-                vec![WordData::new(
-                    tagger.id_word("".into()),
-                    tagger.id_tag("SENT_START"),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-            span: Span::default(),
-            has_space_before: false,
-            chunks: Vec::new(),
-        }
+    pub(crate) fn sent_start() -> &'static Token<'static> {
+        &*SENT_START
     }
 
     /// Shift the span of this sentence right by the specified amount.

@@ -32,7 +32,7 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
                     .get_tags(&captures.get(1).unwrap().as_str());
 
                 tags.iter()
-                    .any(|x| self.postag_regexp.is_match(x.pos().as_ref()))
+                    .any(|x| self.postag_regexp.is_match(x.pos().as_str()))
             } else {
                 false
             }

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{tokenizer::tag::Tagger, types::*};
+use crate::types::*;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
@@ -50,12 +50,7 @@ pub enum Disambiguation {
 }
 
 impl Disambiguation {
-    pub fn apply<'t>(
-        &'t self,
-        groups: Vec<Vec<&mut IncompleteToken<'t>>>,
-        retain_last: bool,
-        tagger: &'t Tagger,
-    ) {
+    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut IncompleteToken<'t>>>, retain_last: bool) {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
@@ -127,7 +122,7 @@ impl Disambiguation {
                         );
 
                         token.word_mut().push(data);
-                        token.word_mut().retain(|x| !x.pos().as_ref().is_empty());
+                        token.word_mut().retain(|x| !x.pos().as_str().is_empty());
                     }
                 }
             }
@@ -156,7 +151,7 @@ impl Disambiguation {
                 for (group, use_mask_val) in groups.iter().zip(mask) {
                     for token in group.iter() {
                         if *use_mask_val {
-                            let finalized: Token = (*token).clone().into_token(tagger);
+                            let finalized: Token = (*token).clone().into_token();
 
                             for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
                                 *mask_val = *mask_val && PosFilter::and(filter, finalized.word());

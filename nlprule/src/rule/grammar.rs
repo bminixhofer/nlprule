@@ -57,9 +57,7 @@ impl PosReplacer {
             .get_tags(text)
             .iter()
             .map(|x| {
-                let group_words = sentence
-                    .tagger()
-                    .get_group_members(&x.lemma().as_ref().to_string());
+                let group_words = sentence.tagger().get_group_members(&x.lemma().as_str());
                 let mut data = Vec::new();
                 for word in group_words {
                     if let Some(i) = sentence

@@ -136,7 +136,7 @@ impl PyTagger {
         self.tagger
             .get_tags_with_options(word, add_lower, use_compound_split_heuristic)
             .into_iter()
-            .map(|x| (x.lemma().as_ref().to_string(), x.pos().as_ref().to_string()))
+            .map(|x| (x.lemma().as_str().to_string(), x.pos().as_str().to_string()))
             .collect()
     }
 

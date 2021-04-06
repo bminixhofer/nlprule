@@ -172,11 +172,8 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(
-                groups,
-                tokenizer.lang_options().retain_last,
-                tokenizer.tagger(),
-            );
+            self.disambiguations
+                .apply(groups, tokenizer.lang_options().retain_last);
         }
     }
 
@@ -238,7 +235,7 @@ impl DisambiguationRule {
                         .iter()
                         .collect::<HashSet<&owned::WordData>>();
 
-                    after.word().as_str() == change.after.text.as_ref_id().as_ref()
+                    after.word().as_str() == change.after.text.as_ref_id().as_str()
                         && unordered_tags == unordered_tags_change
                 }
             };

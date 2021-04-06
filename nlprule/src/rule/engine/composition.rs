@@ -96,14 +96,14 @@ impl TextMatcher {
         if self.set.is_none() {
             return self
                 .matcher
-                .is_match(word_id.as_ref(), context, case_sensitive);
+                .is_match(word_id.as_str(), context, case_sensitive);
         }
 
         if let Some(id) = word_id.id() {
             self.set.as_ref().unwrap().contains(id)
         } else {
             self.matcher
-                .is_match(word_id.as_ref(), context, case_sensitive)
+                .is_match(word_id.as_str(), context, case_sensitive)
         }
     }
 }
@@ -115,7 +115,7 @@ pub struct PosMatcher {
 
 impl PosMatcher {
     pub fn is_match(&self, pos: &PosId) -> bool {
-        self.mask[pos.id().0 as usize]
+        self.mask[pos.id().value() as usize]
     }
 }
 
@@ -370,7 +370,7 @@ impl<'t> MatchSentence<'t> {
     pub fn new(sentence: &'t Sentence<'t>) -> Self {
         MatchSentence {
             sentence,
-            sent_start: sentence.tagger().sent_start(),
+            sent_start: Token::sent_start(),
         }
     }
 

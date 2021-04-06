@@ -770,7 +770,7 @@ impl Chunker {
                                 .word()
                                 .tags()
                                 .iter()
-                                .any(|tag| tag.pos().as_ref() == "NNS")
+                                .any(|tag| tag.pos().as_str() == "NNS")
                         })
                         .unwrap_or(false);
 

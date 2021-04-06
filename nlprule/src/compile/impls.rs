@@ -101,12 +101,6 @@ impl Tagger {
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
 
-        // hardcoded special tags
-        tag_store.insert("");
-        tag_store.insert("SENT_START");
-        tag_store.insert("SENT_END");
-        tag_store.insert("UNKNOWN");
-
         // add language specific special tags
         tag_store.extend(lang_options.extra_tags.iter().map(|x| x.as_str()));
 
@@ -125,23 +119,34 @@ impl Tagger {
             tag_store.insert(tag);
         }
 
-        // word store ids should be consistent across runs
-        let mut word_store: Vec<_> = word_store.iter().collect();
-        word_store.sort();
+        // the empty string must not be part of any wordlist
+        assert!(!word_store.contains(""));
 
-        //  tag store ids should be consistent across runs
-        let mut tag_store: Vec<_> = tag_store.iter().collect();
-        tag_store.sort();
+        // word store ids should be consistent across runs
+        let mut word_store: Vec<_> = word_store.into_iter().collect();
+        word_store.sort_unstable();
+
+        // add special empty string to wordlist, must be the first element to have id 0
+        word_store.insert(0, "");
+
+        // tag store ids should be consistent across runs
+        let mut tag_store: Vec<_> = tag_store.into_iter().collect();
+        tag_store.sort_unstable();
+
+        // add special part of speech tags, they must have ids starting from zero
+        for (i, special_pos) in SpecialPos::iter().enumerate() {
+            tag_store.insert(i, special_pos);
+        }
 
         let word_store: BiMap<_, _> = word_store
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), WordIdInt(i as u32)))
+            .map(|(i, x)| (x.to_string(), WordIdInt::from_value_unchecked(i as u32)))
             .collect();
         let tag_store: BiMap<_, _> = tag_store
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), PosIdInt(i as u16)))
+            .map(|(i, x)| (x.to_string(), PosIdInt::from_value_unchecked(i as u16)))
             .collect();
 
         for (word, inflection, tag) in lines.iter() {
@@ -167,7 +172,6 @@ impl Tagger {
             word_store,
             tag_store,
             lang_options,
-            ..Default::default()
         })
     }
 }
@@ -250,7 +254,7 @@ impl PosMatcher {
         let mut mask = vec![false; info.tagger().tag_store().len()];
 
         for (word, id) in info.tagger().tag_store().iter() {
-            mask[id.0 as usize] = matcher.is_match(word.as_str(), None, None);
+            mask[id.value() as usize] = matcher.is_match(word.as_str(), None, None);
         }
 
         PosMatcher { mask }
