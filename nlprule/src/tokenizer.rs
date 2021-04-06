@@ -326,7 +326,7 @@ impl Tokenizer {
                 let is_sentence_end = i == n_token_strs - 1;
 
                 IncompleteToken::new(
-                    Word::new_with_tags(
+                    Word::new(
                         self.tagger.id_word(token_text.into()),
                         self.tagger.get_tags_with_options(
                             token_text,
@@ -341,7 +341,6 @@ impl Tokenizer {
                     is_sentence_end,
                     sentence[..byte_start].ends_with(char::is_whitespace),
                     Vec::new(),
-                    None,
                 )
             })
             .collect();

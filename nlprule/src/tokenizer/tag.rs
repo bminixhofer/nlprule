@@ -308,12 +308,13 @@ impl Tagger {
                     if !next_tags.is_empty() {
                         tags = next_tags
                             .into_iter()
-                            .map(|mut x| {
-                                x.lemma = self.id_word(
-                                    format!("{}{}", &word[..i], x.lemma.as_ref().to_lowercase())
+                            .map(|x| {
+                                let lemma = self.id_word(
+                                    format!("{}{}", &word[..i], x.lemma().as_ref().to_lowercase())
                                         .into(),
                                 );
-                                x
+
+                                WordData::new(lemma, *x.pos())
                             })
                             .collect();
                         break;

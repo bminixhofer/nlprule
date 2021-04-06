@@ -62,9 +62,9 @@ impl Matcher {
                         .next()
                         .map_or(false, |token| {
                             if case_sensitive {
-                                token.word().text.as_ref() == input
+                                token.word().as_str() == input
                             } else {
-                                UniCase::new(token.word().text.as_ref()) == UniCase::new(input)
+                                UniCase::new(token.word().as_str()) == UniCase::new(input)
                             }
                         })
                 }
@@ -136,7 +136,7 @@ impl WordDataMatcher {
             let pos_matches = self
                 .pos_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(&x.pos));
+                .map_or(true, |m| m.is_match(x.pos()));
 
             // matching part-of-speech tag is faster than inflection, so check POS first and early exit if it doesn't match
             if !pos_matches {
@@ -146,7 +146,7 @@ impl WordDataMatcher {
             let inflect_matches = self
                 .inflect_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(&x.lemma, context, case_sensitive));
+                .map_or(true, |m| m.is_match(x.lemma(), context, case_sensitive));
 
             inflect_matches
         })
@@ -193,7 +193,7 @@ pub mod concrete {
             let (sentence, _) = context;
 
             self.matcher
-                .is_match(&sentence.index(position).word().text, Some(context), None)
+                .is_match(&sentence.index(position).word().text(), Some(context), None)
         }
     }
 
@@ -233,7 +233,7 @@ pub mod concrete {
     impl Atomable for WordDataAtom {
         fn is_match(&self, context: Context, position: usize) -> bool {
             let (sentence, _) = context;
-            let tags = &sentence.index(position).word().tags;
+            let tags = &sentence.index(position).word().tags();
 
             self.matcher
                 .is_match(&tags, Some(context), Some(self.case_sensitive))

@@ -275,7 +275,7 @@ impl<'t> AsRef<str> for WordId<'t> {
 }
 
 /// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
 
 impl<'t> fmt::Debug for PosId<'t> {
@@ -304,16 +304,39 @@ impl<'t> AsRef<str> for PosId<'t> {
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
-    /// The lemma word ID.
-    pub lemma: WordId<'t>,
-    /// The part-of-speech ID.
-    pub pos: PosId<'t>,
+    lemma: WordId<'t>,
+    pos: PosId<'t>,
+    frozen: bool,
 }
 
 impl<'t> WordData<'t> {
+    /// The lemma word ID.
+    pub fn lemma(&self) -> &WordId<'t> {
+        &self.lemma
+    }
+
+    /// The part-of-speech ID.
+    pub fn pos(&self) -> &PosId<'t> {
+        &self.pos
+    }
+
     /// Creates a new referential word data.
     pub fn new(lemma: WordId<'t>, pos: PosId<'t>) -> Self {
-        WordData { lemma, pos }
+        WordData {
+            lemma,
+            pos,
+            frozen: false,
+        }
+    }
+
+    /// Freezes the data hinting that it should never be removed from a word once added.
+    pub fn freeze(&mut self) {
+        self.frozen = true;
+    }
+
+    /// Checks whether the data is frozen i.e. whether it can never be removed from a word once added.
+    pub fn frozen(&self) -> bool {
+        self.frozen
     }
 
     /// Converts to owned word data.
@@ -329,17 +352,45 @@ impl<'t> WordData<'t> {
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word<'t> {
-    /// The text ID of this token.
-    pub text: WordId<'t>,
-    /// Multiple pairs of (lemma, part-of-speech) associated with this token.
-    /// Order is generally not significant.
-    pub tags: Vec<WordData<'t>>,
+    text: WordId<'t>,
+    tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Word<'t> {
-    /// Creates a new Word with tags.
-    pub fn new_with_tags(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
+    /// Creates a new Word.
+    pub fn new(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
         Word { text, tags }
+    }
+
+    /// The text ID of this token.
+    pub fn text(&self) -> &WordId<'t> {
+        &self.text
+    }
+
+    /// Multiple pairs of (lemma, part-of-speech) associated with this token.
+    /// Order is in general not significant.
+    pub fn tags(&self) -> &[WordData<'t>] {
+        &self.tags
+    }
+
+    /// Gets the word text as string.
+    pub fn as_str(&'t self) -> &'t str {
+        self.text.as_ref()
+    }
+
+    /// Removes all non-frozen tags.
+    pub fn clear(&mut self) {
+        self.retain(|_| false);
+    }
+
+    /// Equivalent to [Vec::retain][std::vec::Vec::retain] on the tags but makes sure frozen tags are ignored.
+    pub fn retain<F: FnMut(&WordData<'t>) -> bool>(&mut self, mut f: F) {
+        self.tags.retain(|data| data.frozen() || f(data));
+    }
+
+    /// Adds a new tag to the word.
+    pub fn push(&mut self, data: WordData<'t>) {
+        self.tags.push(data);
     }
 
     /// Converts to an owned word.
@@ -359,7 +410,6 @@ pub struct IncompleteToken<'t> {
     is_sentence_end: bool,
     has_space_before: bool,
     chunks: Vec<String>,
-    multiword_data: Option<WordData<'t>>,
 }
 
 impl<'t> IncompleteToken<'t> {
@@ -369,7 +419,6 @@ impl<'t> IncompleteToken<'t> {
         is_sentence_end: bool,
         has_space_before: bool,
         chunks: Vec<String>,
-        multiword_data: Option<WordData<'t>>,
     ) -> Self {
         IncompleteToken {
             word,
@@ -377,7 +426,6 @@ impl<'t> IncompleteToken<'t> {
             is_sentence_end,
             has_space_before,
             chunks,
-            multiword_data,
         }
     }
 
@@ -387,9 +435,6 @@ impl<'t> IncompleteToken<'t> {
 
         word.tags
             .push(WordData::new(self.word.text.clone(), tagger.id_tag("")));
-
-        // multiword tags are added last because they can not be touched by disambiguation
-        word.tags.extend(self.multiword_data.into_iter());
 
         if word.tags.iter().all(|x| x.pos.0.is_empty()) {
             word.tags.push(WordData::new(
@@ -451,16 +496,6 @@ impl<'t> IncompleteToken<'t> {
         &mut self.chunks
     }
 
-    /// A *multiword* lemma and part-of-speech tag. Set if the token was found in a list of phrases.
-    pub fn multiword_data(&self) -> &Option<WordData<'t>> {
-        &self.multiword_data
-    }
-
-    #[allow(missing_docs)]
-    pub fn multiword_data_mut(&mut self) -> &mut Option<WordData<'t>> {
-        &mut self.multiword_data
-    }
-
     /// Shift the span of this token right by the specified amount.
     pub fn rshift(mut self, position: Position) -> Self {
         self.span = self.span.rshift(position);
@@ -512,7 +547,7 @@ impl<'t> Token<'t> {
 
     pub(crate) fn sent_start(tagger: &Tagger) -> Token<'static> {
         Token {
-            word: Word::new_with_tags(
+            word: Word::new(
                 tagger.id_word("".into()),
                 vec![WordData::new(
                     tagger.id_word("".into()),

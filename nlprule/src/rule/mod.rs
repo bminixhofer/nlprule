@@ -226,7 +226,7 @@ impl DisambiguationRule {
 
                     let unordered_tags = after
                         .word()
-                        .tags
+                        .tags()
                         .iter()
                         .map(|x| x.to_owned_word_data())
                         .collect::<HashSet<owned::WordData>>();
@@ -238,7 +238,7 @@ impl DisambiguationRule {
                         .iter()
                         .collect::<HashSet<&owned::WordData>>();
 
-                    after.word().text == change.after.text.as_ref_id()
+                    after.word().as_str() == change.after.text.as_ref_id().as_ref()
                         && unordered_tags == unordered_tags_change
                 }
             };

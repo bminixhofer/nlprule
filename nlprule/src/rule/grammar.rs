@@ -59,14 +59,14 @@ impl PosReplacer {
             .map(|x| {
                 let group_words = sentence
                     .tagger()
-                    .get_group_members(&x.lemma.as_ref().to_string());
+                    .get_group_members(&x.lemma().as_ref().to_string());
                 let mut data = Vec::new();
                 for word in group_words {
                     if let Some(i) = sentence
                         .tagger()
                         .get_tags(word)
                         .iter()
-                        .position(|x| self.matcher.is_match(&x.pos))
+                        .position(|x| self.matcher.is_match(x.pos()))
                     {
                         data.push((word.to_string(), i));
                     }
@@ -168,8 +168,7 @@ impl Synthesizer {
                     (self.use_titlecase_adjust
                         && first_token
                             .word()
-                            .text
-                            .as_ref()
+                            .as_str()
                             .chars()
                             .next() // a word is expected to always have at least one char, but be defensive here
                             .map_or(false, char::is_uppercase))
