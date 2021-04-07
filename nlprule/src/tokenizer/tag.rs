@@ -249,13 +249,14 @@ impl From<Tagger> for TaggerFields {
 impl From<TaggerFields> for Tagger {
     fn from(data: TaggerFields) -> Self {
         let word_store_fst = Map::new(data.word_store_fst).unwrap();
-        let word_store: BiMap<String, WordIdInt> = word_store_fst
-            .into_stream()
-            .into_str_vec()
-            .unwrap()
-            .into_iter()
-            .map(|(key, value)| (key, WordIdInt(value as u32)))
-            .collect();
+        let mut word_store = BiMap::<String, WordIdInt>::with_capacity(word_store_fst.len());
+
+        let mut stream = word_store_fst.into_stream();
+        while let Some((key, value)) = stream.next() {
+            if let Some(key) = std::str::from_utf8(&key[..(key.len().saturating_sub(1))]).ok() {
+                word_store.insert(key.to_owned(), WordIdInt(value as u32));
+            }
+        };
 
         let mut tags = DefaultHashMap::new();
         let mut groups = DefaultHashMap::new();
@@ -264,17 +265,11 @@ impl From<TaggerFields> for Tagger {
         let mut stream = tag_fst.into_stream();
 
         while let Some((key, value)) = stream.next() {
-            let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
+            let word = std::str::from_utf8(&key[..(key.len().saturating_sub(1))]).unwrap();
             let word_id = *word_store.get_by_left(word).unwrap();
 
-            let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt(u32::from_be_bytes([
-                value_bytes[0],
-                value_bytes[1],
-                value_bytes[2],
-                value_bytes[3],
-            ]));
-            let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+            let inflection_id = WordIdInt((value & 0xFFFF_FFFF as u64) as u32);
+            let pos_id = PosIdInt((value >> 48) as u16);
 
             let group = groups.entry(inflection_id).or_insert_with(Vec::new);
             if !group.contains(&word_id) {
