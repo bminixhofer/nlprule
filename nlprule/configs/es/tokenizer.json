@@ -1,6 +1,5 @@
 {
     "allow_errors": true,
-    "retain_last": true,
     "ignore_ids": [],
     "extra_split_chars": [
         "-",

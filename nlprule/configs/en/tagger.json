@@ -6,5 +6,6 @@
         "ORD",
         "SYM",
         "RB_SENT"
-    ]
+    ],
+    "retain_last": true
 }

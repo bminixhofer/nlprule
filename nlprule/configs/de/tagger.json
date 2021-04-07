@@ -4,5 +4,6 @@
     "extra_tags": [
         "PKT",
         "PRO:IND:DAT:SIN:NEU"
-    ]
+    ],
+    "retain_last": false
 }

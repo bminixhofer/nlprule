@@ -44,13 +44,16 @@ pub enum Disambiguation {
     Remove(Vec<either::Either<owned::WordData, PosFilter>>),
     Add(Vec<owned::WordData>),
     Replace(Vec<owned::WordData>),
-    Filter(Vec<Option<either::Either<owned::WordData, PosFilter>>>),
+    Filter(
+        Vec<Option<either::Either<owned::WordData, PosFilter>>>,
+        bool,
+    ),
     Unify(Vec<Vec<PosFilter>>, Vec<Option<PosFilter>>, Vec<bool>),
     Nop,
 }
 
 impl Disambiguation {
-    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut IncompleteToken<'t>>>, retain_last: bool) {
+    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut IncompleteToken<'t>>>) {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
@@ -70,7 +73,7 @@ impl Disambiguation {
                     }
                 }
             }
-            Disambiguation::Filter(filters) => {
+            Disambiguation::Filter(filters, retain_last) => {
                 for (group, maybe_filter) in groups.into_iter().zip(filters) {
                     if let Some(data_or_filter) = maybe_filter {
                         match data_or_filter {
@@ -86,7 +89,7 @@ impl Disambiguation {
                                         .retain(|x| *x.pos() == limit.pos.as_ref_id());
 
                                     if token.word().tags().is_empty() {
-                                        if retain_last {
+                                        if *retain_last {
                                             token
                                                 .word_mut()
                                                 .push(WordData::new(last, limit.pos.as_ref_id()));

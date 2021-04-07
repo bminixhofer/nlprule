@@ -147,12 +147,7 @@ impl DisambiguationRule {
         Changes(all_byte_spans)
     }
 
-    pub(crate) fn change<'t>(
-        &'t self,
-        sentence: &mut IncompleteSentence<'t>,
-        tokenizer: &'t Tokenizer,
-        changes: Changes,
-    ) {
+    pub(crate) fn change<'t>(&'t self, sentence: &mut IncompleteSentence<'t>, changes: Changes) {
         log::info!("applying {}", self.id);
 
         for byte_spans in changes.0 {
@@ -172,8 +167,7 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations
-                .apply(groups, tokenizer.lang_options().retain_last);
+            self.disambiguations.apply(groups);
         }
     }
 
@@ -201,7 +195,7 @@ impl DisambiguationRule {
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut sentence_after, tokenizer, changes);
+                self.change(&mut sentence_after, changes);
             }
 
             info!("Tokens: {:#?}", sentence_before);

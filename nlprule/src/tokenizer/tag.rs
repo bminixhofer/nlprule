@@ -158,6 +158,9 @@ pub(crate) struct TaggerLangOptions {
     pub always_add_lower_tags: bool,
     /// Used part-of-speech tags which are not in the tagger dictionary.
     pub extra_tags: Vec<String>,
+    /// Whether to retain the last tag if disambiguation leads to an empty tag.
+    /// Language-specific in LT so it has to be an option.
+    pub retain_last: bool,
 }
 
 impl Default for TaggerLangOptions {
@@ -166,6 +169,7 @@ impl Default for TaggerLangOptions {
             use_compound_split_heuristic: false,
             always_add_lower_tags: false,
             extra_tags: Vec::new(),
+            retain_last: false,
         }
     }
 }
@@ -324,6 +328,10 @@ impl Tagger {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn lang_options(&self) -> &TaggerLangOptions {
+        &self.lang_options
     }
 
     fn get_strict_tags(

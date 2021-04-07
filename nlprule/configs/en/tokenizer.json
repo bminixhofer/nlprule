@@ -1,6 +1,5 @@
 {
     "allow_errors": false,
-    "retain_last": true,
     "ignore_ids": [
         "DISAMBIGUATION/BEST_JJS/0"
     ],
