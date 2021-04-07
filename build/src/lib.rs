@@ -596,6 +596,7 @@ mod tests {
 
         BinaryBuilder::new(&["en"], tempdir)
             .fallback_to_build_dir(true)
+            .cache_dir(None)
             .build()?
             .validate()?;
 
