@@ -10,6 +10,9 @@ members = [
 opt-level = 2
 build-override = { opt-level = 2 }
 
+[patch.crates-io]
+bimap = { git = "https://github.com/drahnr/bimap-rs.git", branch = "master" }
+
 # [profile.release] # BUILD_BINDINGS_UNCOMMENT
 # lto = "fat" # BUILD_BINDINGS_UNCOMMENT
 # codegen-units = 1 # BUILD_BINDINGS_UNCOMMENT

@@ -1,4 +1,5 @@
 use bimap::BiMap;
+use fnv::{FnvBuildHasher, FnvHashSet};
 use fs_err::File;
 use indexmap::IndexMap;
 use log::warn;
@@ -138,12 +139,12 @@ impl Tagger {
             tag_store.insert(i, special_pos);
         }
 
-        let word_store: BiMap<_, _> = word_store
+        let word_store: FastBiMap<_, _> = word_store
             .iter()
             .enumerate()
             .map(|(i, x)| (x.to_string(), WordIdInt::from_value_unchecked(i as u32)))
             .collect();
-        let tag_store: BiMap<_, _> = tag_store
+        let tag_store: FastBiMap<_, _> = tag_store
             .iter()
             .enumerate()
             .map(|(i, x)| (x.to_string(), PosIdInt::from_value_unchecked(i as u16)))
@@ -154,9 +155,9 @@ impl Tagger {
             let inflection_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
+            let group = groups.entry(*inflection_id).or_insert_with(HashSet::<WordIdInt, FnvBuildHasher>::default);
             if !group.contains(word_id) {
-                group.push(*word_id);
+                group.insert(*word_id);
             }
 
             tags.entry(*word_id)

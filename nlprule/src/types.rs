@@ -11,10 +11,23 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::{Add, AddAssign, Range, Sub},
 };
+use bimap::BiHashMap;
+
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
+
+pub(crate) type FastBiMap<L,R> = BiHashMap<L, R, hashbrown::hash_map::DefaultHashBuilder, hashbrown::hash_map::DefaultHashBuilder>;
+pub(crate) type FastHashSet<I> = hashbrown::HashSet<I>;
+pub(crate) type FastHashMap<K,V> = hashbrown::HashMap<K,V>;
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct WordIdInt(pub u32);
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct PosIdInt(pub u16);
 
 /// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
 pub mod owned {

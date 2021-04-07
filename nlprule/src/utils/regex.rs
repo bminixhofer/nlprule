@@ -491,7 +491,9 @@ cfg_if::cfg_if! {
         use regex_impl_all as regex_impl;
     } else if #[cfg(feature = "regex-onig")] {
         use regex_impl_onig as regex_impl;
-    } else {
+    } else if #[cfg(feature = "regex-fancy")] {
         use regex_impl_fancy as regex_impl;
+    } else {
+        compile_error!{"Must select exactly one regex impl via features: regex-onig OR regex-fancy"}
     }
 }
