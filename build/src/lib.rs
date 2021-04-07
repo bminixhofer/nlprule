@@ -594,12 +594,8 @@ mod tests {
         let tempdir = tempdir::TempDir::new("builder_test")?;
         let tempdir = tempdir.path();
 
-        let build_tempdir = tempdir::TempDir::new("builder_build_dir_test")?;
-        let build_tempdir = build_tempdir.path().into();
-
         BinaryBuilder::new(&["en"], tempdir)
             .fallback_to_build_dir(true)
-            .build_dir(Some(build_tempdir)) // to avoid problems with cached build dirs
             .build()?
             .validate()?;
 

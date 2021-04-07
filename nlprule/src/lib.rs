@@ -57,8 +57,8 @@
 //! let sentence = tokenizer.pipe(text).next().expect("`text` contains one sentence.");
 //!
 //! println!("{:#?}", sentence);
-//! assert_eq!(sentence.tokens()[1].word().text.as_ref(), "brief");
-//! assert_eq!(sentence.tokens()[1].word().tags[0].pos.as_ref(), "JJ");
+//! assert_eq!(sentence.tokens()[1].word().text().as_str(), "brief");
+//! assert_eq!(sentence.tokens()[1].word().tags()[0].pos().as_str(), "JJ");
 //! assert_eq!(sentence.tokens()[1].chunks(), vec!["I-NP-singular"]);
 //! // some other information like char / byte span, lemmas etc. is also set!
 //! # Ok::<(), nlprule::Error>(())

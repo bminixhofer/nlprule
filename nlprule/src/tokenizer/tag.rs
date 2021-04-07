@@ -14,6 +14,7 @@ use std::{borrow::Cow, fmt, iter::once};
 pub(crate) struct WordIdInt(u32);
 
 impl WordIdInt {
+    #[allow(dead_code)] // used in compile module
     pub(crate) fn from_value_unchecked(value: u32) -> Self {
         WordIdInt(value)
     }
@@ -24,6 +25,7 @@ impl WordIdInt {
 pub(crate) struct PosIdInt(u16);
 
 impl PosIdInt {
+    #[allow(dead_code)] // used in compile module
     pub(crate) fn from_value_unchecked(value: u16) -> Self {
         PosIdInt(value)
     }
@@ -86,6 +88,7 @@ impl SpecialPos {
         }
     }
 
+    #[allow(dead_code)] // used in compile module
     pub fn iter() -> impl Iterator<Item = &'static str> + 'static {
         [
             SpecialPos::None,
@@ -330,6 +333,7 @@ impl Tagger {
         }
     }
 
+    #[allow(dead_code)] // used in compile module
     pub(crate) fn lang_options(&self) -> &TaggerLangOptions {
         &self.lang_options
     }
