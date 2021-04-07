@@ -244,13 +244,22 @@ impl From<TaggerFields> for Tagger {
             Default::default(),
             Default::default(),
         );
-
         let mut stream = word_store_fst.into_stream();
         while let Some((key, value)) = stream.next() {
             if let Some(key) = std::str::from_utf8(key).ok() {
                 word_store.insert(key.to_owned(), WordIdInt(value as u32));
             }
         };
+        // let word_store_fst = Map::new(data.word_store_fst).unwrap();
+        // let word_store: FastBiMap<String, WordIdInt> = word_store_fst
+        //     .into_stream()
+        //     .into_str_vec()
+        //     .unwrap()
+        //     .into_iter()
+        //     .map(|(key, value)| (key, WordIdInt(value as u32)))
+        //     .collect();
+
+
 
         let mut tags = FastHashMap::new();
         let mut groups = FastHashMap::new();
