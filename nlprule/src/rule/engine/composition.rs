@@ -340,10 +340,11 @@ impl Group {
             return "";
         }
 
-        let mut char_indices: Vec<_> = text.char_indices().map(|(i, _)| i).collect();
-        char_indices.push(text.len());
+        let mut iter = text.char_indices();
+        let byte_start = iter.nth(self.span.char().start).map(|(byte_offset,_)| byte_offset).expect("The beginning is within bounds. qed");
+        let byte_end = iter.nth(self.span.char().len().saturating_sub(1)).map(|(byte_offset,_)| byte_offset).unwrap_or_else(|| text.len());
 
-        &text[char_indices[self.span.char().start]..char_indices[self.span.char().end]]
+        &text[byte_start..byte_end]
     }
 }
 
