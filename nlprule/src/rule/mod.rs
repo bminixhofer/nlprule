@@ -9,8 +9,8 @@ use crate::{
 use itertools::Itertools;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
-use std::{collections::HashSet, ops::Range};
 
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
@@ -94,7 +94,30 @@ pub struct DisambiguationRule {
 }
 
 #[derive(Default)]
-pub(crate) struct Changes(Vec<Vec<HashSet<Range<usize>>>>);
+pub(crate) struct Changes(Vec<Vec<HashSet<Span>>>);
+
+// This is only used in tests at the moment.
+// Could maybe be made generic.
+impl Changes {
+    fn lshift(self, position: Position) -> Self {
+        Changes(
+            self.0
+                .into_iter()
+                .map(|spans| {
+                    spans
+                        .into_iter()
+                        .map(|group_spans| {
+                            group_spans
+                                .into_iter()
+                                .map(|span| span.lshift(position))
+                                .collect()
+                        })
+                        .collect()
+                })
+                .collect(),
+        )
+    }
+}
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
@@ -113,7 +136,7 @@ impl DisambiguationRule {
             return Changes::default();
         }
 
-        let mut all_byte_spans = Vec::new();
+        let mut all_spans = Vec::new();
 
         for graph in self.engine.get_matches(sentence, self.start, self.end) {
             if let Some(unification) = &self.unification {
@@ -128,39 +151,34 @@ impl DisambiguationRule {
                 }
             }
 
-            let mut byte_spans = Vec::new();
+            let mut spans = Vec::new();
 
             for group_idx in GraphId::range(&self.start, &self.end) {
                 let group = graph.by_id(group_idx);
 
-                let group_byte_spans: HashSet<_> = group
-                    .tokens(sentence)
-                    .map(|x| x.span().byte().clone())
-                    .collect();
+                let group_spans: HashSet<_> =
+                    group.tokens(sentence).map(|x| x.span().clone()).collect();
 
-                byte_spans.push(group_byte_spans);
+                spans.push(group_spans);
             }
 
-            all_byte_spans.push(byte_spans);
+            all_spans.push(spans);
         }
 
-        Changes(all_byte_spans)
+        Changes(all_spans)
     }
 
     pub(crate) fn change<'t>(&'t self, sentence: &mut IncompleteSentence<'t>, changes: Changes) {
         log::info!("applying {}", self.id);
 
-        for byte_spans in changes.0 {
+        for spans in changes.0 {
             let mut groups = Vec::new();
             let mut refs = sentence.iter_mut().collect::<Vec<_>>();
 
-            for group_byte_spans in byte_spans {
+            for group_spans in spans {
                 let mut group = Vec::new();
 
-                while let Some(i) = refs
-                    .iter()
-                    .position(|x| group_byte_spans.contains(&x.span().byte()))
-                {
+                while let Some(i) = refs.iter().position(|x| group_spans.contains(&x.span())) {
                     group.push(refs.remove(i));
                 }
 
@@ -189,8 +207,15 @@ impl DisambiguationRule {
                     .expect("test text must not be empty"),
                 Some(&self.id),
             );
-            let sentence_before_complete = sentence_before.clone().into_sentence();
-            let changes = self.apply(&MatchSentence::new(&sentence_before_complete));
+
+            // shift the sentence to the right before matching to make sure
+            // nothing assumes the sentene starts from absolute index zero
+            let shift_delta = Position { byte: 1, char: 1 };
+            let sentence_before_complete =
+                sentence_before.clone().rshift(shift_delta).into_sentence();
+            let changes = self
+                .apply(&MatchSentence::new(&sentence_before_complete))
+                .lshift(shift_delta);
 
             let mut sentence_after = sentence_before.clone();
 
@@ -319,10 +344,7 @@ impl<'a, 't> Iterator for Suggestions<'a, 't> {
                 return None;
             }
 
-            let text_before = &sentence.text()[Span::from_positions(start, end)
-                .lshift(sentence.span().start())
-                .byte()
-                .clone()];
+            let text_before = sentence.slice(Span::from_positions(start, end));
 
             // fix e. g. "Super , dass"
             let replacements: Vec<String> = replacements
@@ -450,6 +472,11 @@ impl Rule {
     pub fn test(&self, tokenizer: &Tokenizer) -> bool {
         let mut passes = Vec::new();
 
+        // make sure relative position is handled correctly
+        // shifting the entire sentence must be a no-op as far as the matcher is concerned
+        // if the suggestions are shifted back
+        let shift_delta = Position { byte: 1, char: 1 };
+
         for test in self.examples.iter() {
             // by convention examples are always considered as one sentence even if the sentencizer would split
             let sentence = tokenizer
@@ -458,9 +485,14 @@ impl Rule {
                         .tokenize(&test.text())
                         .expect("test text must not be empty."),
                 )
+                .rshift(shift_delta)
                 .into_sentence();
+
             info!("Sentence: {:#?}", sentence);
-            let suggestions: Vec<_> = self.apply(&MatchSentence::new(&sentence)).collect();
+            let suggestions: Vec<_> = self
+                .apply(&MatchSentence::new(&sentence))
+                .map(|s| s.lshift(shift_delta))
+                .collect();
 
             let pass = if suggestions.len() > 1 {
                 false

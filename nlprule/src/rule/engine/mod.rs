@@ -125,7 +125,10 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
                             .get(&byte_span.end)
                             .expect("byte index is at char boundary");
 
-                        groups.push(Group::new(Span::new(byte_span, char_start..char_end)));
+                        groups.push(Group::new(
+                            Span::new(byte_span, char_start..char_end)
+                                .rshift(sentence.span().start()),
+                        ));
                     } else {
                         groups.push(Group::new(Span::default()));
                     }

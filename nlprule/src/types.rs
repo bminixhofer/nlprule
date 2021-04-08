@@ -721,4 +721,10 @@ impl Suggestion {
         self.span = self.span.rshift(position);
         self
     }
+
+    /// Shift the span left by the specified amount.
+    pub fn lshift(mut self, position: Position) -> Self {
+        self.span = self.span.lshift(position);
+        self
+    }
 }
