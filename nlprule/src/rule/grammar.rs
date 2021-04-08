@@ -93,7 +93,7 @@ pub struct Match {
 
 impl Match {
     fn apply(&self, sentence: &MatchSentence, graph: &MatchGraph) -> Option<String> {
-        let text = graph.by_id(self.id).text(sentence.text());
+        let text = graph.by_id(self.id).text(sentence);
 
         let mut text = if let Some(replacer) = &self.pos_replacer {
             replacer.apply(text, sentence)?
@@ -170,7 +170,7 @@ impl Synthesizer {
                             .chars()
                             .next() // a word is expected to always have at least one char, but be defensive here
                             .map_or(false, char::is_uppercase))
-                        || first_token.span().byte().start == 0
+                        || first_token.span().start() == sentence.span().start()
                 })
                 .unwrap_or(false);
 

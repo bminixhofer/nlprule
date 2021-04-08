@@ -335,15 +335,12 @@ impl Group {
         })
     }
 
-    pub fn text<'a>(&self, text: &'a str) -> &'a str {
+    pub fn text<'a>(&self, sentence: &'a MatchSentence<'a>) -> &'a str {
         if self.span.char().start >= self.span.char().end {
             return "";
         }
 
-        let mut char_indices: Vec<_> = text.char_indices().map(|(i, _)| i).collect();
-        char_indices.push(text.len());
-
-        &text[char_indices[self.span.char().start]..char_indices[self.span.char().end]]
+        sentence.slice(self.span.clone())
     }
 }
 
@@ -391,6 +388,11 @@ impl<'t> MatchSentence<'t> {
 
     pub fn text(&self) -> &str {
         self.sentence.text()
+    }
+
+    pub fn slice(&self, span: Span) -> &str {
+        let span = span.lshift(self.span().start());
+        &self.text()[span.byte().clone()]
     }
 
     pub fn tagger(&self) -> &'t Tagger {
