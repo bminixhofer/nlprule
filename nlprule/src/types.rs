@@ -2,7 +2,7 @@
 
 use crate::tokenizer::tag::Tagger;
 pub use crate::tokenizer::tag::{PosId, WordId};
-pub(crate) use crate::tokenizer::tag::{PosIdInt, SpecialPos, WordIdInt};
+pub(crate) use crate::tokenizer::tag::SpecialPos;
 use derivative::Derivative;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};

@@ -8,32 +8,6 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt, iter::once};
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct WordIdInt(u32);
-
-impl WordIdInt {
-    #[allow(dead_code)] // used in compile module
-    pub(crate) fn from_value_unchecked(value: u32) -> Self {
-        WordIdInt(value)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct PosIdInt(u16);
-
-impl PosIdInt {
-    #[allow(dead_code)] // used in compile module
-    pub(crate) fn from_value_unchecked(value: u16) -> Self {
-        PosIdInt(value)
-    }
-
-    pub fn value(&self) -> u16 {
-        self.0
-    }
-}
-
 /// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
 #[derive(Clone, PartialEq)]
 pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
