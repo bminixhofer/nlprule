@@ -112,6 +112,7 @@ jobs:
     strategy:      
       matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
     runs-on: ${{ matrix.os }}
+    container: ''
     env:
       working-directory: python
     steps:
