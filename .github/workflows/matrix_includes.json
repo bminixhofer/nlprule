@@ -3,72 +3,84 @@
         "os": "ubuntu-latest",
         "python-version": "3.9",
         "runOnEvent": "always",
-        "container": "quay.io/pypa/manylinux2014_x86_64"
+        "container": "quay.io/pypa/manylinux2014_x86_64",
+        "pybin": "/opt/python/cp39-cp39/bin/python"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.8",
         "runOnEvent": "release",
-        "container": "quay.io/pypa/manylinux2014_x86_64"
+        "container": "quay.io/pypa/manylinux2014_x86_64",
+        "pybin": "/opt/python/cp38-cp38/bin/python"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.7",
         "runOnEvent": "release",
-        "container": "quay.io/pypa/manylinux2014_x86_64"
+        "container": "quay.io/pypa/manylinux2014_x86_64",
+        "pybin": "/opt/python/cp37-cp37m/bin/python"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.6",
         "runOnEvent": "release",
-        "container": "quay.io/pypa/manylinux2014_x86_64"
+        "container": "quay.io/pypa/manylinux2014_x86_64",
+        "pybin": "/opt/python/cp36-cp36m/bin/python"
     },
     {
         "os": "windows-latest",
         "python-version": "3.9",
         "runOnEvent": "always",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "windows-latest",
         "python-version": "3.8",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "windows-latest",
         "python-version": "3.7",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "windows-latest",
         "python-version": "3.6",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "macos-latest",
         "python-version": "3.9",
         "runOnEvent": "always",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "macos-latest",
         "python-version": "3.8",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "macos-latest",
         "python-version": "3.7",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     },
     {
         "os": "macos-latest",
         "python-version": "3.6",
         "runOnEvent": "release",
-        "container": ""
+        "container": "",
+        "pybin": "python"
     }
 ]
