@@ -1,5 +1,4 @@
-//! A dictionary-based tagger. The raw format is tuples of the form `(word, lemma, part-of-speech)`
-//! where each word typically has multiple entries with different part-of-speech tags.
+//! A dictionary-based tagger.
 
 use crate::types::*;
 use bimap::BiMap;
@@ -299,6 +298,44 @@ impl From<TaggerFields> for Tagger {
 }
 
 /// The lexical tagger.
+/// Created from a dictionary that looks like this:
+///
+/// ```raw
+/// actualize   actualize   VB
+/// actualize   actualize   VBP
+/// actualized  actualize   VBD
+/// actualized  actualize   VBN
+/// actualizes  actualize   VBZ
+/// actualizing actualize   VBG
+/// actually    actually    RB
+/// ```
+///
+/// i.e. one word (left) associated with one or more pairs of lemma (middle) and POS (part-of-speech) tag (right).
+/// From this structure, the tagger must be able to look up:
+/// 1. lemma and pos by word: all lemmas and POS tags associated with a given word.
+/// 2. word by lemma: all words associated with a given lemma.
+///
+/// (1) is called extensively (at least once for every word) so it has to be as fast as possible.
+/// (2) is currently not used in nlprule itself but useful for downstream applications.
+///
+/// ## Implementation
+///
+/// The tagger stores two bidirectional maps:
+/// - A POS bimap: A bimap assigning each POS tag a 16-bit ID. POS tags are a closed set, so there is an entry
+/// for every tag in the bimap. This allows e.g. storing a set of IDs of matching tags for a regex instead of actually
+/// evaluating it in the matcher logic.
+/// - A word bimap: A bimap assigning each known word a 32-bit ID. Words are not a closed set, so if an entry in this map
+/// does not exist it only means that the word is not known to nlprule. Still, the map can be used for optimizations similar
+/// to the POS bimap. The word bimap also stores lemmas since there is often a large overlap between known words
+/// and known lemmas.
+///
+/// These two maps can be used to relatively cheaply in terms of memory allow (1) and (2) while retaining fast lookup.
+///
+/// There is a `tags` map which associates a Word ID with *multiple* pairs of
+/// `(lemma_id, pos_id)` where the ID for the lemma is a regular 32-bit Word ID.
+///
+/// And there is a `groups` map which associates Word IDs (for the lemma) with *multiple* Word IDs
+/// (for the words with the same lemma).
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
@@ -310,6 +347,9 @@ pub struct Tagger {
 }
 
 impl Tagger {
+    /// Directly looks up the given word in the `tags` map and returns
+    /// corresponding [WordData].
+    // TODO: This could probably return an iterator instead of allocating a `Vec`.
     fn get_raw(&self, word: &str) -> Vec<WordData> {
         if let Some(map) = self
             .word_store
@@ -338,6 +378,12 @@ impl Tagger {
         &self.lang_options
     }
 
+    /// Same as [get_tags] but optionally:
+    /// - Adds tags for the lower variant of the word (if `add_lower` is true).
+    /// - Adds tags for the lower variant of the word if no [WordData] is found otherwise.
+    /// (if `add_lower_if_empty` is true).
+    // TODO: `add_lower` and `add_lower_if_empty` might better be collapsed into an enum since
+    /// `add_lower` implies `add_lower_if_empty`.
     fn get_strict_tags(
         &self,
         word: &str,
@@ -367,12 +413,14 @@ impl Tagger {
         &self.word_store
     }
 
+    /// Gets the string associated with a word ID.
     fn str_for_word_id(&self, id: &WordIdInt) -> &str {
         self.word_store
             .get_by_right(id)
             .expect("only valid word ids are created")
     }
 
+    /// Gets the string associated with a POS ID.
     fn str_for_pos_id(&self, id: &PosIdInt) -> &str {
         self.tag_store
             .get_by_right(id)
@@ -401,7 +449,7 @@ impl Tagger {
         WordId(text, id)
     }
 
-    /// Get the tags and lemmas (as [WordData][crate::types::WordData]) for the given word.
+    /// Get the tags and lemmas (as [WordData]) for the given word.
     ///
     /// # Arguments
     /// * `word`: The word to lookup data for.
