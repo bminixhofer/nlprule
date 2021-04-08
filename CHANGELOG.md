@@ -1,4 +1,20 @@
-# 0.5.2
+# 0.6.0
+
+## Fixes
+
+- Fix a significant bug where text with multiple sentences would sometimes cause an error if one of the latter sentences matches some pattern (#61, #63, thanks @drahnr!).
+
+## Breaking changes
+
+- Remove `multiword_tags` on tokens (now part of the regular tags).
+- Make fields of the `Word` private and add getter methods.
+- `Word` constructor is now called `new` instead of `new_with_tags`.
+
+## New features
+
+- Adds `as_str` convenience method to multiple structs (`WordId`, `PosId`, `Word`).
+
+# 0.5.3
 
 - Restore `FromIterator` and `IntoIterator` impl on `Rules` (#58, thanks @drahnr!)
 - Add `Clone` derives on `Tokenizer` and `Rules` (and, accordingly, on their fields)
