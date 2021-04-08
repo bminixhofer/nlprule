@@ -1,26 +1,20 @@
 //! Fundamental types used by this crate.
 
 use crate::tokenizer::tag::Tagger;
+pub use crate::tokenizer::tag::{PosId, WordId};
+pub(crate) use crate::tokenizer::tag::{PosIdInt, SpecialPos, WordIdInt};
 use derivative::Derivative;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     cmp::Ordering,
     collections::{hash_map, HashMap, HashSet},
-    fmt,
     ops::{Add, AddAssign, Range, Sub},
 };
 
 pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct WordIdInt(pub u32);
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct PosIdInt(pub u16);
 
 /// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
 pub mod owned {
@@ -51,7 +45,7 @@ pub mod owned {
     impl PosId {
         /// Gets this ID as a reference ID.
         pub fn as_ref_id(&self) -> super::PosId {
-            super::PosId(self.0.as_str(), self.1)
+            super::PosId::regular(self.0.as_str(), self.1)
         }
     }
 
@@ -164,7 +158,7 @@ impl<'t> IncompleteSentence<'t> {
             tokens: self
                 .tokens
                 .into_iter()
-                .map(|token| token.into_token(tagger))
+                .map(|token| token.into_token())
                 .collect(),
             span: self.span,
         }
@@ -242,78 +236,42 @@ impl<'t> Sentence<'t> {
     }
 }
 
-/// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
-#[derive(Clone, PartialEq)]
-pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
-
-impl<'t> fmt::Debug for WordId<'t> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id_str = if let Some(id) = self.1 {
-            id.0.to_string()
-        } else {
-            "none".into()
-        };
-
-        write!(f, "{:?}<id={}>", self.0, id_str)
-    }
-}
-
-impl<'t> WordId<'t> {
-    pub(crate) fn to_owned_id(&self) -> owned::WordId {
-        owned::WordId(self.0.to_string(), self.1)
-    }
-
-    pub(crate) fn id(&self) -> &Option<WordIdInt> {
-        &self.1
-    }
-}
-
-impl<'t> AsRef<str> for WordId<'t> {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-/// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
-#[derive(Clone, PartialEq)]
-pub struct PosId<'t>(pub(crate) &'t str, pub(crate) PosIdInt);
-
-impl<'t> fmt::Debug for PosId<'t> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}<id={}>", self.0, self.1 .0)
-    }
-}
-
-impl<'t> PosId<'t> {
-    /// Converts this ID to an owned ID.
-    pub fn to_owned_id(&self) -> owned::PosId {
-        owned::PosId(self.0.to_string(), self.1)
-    }
-
-    pub(crate) fn id(&self) -> &PosIdInt {
-        &self.1
-    }
-}
-
-impl<'t> AsRef<str> for PosId<'t> {
-    fn as_ref(&self) -> &str {
-        self.0
-    }
-}
-
 /// Lemma and part-of-speech tag associated with a word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordData<'t> {
-    /// The lemma word ID.
-    pub lemma: WordId<'t>,
-    /// The part-of-speech ID.
-    pub pos: PosId<'t>,
+    lemma: WordId<'t>,
+    pos: PosId<'t>,
+    frozen: bool,
 }
 
 impl<'t> WordData<'t> {
+    /// The lemma word ID.
+    pub fn lemma(&self) -> &WordId<'t> {
+        &self.lemma
+    }
+
+    /// The part-of-speech ID.
+    pub fn pos(&self) -> &PosId<'t> {
+        &self.pos
+    }
+
     /// Creates a new referential word data.
     pub fn new(lemma: WordId<'t>, pos: PosId<'t>) -> Self {
-        WordData { lemma, pos }
+        WordData {
+            lemma,
+            pos,
+            frozen: false,
+        }
+    }
+
+    /// Freezes the data hinting that it should never be removed from a word once added.
+    pub fn freeze(&mut self) {
+        self.frozen = true;
+    }
+
+    /// Checks whether the data is frozen i.e. whether it can never be removed from a word once added.
+    pub fn frozen(&self) -> bool {
+        self.frozen
     }
 
     /// Converts to owned word data.
@@ -329,17 +287,45 @@ impl<'t> WordData<'t> {
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word<'t> {
-    /// The text ID of this token.
-    pub text: WordId<'t>,
-    /// Multiple pairs of (lemma, part-of-speech) associated with this token.
-    /// Order is generally not significant.
-    pub tags: Vec<WordData<'t>>,
+    text: WordId<'t>,
+    tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Word<'t> {
-    /// Creates a new Word with tags.
-    pub fn new_with_tags(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
+    /// Creates a new Word.
+    pub fn new(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
         Word { text, tags }
+    }
+
+    /// The text ID of this token.
+    pub fn text(&self) -> &WordId<'t> {
+        &self.text
+    }
+
+    /// Multiple pairs of (lemma, part-of-speech) associated with this token.
+    /// Order is in general not significant.
+    pub fn tags(&self) -> &[WordData<'t>] {
+        &self.tags
+    }
+
+    /// Gets the word text as string.
+    pub fn as_str(&'t self) -> &'t str {
+        self.text.as_str()
+    }
+
+    /// Removes all non-frozen tags.
+    pub fn clear(&mut self) {
+        self.retain(|_| false);
+    }
+
+    /// Equivalent to [Vec::retain][std::vec::Vec::retain] on the tags but makes sure frozen tags are ignored.
+    pub fn retain<F: FnMut(&WordData<'t>) -> bool>(&mut self, mut f: F) {
+        self.tags.retain(|data| data.frozen() || f(data));
+    }
+
+    /// Adds a new tag to the word.
+    pub fn push(&mut self, data: WordData<'t>) {
+        self.tags.push(data);
     }
 
     /// Converts to an owned word.
@@ -359,7 +345,6 @@ pub struct IncompleteToken<'t> {
     is_sentence_end: bool,
     has_space_before: bool,
     chunks: Vec<String>,
-    multiword_data: Option<WordData<'t>>,
 }
 
 impl<'t> IncompleteToken<'t> {
@@ -369,7 +354,6 @@ impl<'t> IncompleteToken<'t> {
         is_sentence_end: bool,
         has_space_before: bool,
         chunks: Vec<String>,
-        multiword_data: Option<WordData<'t>>,
     ) -> Self {
         IncompleteToken {
             word,
@@ -377,30 +361,30 @@ impl<'t> IncompleteToken<'t> {
             is_sentence_end,
             has_space_before,
             chunks,
-            multiword_data,
         }
     }
 
     /// Converts this incomplete token to a complete token.
-    pub fn into_token(self, tagger: &'t Tagger) -> Token {
+    pub fn into_token(self) -> Token<'t> {
         let mut word = self.word.clone();
 
-        word.tags
-            .push(WordData::new(self.word.text.clone(), tagger.id_tag("")));
+        word.tags.push(WordData::new(
+            self.word.text.clone(),
+            PosId::special(SpecialPos::None),
+        ));
 
-        // multiword tags are added last because they can not be touched by disambiguation
-        word.tags.extend(self.multiword_data.into_iter());
-
-        if word.tags.iter().all(|x| x.pos.0.is_empty()) {
+        if word.tags.iter().all(|x| x.pos.as_str().is_empty()) {
             word.tags.push(WordData::new(
                 self.word.text.clone(),
-                tagger.id_tag("UNKNOWN"),
+                PosId::special(SpecialPos::Unknown),
             ));
         }
 
         if self.is_sentence_end {
-            word.tags
-                .push(WordData::new(self.word.text, tagger.id_tag("SENT_END")));
+            word.tags.push(WordData::new(
+                self.word.text,
+                PosId::special(SpecialPos::SentEnd),
+            ));
         }
 
         Token {
@@ -451,16 +435,6 @@ impl<'t> IncompleteToken<'t> {
         &mut self.chunks
     }
 
-    /// A *multiword* lemma and part-of-speech tag. Set if the token was found in a list of phrases.
-    pub fn multiword_data(&self) -> &Option<WordData<'t>> {
-        &self.multiword_data
-    }
-
-    #[allow(missing_docs)]
-    pub fn multiword_data_mut(&mut self) -> &mut Option<WordData<'t>> {
-        &mut self.multiword_data
-    }
-
     /// Shift the span of this token right by the specified amount.
     pub fn rshift(mut self, position: Position) -> Self {
         self.span = self.span.rshift(position);
@@ -477,6 +451,25 @@ pub struct Token<'t> {
     span: Span,
     has_space_before: bool,
     chunks: Vec<String>,
+}
+
+lazy_static! {
+    static ref SENT_START: Token<'static> = {
+        Token {
+            word: Word::new(
+                WordId::empty(),
+                vec![WordData::new(
+                    WordId::empty(),
+                    PosId::special(SpecialPos::SentStart),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            span: Span::default(),
+            has_space_before: false,
+            chunks: Vec::new(),
+        }
+    };
 }
 
 impl<'t> Token<'t> {
@@ -510,21 +503,8 @@ impl<'t> Token<'t> {
         &self.chunks
     }
 
-    pub(crate) fn sent_start(tagger: &Tagger) -> Token<'static> {
-        Token {
-            word: Word::new_with_tags(
-                tagger.id_word("".into()),
-                vec![WordData::new(
-                    tagger.id_word("".into()),
-                    tagger.id_tag("SENT_START"),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-            span: Span::default(),
-            has_space_before: false,
-            chunks: Vec::new(),
-        }
+    pub(crate) fn sent_start() -> &'static Token<'static> {
+        &*SENT_START
     }
 
     /// Shift the span of this sentence right by the specified amount.

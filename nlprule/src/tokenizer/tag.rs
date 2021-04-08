@@ -5,10 +5,153 @@ use crate::types::*;
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
-use lazycell::AtomicLazyCell;
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, iter::once};
+use std::{borrow::Cow, fmt, iter::once};
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct WordIdInt(u32);
+
+impl WordIdInt {
+    #[allow(dead_code)] // used in compile module
+    pub(crate) fn from_value_unchecked(value: u32) -> Self {
+        WordIdInt(value)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(transparent)]
+pub(crate) struct PosIdInt(u16);
+
+impl PosIdInt {
+    #[allow(dead_code)] // used in compile module
+    pub(crate) fn from_value_unchecked(value: u16) -> Self {
+        PosIdInt(value)
+    }
+
+    pub fn value(&self) -> u16 {
+        self.0
+    }
+}
+
+/// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
+#[derive(Clone, PartialEq)]
+pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
+
+impl<'t> fmt::Debug for WordId<'t> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id_str = if let Some(id) = self.1 {
+            id.0.to_string()
+        } else {
+            "none".into()
+        };
+
+        write!(f, "{:?}<id={}>", self.0, id_str)
+    }
+}
+
+impl<'t> WordId<'t> {
+    pub(crate) fn to_owned_id(&self) -> owned::WordId {
+        owned::WordId(self.0.to_string(), self.1)
+    }
+
+    pub(crate) fn id(&self) -> &Option<WordIdInt> {
+        &self.1
+    }
+
+    pub(crate) fn empty() -> Self {
+        WordId("".into(), Some(WordIdInt(0)))
+    }
+
+    /// Gets the word as string.
+    pub fn as_str(&'t self) -> &'t str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) enum SpecialPos {
+    None = 0,
+    Unknown = 1,
+    SentStart = 2,
+    SentEnd = 3,
+}
+
+impl SpecialPos {
+    pub fn as_str(&self) -> &'static str {
+        match &self {
+            SpecialPos::None => "",
+            SpecialPos::Unknown => "UNKNOWN",
+            SpecialPos::SentStart => "SENT_START",
+            SpecialPos::SentEnd => "SENT_END",
+        }
+    }
+
+    #[allow(dead_code)] // used in compile module
+    pub fn iter() -> impl Iterator<Item = &'static str> + 'static {
+        [
+            SpecialPos::None,
+            SpecialPos::Unknown,
+            SpecialPos::SentStart,
+            SpecialPos::SentEnd,
+        ]
+        .iter()
+        .map(|pos| pos.as_str())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum InnerPosId<'t> {
+    Normal(&'t str, PosIdInt),
+    Special(SpecialPos),
+}
+
+/// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
+#[derive(Clone, Copy, PartialEq)]
+pub struct PosId<'t> {
+    inner: InnerPosId<'t>,
+}
+
+impl<'t> fmt::Debug for PosId<'t> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}<id={}>", self.as_str(), self.id().0)
+    }
+}
+
+impl<'t> PosId<'t> {
+    pub(crate) fn regular(text: &'t str, id: PosIdInt) -> Self {
+        PosId {
+            inner: InnerPosId::Normal(text, id),
+        }
+    }
+
+    pub(crate) fn special(special: SpecialPos) -> Self {
+        PosId {
+            inner: InnerPosId::Special(special),
+        }
+    }
+
+    /// Converts this ID to an owned ID.
+    pub fn to_owned_id(&self) -> owned::PosId {
+        owned::PosId(self.as_str().to_string(), self.id())
+    }
+
+    pub(crate) fn id(&self) -> PosIdInt {
+        match &self.inner {
+            InnerPosId::Normal(_, id) => *id,
+            InnerPosId::Special(special) => PosIdInt(*special as u16),
+        }
+    }
+
+    /// Gets the part-of-speech as string.
+    pub fn as_str(&self) -> &'t str {
+        match &self.inner {
+            InnerPosId::Normal(text, _) => *text,
+            InnerPosId::Special(special) => special.as_str(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TaggerLangOptions {
@@ -18,6 +161,9 @@ pub(crate) struct TaggerLangOptions {
     pub always_add_lower_tags: bool,
     /// Used part-of-speech tags which are not in the tagger dictionary.
     pub extra_tags: Vec<String>,
+    /// Whether to retain the last tag if disambiguation leads to an empty tag.
+    /// Language-specific in LT so it has to be an option.
+    pub retain_last: bool,
 }
 
 impl Default for TaggerLangOptions {
@@ -26,6 +172,7 @@ impl Default for TaggerLangOptions {
             use_compound_split_heuristic: false,
             always_add_lower_tags: false,
             extra_tags: Vec::new(),
+            retain_last: false,
         }
     }
 }
@@ -147,7 +294,6 @@ impl From<TaggerFields> for Tagger {
             word_store,
             groups,
             lang_options: data.lang_options,
-            ..Default::default()
         }
     }
 }
@@ -161,7 +307,6 @@ pub struct Tagger {
     pub(crate) word_store: BiMap<String, WordIdInt>,
     pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
-    pub(crate) sent_start: AtomicLazyCell<Token<'static>>,
 }
 
 impl Tagger {
@@ -188,6 +333,11 @@ impl Tagger {
         }
     }
 
+    #[allow(dead_code)] // used in compile module
+    pub(crate) fn lang_options(&self) -> &TaggerLangOptions {
+        &self.lang_options
+    }
+
     fn get_strict_tags(
         &self,
         word: &str,
@@ -205,15 +355,6 @@ impl Tagger {
         }
 
         tags
-    }
-
-    pub(crate) fn sent_start(&self) -> &Token<'static> {
-        if let Some(token) = self.sent_start.borrow() {
-            token
-        } else {
-            self.sent_start.fill(Token::sent_start(&self)).ok();
-            self.sent_start.borrow().unwrap()
-        }
     }
 
     #[allow(dead_code)] // used by compile module
@@ -241,7 +382,7 @@ impl Tagger {
     /// Tags the given string representation of a part-of-speech tag.
     /// Part-of-speech tags are treated as a closed set so each valid part-of-speech tag will get a numerical id.
     pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
-        PosId(
+        PosId::regular(
             tag,
             *self.tag_store.get_by_left(tag).unwrap_or_else(|| {
                 error!(
@@ -265,7 +406,7 @@ impl Tagger {
     /// # Arguments
     /// * `word`: The word to lookup data for.
     /// * `add_lower`: Whether to add data for the lowercase variant of the word.
-    ///     If `None`, will be set according to the language options.
+    ///     If `None`, will be set according to the language options.
     /// * `use_compound_split_heuristic`: Whether to use a heuristic to split compound words.
     ///     If `None`, will be set according to the language options.
     /// If true, will attempt to find tags for words which are longer than some cutoff and unknown by looking up tags
@@ -308,12 +449,13 @@ impl Tagger {
                     if !next_tags.is_empty() {
                         tags = next_tags
                             .into_iter()
-                            .map(|mut x| {
-                                x.lemma = self.id_word(
-                                    format!("{}{}", &word[..i], x.lemma.as_ref().to_lowercase())
+                            .map(|x| {
+                                let lemma = self.id_word(
+                                    format!("{}{}", &word[..i], x.lemma().as_str().to_lowercase())
                                         .into(),
                                 );
-                                x
+
+                                WordData::new(lemma, *x.pos())
                             })
                             .collect();
                         break;

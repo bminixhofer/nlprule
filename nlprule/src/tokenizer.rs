@@ -57,9 +57,6 @@ where
 pub(crate) struct TokenizerLangOptions {
     /// Whether to allow errors while constructing the tokenizer.
     pub allow_errors: bool,
-    /// Whether to retain the last tag if disambiguation leads to an empty tag.
-    /// Language-specific in LT so it has to be an option.
-    pub retain_last: bool,
     /// Disambiguation Rule selectors to use in this tokenizer.
     #[serde(default)]
     pub ids: Vec<Selector>,
@@ -81,7 +78,6 @@ impl Default for TokenizerLangOptions {
     fn default() -> Self {
         TokenizerLangOptions {
             allow_errors: false,
-            retain_last: false,
             ids: Vec::new(),
             ignore_ids: Vec::new(),
             known_failures: Vec::new(),
@@ -231,7 +227,7 @@ impl Tokenizer {
                 .find_first(|_| true);
 
             if let Some((index, changes)) = result {
-                self.rules[index].change(&mut sentence, &self, changes);
+                self.rules[index].change(&mut sentence, changes);
                 i = index + 1;
             } else {
                 i = n;
@@ -326,7 +322,7 @@ impl Tokenizer {
                 let is_sentence_end = i == n_token_strs - 1;
 
                 IncompleteToken::new(
-                    Word::new_with_tags(
+                    Word::new(
                         self.tagger.id_word(token_text.into()),
                         self.tagger.get_tags_with_options(
                             token_text,
@@ -341,7 +337,6 @@ impl Tokenizer {
                     is_sentence_end,
                     sentence[..byte_start].ends_with(char::is_whitespace),
                     Vec::new(),
-                    None,
                 )
             })
             .collect();

@@ -1,6 +1,5 @@
 {
     "allow_errors": false,
-    "retain_last": false,
     "ignore_ids": [
         "DISAMBIGUATION/SUB_BEAMTE/1",
         "DISAMBIGUATION/SUB_BEAMTE/2"

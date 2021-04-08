@@ -1115,16 +1115,23 @@ impl DisambiguationRule {
 
                 Ok(Disambiguation::Filter(
                     disambiguations.into_iter().collect(),
+                    info.tagger().lang_options().retain_last,
                 ))
             }
             Some("filter") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
-                    Ok(Disambiguation::Filter(vec![Some(either::Right(
-                        parse_pos_filter(postag, Some("yes"), info),
-                    ))]))
+                    Ok(Disambiguation::Filter(
+                        vec![Some(either::Right(parse_pos_filter(
+                            postag,
+                            Some("yes"),
+                            info,
+                        )))],
+                        info.tagger().lang_options().retain_last,
+                    ))
                 } else {
                     Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
+                        info.tagger().lang_options().retain_last,
                     ))
                 }
             }
@@ -1181,15 +1188,17 @@ impl DisambiguationRule {
             }
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
-                    Ok(Disambiguation::Filter(vec![Some(either::Left(
-                        owned::WordData::new(
+                    Ok(Disambiguation::Filter(
+                        vec![Some(either::Left(owned::WordData::new(
                             info.tagger.id_word("".into()).to_owned_id(),
                             info.tagger.id_tag(postag).to_owned_id(),
-                        ),
-                    ))]))
+                        )))],
+                        info.tagger().lang_options().retain_last,
+                    ))
                 } else {
                     Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
+                        info.tagger().lang_options().retain_last,
                     ))
                 }
             }

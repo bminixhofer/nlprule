@@ -147,12 +147,7 @@ impl DisambiguationRule {
         Changes(all_byte_spans)
     }
 
-    pub(crate) fn change<'t>(
-        &'t self,
-        sentence: &mut IncompleteSentence<'t>,
-        tokenizer: &'t Tokenizer,
-        changes: Changes,
-    ) {
+    pub(crate) fn change<'t>(&'t self, sentence: &mut IncompleteSentence<'t>, changes: Changes) {
         log::info!("applying {}", self.id);
 
         for byte_spans in changes.0 {
@@ -172,11 +167,7 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(
-                groups,
-                tokenizer.lang_options().retain_last,
-                tokenizer.tagger(),
-            );
+            self.disambiguations.apply(groups);
         }
     }
 
@@ -204,7 +195,7 @@ impl DisambiguationRule {
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut sentence_after, tokenizer, changes);
+                self.change(&mut sentence_after, changes);
             }
 
             info!("Tokens: {:#?}", sentence_before);
@@ -226,7 +217,7 @@ impl DisambiguationRule {
 
                     let unordered_tags = after
                         .word()
-                        .tags
+                        .tags()
                         .iter()
                         .map(|x| x.to_owned_word_data())
                         .collect::<HashSet<owned::WordData>>();
@@ -238,7 +229,7 @@ impl DisambiguationRule {
                         .iter()
                         .collect::<HashSet<&owned::WordData>>();
 
-                    after.word().text == change.after.text.as_ref_id()
+                    after.word().as_str() == change.after.text.as_ref_id().as_str()
                         && unordered_tags == unordered_tags_change
                 }
             };

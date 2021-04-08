@@ -768,9 +768,9 @@ impl Chunker {
                         .map(|token| {
                             token
                                 .word()
-                                .tags
+                                .tags()
                                 .iter()
-                                .any(|tag| tag.pos.as_ref() == "NNS")
+                                .any(|tag| tag.pos().as_str() == "NNS")
                         })
                         .unwrap_or(false);
 
