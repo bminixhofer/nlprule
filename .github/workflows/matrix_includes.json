@@ -2,61 +2,73 @@
     {
         "os": "ubuntu-latest",
         "python-version": "3.9",
-        "runOnEvent": "always"
+        "runOnEvent": "always",
+        "container": "quay.io/pypa/manylinux2014_x86_64"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.8",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": "quay.io/pypa/manylinux2014_x86_64"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.7",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": "quay.io/pypa/manylinux2014_x86_64"
     },
     {
         "os": "ubuntu-latest",
         "python-version": "3.6",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": "quay.io/pypa/manylinux2014_x86_64"
     },
     {
         "os": "windows-latest",
         "python-version": "3.9",
-        "runOnEvent": "always"
+        "runOnEvent": "always",
+        "container": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.8",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.7",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.6",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.9",
-        "runOnEvent": "always"
+        "runOnEvent": "always",
+        "container": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.8",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.7",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.6",
-        "runOnEvent": "release"
+        "runOnEvent": "release",
+        "container": ""
     }
 ]
