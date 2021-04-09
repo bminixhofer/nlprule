@@ -32,55 +32,55 @@
         "python-version": "3.9",
         "runOnEvent": "always",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.8",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.7",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "windows-latest",
         "python-version": "3.6",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.9",
         "runOnEvent": "always",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.8",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.7",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     },
     {
         "os": "macos-latest",
         "python-version": "3.6",
         "runOnEvent": "release",
         "container": "",
-        "pybin": "python"
+        "pybin": ""
     }
 ]
