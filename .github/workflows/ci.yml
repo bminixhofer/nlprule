@@ -141,17 +141,17 @@ jobs:
       - name: Build and Test
         run: |
           PYBIN=${{ matrix.pybin }}
-          
-          if [ -z "${PYBIN}" ]; then 
+                    
+          if [ -z "${PYBIN}" ]; then
+              PIP_CMD="python -m pip"
+              PYTHON_CMD="python"
+              PYTEST_CMD="python -m pytest"
+              export MATURIN_CMD="maturin"
+          else 
               PIP_CMD="${PYBIN}/pip"
               PYTHON_CMD="${PYBIN}/maturin"
               PYTEST_CMD="${PYBIN}/pytest"
               export MATURIN_CMD="${PYBIN}/maturin"
-          else 
-              PIP="python -m pip"
-              PYTHON_CMD="python"
-              PYTEST_CMD="python -m pytest"
-              export MATURIN_CMD="maturin"
           fi
 
           echo $PIP_CMD
