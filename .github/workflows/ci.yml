@@ -140,6 +140,7 @@ jobs:
           bash scripts/set_version.sh ${{ github.event.release.tag_name }}
       - name: Build and Test
         run: |
+          # pybin is the directory with python binaries
           PYBIN=${{ matrix.pybin }}
                     
           if [ -z "${PYBIN}" ]; then
@@ -154,11 +155,8 @@ jobs:
               export MATURIN_CMD="${PYBIN}/maturin"
           fi
 
-          echo $PIP_CMD
-          echo $PYTHON_CMD
-          echo $PYTEST_CMD
-          echo $MATURIN_CMD
-
+          # if pybin is set, the venv will not be used
+          # still create it here for convenience since we need it on windows
           ${PYTHON_CMD} -m venv venv
           . venv/bin/activate || . venv/Scripts/activate # 'Scripts' on windows, 'bin' on Linux / macOS
           ${PIP_CMD} install --upgrade pip
@@ -168,6 +166,9 @@ jobs:
           rm target/wheels/* || true
           bash scripts/maturin.sh build --interpreter ${PYTHON_CMD} --release --manylinux 2014
 
+          # install the wheel in two different ways:
+          # 1. via pip: needed on manylinux
+          # 2. via maturin develop: needed on windows in venv
           ${PIP_CMD} install $(ls target/wheels/* | head -n1)
           bash scripts/maturin.sh develop --release
 
