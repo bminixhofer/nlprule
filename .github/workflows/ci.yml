@@ -149,7 +149,7 @@ jobs:
               export MATURIN_CMD="maturin"
           else 
               PIP_CMD="${PYBIN}/pip"
-              PYTHON_CMD="${PYBIN}/maturin"
+              PYTHON_CMD="${PYBIN}/python"
               PYTEST_CMD="${PYBIN}/pytest"
               export MATURIN_CMD="${PYBIN}/maturin"
           fi
