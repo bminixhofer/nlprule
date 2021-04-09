@@ -41,7 +41,7 @@ jobs:
           args: --target wasm32-unknown-unknown --no-default-features --features regex-fancy -p nlprule
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
-        if: matrix.lang == 'en' # only need to run this once
+        if: matrix.lang == 'xx' # TEMP
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
@@ -54,7 +54,7 @@ jobs:
           args: --all-features --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
       - name: Run nlprule tests
         uses: actions-rs/cargo@v1
-        if: matrix.lang == 'en'
+        if: matrix.lang == 'xx' # TEMP
         with:
           command: test
           args: --verbose --all-features --release
@@ -67,7 +67,7 @@ jobs:
           args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - name: Run disambiguation tests (with regex-fancy backend)
         uses: actions-rs/cargo@v1
-        if: matrix.lang == 'en'
+        if: matrix.lang == 'xx' # TEMP
         env:
             RUST_LOG: WARN
         with:
@@ -75,7 +75,7 @@ jobs:
           args: --manifest-path nlprule/Cargo.toml --features "bin regex-onig" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
       - name: Run disambiguation tests (with regex-onig backend)
         uses: actions-rs/cargo@v1
-        if: matrix.lang == 'en'
+        if: matrix.lang == 'xx' # TEMP
         env:
             RUST_LOG: WARN
         with:
@@ -153,6 +153,11 @@ jobs:
               PYTEST_CMD="python -m pytest"
               export MATURIN_CMD="maturin"
           fi
+
+          echo $PIP_CMD
+          echo $PYTHON_CMD
+          echo $PYTEST_CMD
+          echo $MATURIN_CMD
 
           ${PYTHON_CMD} -m venv venv
           . venv/bin/activate || . venv/Scripts/activate # 'Scripts' on windows, 'bin' on Linux / macOS
