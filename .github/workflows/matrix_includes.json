@@ -9,7 +9,7 @@
     {
         "os": "ubuntu-latest",
         "python-version": "3.8",
-        "runOnEvent": "release",
+        "runOnEvent": "always",
         "container": "quay.io/pypa/manylinux2014_x86_64",
         "pybin": "/opt/python/cp38-cp38/bin"
     },
