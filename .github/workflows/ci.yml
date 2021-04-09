@@ -142,17 +142,29 @@ jobs:
         run: |
           PYBIN=${{ matrix.pybin }}
           
-          ${PYBIN} -m venv venv
+          if [ -z "${PYBIN}" ]; then 
+              PIP_CMD="${PYBIN}/pip"
+              PYTHON_CMD="${PYBIN}/maturin"
+              PYTEST_CMD="${PYBIN}/pytest"
+              export MATURIN_CMD="${PYBIN}/maturin"
+          else 
+              PIP="python -m pip"
+              PYTHON_CMD="python"
+              PYTEST_CMD="python -m pytest"
+              export MATURIN_CMD="maturin"
+          fi
+
+          ${PYTHON_CMD} -m venv venv
           . venv/bin/activate || . venv/Scripts/activate # 'Scripts' on windows, 'bin' on Linux / macOS
-          ${PYBIN} -m pip install --upgrade pip
-          ${PYBIN} -m pip install maturin==0.9.4 pytest==6.1.2
+          ${PIP_CMD} install --upgrade pip
+          ${PIP_CMD} install maturin==0.9.4 pytest==6.1.2
           
           # remove potentially cached wheels
           rm target/wheels/* || true
-          bash scripts/maturin.sh build --interpreter ${PYBIN} --release --manylinux 2014
+          bash scripts/maturin.sh build --interpreter ${PYTHON_CMD} --release --manylinux 2014
           bash scripts/maturin.sh develop --release
 
-          ${PYBIN} -m pytest python/test.py -s
+          ${PYTEST_CMD} python/test.py -s
         shell: bash
       - name: Upload wheel as artifact
         uses: actions/upload-artifact@v2

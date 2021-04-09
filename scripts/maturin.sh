@@ -40,7 +40,14 @@ function cleanup() {
     mv .Cargo.toml.bak Cargo.toml
 }
 
-maturin $@
+# MATURIN_CMD can be used to override the maturin command used
+# needed mainly for CI
+if [ -z "${MATURIN_CMD}" ]; then
+    ${MATURIN_CMD} $@
+else
+    maturin $@
+fi
+
 exit_code=$?
 
 cleanup
