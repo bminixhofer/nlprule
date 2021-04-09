@@ -43,9 +43,9 @@ function cleanup() {
 # MATURIN_CMD can be used to override the maturin command used
 # needed mainly for CI
 if [ -z "${MATURIN_CMD}" ]; then
-    ${MATURIN_CMD} $@
-else
     maturin $@
+else
+    ${MATURIN_CMD} $@
 fi
 
 exit_code=$?
