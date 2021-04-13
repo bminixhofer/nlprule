@@ -115,7 +115,7 @@ pub struct PosMatcher {
 
 impl PosMatcher {
     pub fn is_match(&self, pos: &PosId) -> bool {
-        self.mask[pos.id().value() as usize]
+        self.mask[pos.id().0 as usize]
     }
 }
 

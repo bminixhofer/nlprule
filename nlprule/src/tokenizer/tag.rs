@@ -1,38 +1,11 @@
 //! A dictionary-based tagger.
 
 use crate::types::*;
-use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt, iter::once};
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct WordIdInt(u32);
-
-impl WordIdInt {
-    #[allow(dead_code)] // used in compile module
-    pub(crate) fn from_value_unchecked(value: u32) -> Self {
-        WordIdInt(value)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(transparent)]
-pub(crate) struct PosIdInt(u16);
-
-impl PosIdInt {
-    #[allow(dead_code)] // used in compile module
-    pub(crate) fn from_value_unchecked(value: u16) -> Self {
-        PosIdInt(value)
-    }
-
-    pub fn value(&self) -> u16 {
-        self.0
-    }
-}
 
 /// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
 #[derive(Clone, PartialEq)]
@@ -180,7 +153,7 @@ impl Default for TaggerLangOptions {
 struct TaggerFields {
     tag_fst: Vec<u8>,
     word_store_fst: Vec<u8>,
-    tag_store: BiMap<String, PosIdInt>,
+    tag_store: FastBiMap<String, PosIdInt>,
     lang_options: TaggerLangOptions,
 }
 
@@ -197,20 +170,11 @@ impl From<Tagger> for TaggerFields {
                     assert!(i < 255);
                     i += 1;
 
-                    let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
-                    let pos_bytes = pos_id.0.to_be_bytes();
-                    let inflect_bytes = inflect_id.0.to_be_bytes();
+                    let key: Vec<u8> = word.as_bytes().iter().copied().chain(once(i)).collect();
+                    let pos_bytes = pos_id.0 as u64;
+                    let inflect_bytes = inflect_id.0 as u64;
+                    let value = (pos_bytes & 0xFFFF) | (inflect_bytes & 0xFFFF_FFFF) << 32;
 
-                    let value = u64::from_be_bytes([
-                        inflect_bytes[0],
-                        inflect_bytes[1],
-                        inflect_bytes[2],
-                        inflect_bytes[3],
-                        0,
-                        0,
-                        pos_bytes[0],
-                        pos_bytes[1],
-                    ]);
                     tag_fst_items.push((key, value));
                 }
             }
@@ -248,42 +212,38 @@ impl From<Tagger> for TaggerFields {
 impl From<TaggerFields> for Tagger {
     fn from(data: TaggerFields) -> Self {
         let word_store_fst = Map::new(data.word_store_fst).unwrap();
-        let word_store: BiMap<String, WordIdInt> = word_store_fst
-            .into_stream()
-            .into_str_vec()
-            .unwrap()
-            .into_iter()
-            .map(|(key, value)| (key, WordIdInt(value as u32)))
-            .collect();
+        let mut word_store = FastBiMap::<String, WordIdInt>::with_capacity_and_hashers(
+            word_store_fst.len(),
+            Default::default(),
+            Default::default(),
+        );
+        let mut stream = word_store_fst.into_stream();
+        while let Some((key, value)) = stream.next() {
+            if let Some(key) = std::str::from_utf8(key).ok() {
+                word_store.insert(key.to_owned(), WordIdInt(value as u32));
+            }
+        };
 
-        let mut tags = DefaultHashMap::new();
-        let mut groups = DefaultHashMap::new();
+        let mut tags = FastHashMap::new();
+        let mut groups = FastHashMap::new();
 
         let tag_fst = Map::new(data.tag_fst).unwrap();
         let mut stream = tag_fst.into_stream();
 
         while let Some((key, value)) = stream.next() {
-            let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
+            let word = std::str::from_utf8(&key[..(key.len().saturating_sub(1))]).unwrap();
             let word_id = *word_store.get_by_left(word).unwrap();
 
-            let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt(u32::from_be_bytes([
-                value_bytes[0],
-                value_bytes[1],
-                value_bytes[2],
-                value_bytes[3],
-            ]));
-            let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+            let inflection_id = WordIdInt((value >> 32) as u32);
+            let pos_id = PosIdInt((value & 0xFF_u64) as u16);
 
-            let group = groups.entry(inflection_id).or_insert_with(Vec::new);
-            if !group.contains(&word_id) {
-                group.push(word_id);
-            }
+            let group = groups.entry(inflection_id).or_insert_with(FastHashSet::default);
+            let _ = group.insert(word_id);
 
             tags.entry(word_id)
                 .or_insert_with(IndexMap::new)
                 .entry(inflection_id)
-                .or_insert_with(Vec::new)
+                .or_insert_with(|| Vec::with_capacity(32))
                 .push(pos_id);
         }
 
@@ -339,10 +299,10 @@ impl From<TaggerFields> for Tagger {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: DefaultHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
-    pub(crate) tag_store: BiMap<String, PosIdInt>,
-    pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
+    pub(crate) tags: FastHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
+    pub(crate) tag_store: FastBiMap<String, PosIdInt>,
+    pub(crate) word_store: FastBiMap<String, WordIdInt>,
+    pub(crate) groups: FastHashMap<WordIdInt, FastHashSet<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
 }
 
@@ -404,12 +364,12 @@ impl Tagger {
     }
 
     #[allow(dead_code)] // used by compile module
-    pub(crate) fn tag_store(&self) -> &BiMap<String, PosIdInt> {
+    pub(crate) fn tag_store(&self) -> &FastBiMap<String, PosIdInt> {
         &self.tag_store
     }
 
     #[allow(dead_code)] // used by compile module
-    pub(crate) fn word_store(&self) -> &BiMap<String, WordIdInt> {
+    pub(crate) fn word_store(&self) -> &FastBiMap<String, WordIdInt> {
         &self.word_store
     }
 
