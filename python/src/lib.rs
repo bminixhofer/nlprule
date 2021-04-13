@@ -50,6 +50,7 @@ fn get_resource(lang_code: &str, name: &str) -> PyResult<impl Read> {
         lang_code,
         name
     ))
+    .and_then(|x| x.error_for_status())
     .and_then(|x| x.bytes())
     .map_err(|x| PyValueError::new_err(format!("{}", x)))?;
 
