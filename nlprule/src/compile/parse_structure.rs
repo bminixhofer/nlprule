@@ -906,7 +906,7 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<owned::Word, Error> {
+fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<Word<'static>, Error> {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]".into());
     }
@@ -929,29 +929,25 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<owned::Word, Error
             if parts.len() < 2 {
                 None
             } else {
-                Some(owned::WordData::new(
-                    info.tagger.id_word(parts[0].into()).to_owned_id(),
-                    info.tagger.id_tag(parts[1]).to_owned_id(),
+                Some(WordData::new(
+                    info.tagger.id_word(parts[0].to_owned().into()),
+                    info.tagger.id_tag(parts[1]).into_static(),
                 ))
             }
         })
         .collect();
 
-    Ok(owned::Word {
-        text: info.tagger.id_word(text.into()).to_owned_id(),
-        tags,
-    })
+    Ok(Word::new(info.tagger.id_word(text.to_owned().into()), tags))
 }
 
-impl owned::WordData {
+impl WordData<'static> {
     fn from_structure(data: structure::WordData, info: &mut BuildInfo) -> Self {
-        owned::WordData::new(
+        WordData::new(
             info.tagger
-                .id_word(data.lemma.unwrap_or_else(String::new).into())
-                .to_owned_id(),
+                .id_word(data.lemma.unwrap_or_else(String::new).into()),
             info.tagger
-                .id_tag(data.pos.as_ref().map_or("", |x| x.as_str().trim()))
-                .to_owned_id(),
+                .id_tag(data.pos.as_deref().unwrap_or("").trim())
+                .into_static(),
         )
     }
 }
@@ -1011,7 +1007,7 @@ impl DisambiguationRule {
             wds.into_iter()
                 .map(|part| match part {
                     structure::DisambiguationPart::WordData(x) => {
-                        either::Left(owned::WordData::from_structure(x, info))
+                        either::Left(WordData::from_structure(x, info))
                     }
                     structure::DisambiguationPart::Match(x) => either::Right(parse_pos_filter(
                         &x.postag.unwrap(),
@@ -1190,9 +1186,9 @@ impl DisambiguationRule {
             None => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(
-                        vec![Some(either::Left(owned::WordData::new(
-                            info.tagger.id_word("".into()).to_owned_id(),
-                            info.tagger.id_tag(postag).to_owned_id(),
+                        vec![Some(either::Left(WordData::new(
+                            info.tagger.id_word("".into()),
+                            info.tagger.id_tag(postag).into_static(),
                         )))],
                         info.tagger().lang_options().retain_last,
                     ))

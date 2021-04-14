@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct MultiwordTaggerFields {
-    pub(crate) multiwords: Vec<(String, owned::PosId)>,
+    pub(crate) multiwords: Vec<(String, PosId<'static>)>,
 }
 
 impl From<MultiwordTaggerFields> for MultiwordTagger {
@@ -33,7 +33,7 @@ impl From<MultiwordTaggerFields> for MultiwordTagger {
 pub struct MultiwordTagger {
     #[serde(skip)]
     matcher: AhoCorasick,
-    multiwords: Vec<(String, owned::PosId)>,
+    multiwords: Vec<(String, PosId<'static>)>,
 }
 
 impl MultiwordTagger {
@@ -66,8 +66,7 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
-                    let mut data =
-                        WordData::new(tagger.id_word(word.as_str().into()), pos.as_ref_id());
+                    let mut data = WordData::new(tagger.id_word(word.as_str().into()), pos.clone());
                     data.freeze();
 
                     token.word_mut().push(data);

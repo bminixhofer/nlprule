@@ -240,21 +240,11 @@ impl DisambiguationRule {
                         .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
-                    let unordered_tags = after
-                        .word()
-                        .tags()
-                        .iter()
-                        .map(|x| x.to_owned_word_data())
-                        .collect::<HashSet<owned::WordData>>();
-                    // need references to compare
-                    let unordered_tags: HashSet<_> = unordered_tags.iter().collect();
-                    let unordered_tags_change = change
-                        .after
-                        .tags
-                        .iter()
-                        .collect::<HashSet<&owned::WordData>>();
+                    let unordered_tags = after.word().tags().iter().collect::<HashSet<&WordData>>();
+                    let unordered_tags_change =
+                        change.after.tags().iter().collect::<HashSet<&WordData>>();
 
-                    after.word().as_str() == change.after.text.as_ref_id().as_str()
+                    after.word().as_str() == change.after.as_str()
                         && unordered_tags == unordered_tags_change
                 }
             };

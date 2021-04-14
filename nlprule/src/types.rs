@@ -16,79 +16,6 @@ pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
-/// Owned versions of the types for use in longer-living structures not bound to the `'t` lifetime e.g. rule tests.
-pub mod owned {
-    use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-    /// See [super::WordId].
-    pub struct WordId(pub(crate) String, pub(crate) Option<WordIdInt>);
-
-    impl WordId {
-        /// Gets this ID as a reference ID.
-        pub fn as_ref_id(&self) -> super::WordId {
-            super::WordId(self.0.as_str().into(), self.1)
-        }
-    }
-
-    impl AsRef<str> for WordId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-
-    /// See [super::PosId].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-    pub struct PosId(pub(crate) String, pub(crate) PosIdInt);
-
-    impl PosId {
-        /// Gets this ID as a reference ID.
-        pub fn as_ref_id(&self) -> super::PosId {
-            super::PosId::regular(self.0.as_str(), self.1)
-        }
-    }
-
-    impl AsRef<str> for PosId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-
-    /// See [super::WordData].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-    #[allow(missing_docs)]
-    pub struct WordData {
-        pub lemma: WordId,
-        pub pos: PosId,
-    }
-
-    impl WordData {
-        /// Creates a new owned Word ID.
-        pub fn new(lemma: WordId, pos_id: PosId) -> Self {
-            WordData { lemma, pos: pos_id }
-        }
-    }
-
-    /// See [super::Word].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-    #[allow(missing_docs)]
-    pub struct Word {
-        pub text: WordId,
-        pub tags: Vec<WordData>,
-    }
-
-    /// See [super::Token].
-    #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-    #[allow(missing_docs)]
-    pub struct Token {
-        pub word: Word,
-        pub span: Span,
-        pub has_space_before: bool,
-        pub chunks: Vec<String>,
-    }
-}
-
 /// A incomplete sentence containing partially set information about the tokens.
 /// Can be converted to a complete sentence with [into_sentence][IncompleteSentence::into_sentence].
 #[derive(Derivative, Clone)]
@@ -237,7 +164,7 @@ impl<'t> Sentence<'t> {
 }
 
 /// Lemma and part-of-speech tag associated with a word.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WordData<'t> {
     lemma: WordId<'t>,
     pos: PosId<'t>,
@@ -274,18 +201,19 @@ impl<'t> WordData<'t> {
         self.frozen
     }
 
-    /// Converts to owned word data.
-    pub fn to_owned_word_data(&self) -> owned::WordData {
-        owned::WordData {
-            lemma: self.lemma.to_owned_id(),
-            pos: self.pos.to_owned_id(),
+    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
+    pub fn into_static(self) -> WordData<'static> {
+        WordData {
+            lemma: self.lemma.into_static(),
+            pos: self.pos.into_static(),
+            frozen: self.frozen,
         }
     }
 }
 
 /// Contains all the local information about a token i. e.
 /// the text itself and the [WordData]s associated with the word.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Word<'t> {
     text: WordId<'t>,
     tags: Vec<WordData<'t>>,
@@ -328,11 +256,11 @@ impl<'t> Word<'t> {
         self.tags.push(data);
     }
 
-    /// Converts to an owned word.
-    pub fn to_owned_word(&self) -> owned::Word {
-        owned::Word {
-            text: self.text.to_owned_id(),
-            tags: self.tags.iter().map(|x| x.to_owned_word_data()).collect(),
+    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
+    pub fn into_static(self) -> Word<'static> {
+        Word {
+            text: self.text.into_static(),
+            tags: self.tags.into_iter().map(|x| x.into_static()).collect(),
         }
     }
 }
@@ -473,16 +401,6 @@ lazy_static! {
 }
 
 impl<'t> Token<'t> {
-    /// Converts this token to an owned equivalent.
-    pub fn to_owned_token(&self) -> owned::Token {
-        owned::Token {
-            word: self.word.to_owned_word(),
-            span: self.span.clone(),
-            has_space_before: self.has_space_before,
-            chunks: self.chunks.clone(),
-        }
-    }
-
     /// The word of this token. Contains information about the actual text and part-of-speech tags + lemmas.
     pub fn word(&self) -> &Word<'t> {
         &self.word
@@ -511,6 +429,16 @@ impl<'t> Token<'t> {
     pub fn rshift(mut self, position: Position) -> Self {
         self.span = self.span.rshift(position);
         self
+    }
+
+    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
+    pub fn into_static(self) -> Token<'static> {
+        Token {
+            word: self.word.into_static(),
+            span: self.span,
+            has_space_before: self.has_space_before,
+            chunks: self.chunks,
+        }
     }
 }
 

@@ -43,7 +43,7 @@ impl PosIdInt {
 }
 
 /// A potentially identified word. If it is identified as a known word, many optimizations can be applied.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WordId<'t>(pub(crate) Cow<'t, str>, pub(crate) Option<WordIdInt>);
 
 impl<'t> fmt::Debug for WordId<'t> {
@@ -59,10 +59,6 @@ impl<'t> fmt::Debug for WordId<'t> {
 }
 
 impl<'t> WordId<'t> {
-    pub(crate) fn to_owned_id(&self) -> owned::WordId {
-        owned::WordId(self.0.to_string(), self.1)
-    }
-
     pub(crate) fn id(&self) -> &Option<WordIdInt> {
         &self.1
     }
@@ -75,9 +71,14 @@ impl<'t> WordId<'t> {
     pub fn as_str(&'t self) -> &'t str {
         self.0.as_ref()
     }
+
+    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
+    pub fn into_static(self) -> WordId<'static> {
+        WordId(self.0.into_owned().into(), self.1)
+    }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum SpecialPos {
     None = 0,
     Unknown = 1,
@@ -108,14 +109,14 @@ impl SpecialPos {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum InnerPosId<'t> {
-    Normal(&'t str, PosIdInt),
+    Normal(Cow<'t, str>, PosIdInt),
     Special(SpecialPos),
 }
 
 /// An identified part-of-speech tag. POS tags are treated as a closed set so every POS tag is identified.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PosId<'t> {
     inner: InnerPosId<'t>,
 }
@@ -129,7 +130,7 @@ impl<'t> fmt::Debug for PosId<'t> {
 impl<'t> PosId<'t> {
     pub(crate) fn regular(text: &'t str, id: PosIdInt) -> Self {
         PosId {
-            inner: InnerPosId::Normal(text, id),
+            inner: InnerPosId::Normal(text.into(), id),
         }
     }
 
@@ -139,11 +140,6 @@ impl<'t> PosId<'t> {
         }
     }
 
-    /// Converts this ID to an owned ID.
-    pub fn to_owned_id(&self) -> owned::PosId {
-        owned::PosId(self.as_str().to_string(), self.id())
-    }
-
     pub(crate) fn id(&self) -> PosIdInt {
         match &self.inner {
             InnerPosId::Normal(_, id) => *id,
@@ -151,10 +147,20 @@ impl<'t> PosId<'t> {
         }
     }
 
+    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
+    pub fn into_static(self) -> PosId<'static> {
+        let inner = match self.inner {
+            InnerPosId::Normal(string, id) => InnerPosId::Normal(string.into_owned().into(), id),
+            InnerPosId::Special(special) => InnerPosId::Special(special),
+        };
+
+        PosId { inner }
+    }
+
     /// Gets the part-of-speech as string.
-    pub fn as_str(&self) -> &'t str {
+    pub fn as_str(&self) -> &str {
         match &self.inner {
-            InnerPosId::Normal(text, _) => *text,
+            InnerPosId::Normal(text, _) => text.as_ref(),
             InnerPosId::Special(special) => special.as_str(),
         }
     }
@@ -475,7 +481,7 @@ impl<'a> Iterator for TagIter<'a> {
                 data.lemma().clone()
             };
 
-            WordData::new(lemma, *data.pos())
+            WordData::new(lemma, data.pos().clone())
         })
     }
 }

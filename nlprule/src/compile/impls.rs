@@ -193,7 +193,7 @@ impl MultiwordTagger {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
+            let pos = info.tagger().id_tag(tab_split[1]).into_static();
             multiwords.push((word, pos));
         }
 

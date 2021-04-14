@@ -41,11 +41,11 @@ impl PosFilter {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Disambiguation {
-    Remove(Vec<either::Either<owned::WordData, PosFilter>>),
-    Add(Vec<owned::WordData>),
-    Replace(Vec<owned::WordData>),
+    Remove(Vec<either::Either<WordData<'static>, PosFilter>>),
+    Add(Vec<WordData<'static>>),
+    Replace(Vec<WordData<'static>>),
     Filter(
-        Vec<Option<either::Either<owned::WordData, PosFilter>>>,
+        Vec<Option<either::Either<WordData<'static>, PosFilter>>>,
         bool,
     ),
     Unify(Vec<Vec<PosFilter>>, Vec<Option<PosFilter>>, Vec<bool>),
@@ -61,9 +61,9 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(data) => {
                                 token.word_mut().retain(|x| {
-                                    !(*x.pos() == data.pos.as_ref_id()
-                                        && (data.lemma.as_ref().is_empty()
-                                            || *x.lemma() == data.lemma.as_ref_id()))
+                                    !(x.pos() == data.pos()
+                                        && (data.lemma().as_str().is_empty()
+                                            || x.lemma() == data.lemma()))
                                 });
                             }
                             either::Right(filter) => {
@@ -84,21 +84,19 @@ impl Disambiguation {
                                         |x| x.lemma().clone(),
                                     );
 
-                                    token
-                                        .word_mut()
-                                        .retain(|x| *x.pos() == limit.pos.as_ref_id());
+                                    token.word_mut().retain(|x| x.pos() == limit.pos());
 
                                     if token.word().tags().is_empty() {
                                         if *retain_last {
                                             token
                                                 .word_mut()
-                                                .push(WordData::new(last, limit.pos.as_ref_id()));
+                                                .push(WordData::new(last, limit.pos().clone()));
                                         } else {
                                             let lemma = token.word().text().clone();
 
                                             token
                                                 .word_mut()
-                                                .push(WordData::new(lemma, limit.pos.as_ref_id()));
+                                                .push(WordData::new(lemma, limit.pos().clone()));
                                         }
                                     }
                                 }
@@ -116,12 +114,12 @@ impl Disambiguation {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
                         let data = WordData::new(
-                            if data.lemma.as_ref().is_empty() {
+                            if data.lemma().as_str().is_empty() {
                                 token.word().text().clone()
                             } else {
-                                data.lemma.as_ref_id()
+                                data.lemma().clone()
                             },
-                            data.pos.as_ref_id(),
+                            data.pos().clone(),
                         );
 
                         token.word_mut().push(data);
@@ -133,12 +131,12 @@ impl Disambiguation {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
                         let data = WordData::new(
-                            if data.lemma.as_ref().is_empty() {
+                            if data.lemma().as_str().is_empty() {
                                 token.word().text().clone()
                             } else {
-                                data.lemma.as_ref_id()
+                                data.lemma().clone()
                             },
-                            data.pos.as_ref_id(),
+                            data.pos().clone(),
                         );
 
                         token.word_mut().clear();
@@ -209,8 +207,8 @@ impl Disambiguation {
 pub struct DisambiguationChange {
     pub text: String,
     pub char_span: Range<usize>,
-    pub before: owned::Word,
-    pub after: owned::Word,
+    pub before: Word<'static>,
+    pub after: Word<'static>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -157,11 +157,11 @@ impl PyTagger {
 /// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
-    token: owned::Token,
+    token: Token<'static>,
 }
 
-impl From<owned::Token> for PyToken {
-    fn from(token: owned::Token) -> Self {
+impl From<Token<'static>> for PyToken {
+    fn from(token: Token<'static>) -> Self {
         PyToken { token }
     }
 }
@@ -170,21 +170,21 @@ impl From<owned::Token> for PyToken {
 impl PyToken {
     #[getter]
     fn text(&self) -> &str {
-        self.token.word.text.as_ref()
+        self.token.word().as_str()
     }
 
     #[getter]
     fn span(&self) -> (usize, usize) {
-        (self.token.span.char().start, self.token.span.char().end)
+        (self.token.span().char().start, self.token.span().char().end)
     }
 
     #[getter]
     fn data(&self) -> Vec<(&str, &str)> {
         self.token
-            .word
-            .tags
+            .word()
+            .tags()
             .iter()
-            .map(|x| (x.lemma.as_ref(), x.pos.as_ref()))
+            .map(|x| (x.lemma().as_str(), x.pos().as_str()))
             .collect()
     }
 
@@ -192,14 +192,14 @@ impl PyToken {
     fn lemmas(&self) -> Vec<&str> {
         let mut lemmas: Vec<_> = self
             .token
-            .word
-            .tags
+            .word()
+            .tags()
             .iter()
             .filter_map(|x| {
-                if x.lemma.as_ref().is_empty() {
+                if x.lemma().as_str().is_empty() {
                     None
                 } else {
-                    Some(x.lemma.as_ref())
+                    Some(x.lemma().as_str())
                 }
             })
             .collect();
@@ -212,14 +212,14 @@ impl PyToken {
     fn tags(&self) -> Vec<&str> {
         let mut tags: Vec<_> = self
             .token
-            .word
-            .tags
+            .word()
+            .tags()
             .iter()
             .filter_map(|x| {
-                if x.pos.as_ref().is_empty() {
+                if x.pos().as_str().is_empty() {
                     None
                 } else {
-                    Some(x.pos.as_ref())
+                    Some(x.pos().as_str())
                 }
             })
             .collect();
@@ -230,7 +230,7 @@ impl PyToken {
 
     #[getter]
     fn chunks(&self) -> Vec<&str> {
-        self.token.chunks.iter().map(|x| x.as_str()).collect()
+        self.token.chunks().iter().map(|x| x.as_str()).collect()
     }
 }
 
@@ -359,7 +359,7 @@ impl PyTokenizer {
                 .map(|sentence| {
                     sentence
                         .into_iter()
-                        .map(|x| PyCell::new(py, PyToken::from(x.to_owned_token())))
+                        .map(|token| PyCell::new(py, PyToken::from(token.into_static())))
                         .collect::<PyResult<Vec<_>>>()
                 })
                 .collect::<PyResult<Vec<Vec<_>>>>()?;
