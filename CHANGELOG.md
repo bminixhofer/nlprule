@@ -1,3 +1,10 @@
+# 0.6.1
+
+## Fixes
+
+- Build Python wheels in container for full manylinux2014 compliance, now works for glibc 2.17 and above (thanks @dvwright!)
+- Speed up loading the `Tokenizer` by avoiding an allocation (thanks @drahnr!)
+
 # 0.6.0
 
 ## Fixes
