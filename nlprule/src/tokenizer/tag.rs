@@ -248,13 +248,17 @@ impl From<Tagger> for TaggerFields {
 impl From<TaggerFields> for Tagger {
     fn from(data: TaggerFields) -> Self {
         let word_store_fst = Map::new(data.word_store_fst).unwrap();
-        let word_store: BiMap<String, WordIdInt> = word_store_fst
-            .into_stream()
-            .into_str_vec()
-            .unwrap()
-            .into_iter()
-            .map(|(key, value)| (key, WordIdInt(value as u32)))
-            .collect();
+        let mut word_store: BiMap<String, WordIdInt> = BiMap::with_capacity(word_store_fst.len());
+        let mut stream = word_store_fst.into_stream();
+
+        while let Some((key, value)) = stream.next() {
+            word_store.insert(
+                std::str::from_utf8(key)
+                    .expect("word store keys are valid utf-8.")
+                    .to_owned(),
+                WordIdInt(value as u32),
+            );
+        }
 
         let mut tags = DefaultHashMap::new();
         let mut groups = DefaultHashMap::new();
