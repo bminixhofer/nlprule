@@ -757,13 +757,7 @@ impl Chunker {
                     let contains_nns = sentence
                         .iter()
                         .find(|token| *token.span().char() == char_span)
-                        .map(|token| {
-                            token
-                                .word()
-                                .tags()
-                                .iter()
-                                .any(|tag| tag.pos().as_str() == "NNS")
-                        })
+                        .map(|token| token.tags().iter().any(|tag| tag.pos().as_str() == "NNS"))
                         .unwrap_or(false);
 
                     if contains_nns {

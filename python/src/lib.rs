@@ -157,11 +157,11 @@ impl PyTagger {
 /// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
-    token: Token<'static>,
+    token: IncompleteToken<'static>,
 }
 
-impl From<Token<'static>> for PyToken {
-    fn from(token: Token<'static>) -> Self {
+impl From<IncompleteToken<'static>> for PyToken {
+    fn from(token: IncompleteToken<'static>) -> Self {
         PyToken { token }
     }
 }
@@ -170,7 +170,7 @@ impl From<Token<'static>> for PyToken {
 impl PyToken {
     #[getter]
     fn text(&self) -> &str {
-        self.token.word().as_str()
+        self.token.as_str()
     }
 
     #[getter]
@@ -181,7 +181,6 @@ impl PyToken {
     #[getter]
     fn data(&self) -> Vec<(&str, &str)> {
         self.token
-            .word()
             .tags()
             .iter()
             .map(|x| (x.lemma().as_str(), x.pos().as_str()))
@@ -192,7 +191,6 @@ impl PyToken {
     fn lemmas(&self) -> Vec<&str> {
         let mut lemmas: Vec<_> = self
             .token
-            .word()
             .tags()
             .iter()
             .filter_map(|x| {
@@ -212,7 +210,6 @@ impl PyToken {
     fn tags(&self) -> Vec<&str> {
         let mut tags: Vec<_> = self
             .token
-            .word()
             .tags()
             .iter()
             .filter_map(|x| {

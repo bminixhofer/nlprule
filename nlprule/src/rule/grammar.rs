@@ -139,7 +139,6 @@ impl Synthesizer {
                 .map(|first_token| {
                     (self.use_titlecase_adjust
                         && first_token
-                            .word()
                             .as_str()
                             .chars()
                             .next() // a word is expected to always have at least one char, but be defensive here

@@ -48,7 +48,7 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && PosFilter::and(filter, token.word());
+                        *mask_val = *mask_val && PosFilter::and(filter, token.tags());
                     }
                 }
             }
@@ -93,7 +93,7 @@ pub struct DisambiguationRule {
     pub(crate) unification: Option<Unification>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Changes(Vec<Vec<HashSet<Span>>>);
 
 // This is only used in tests at the moment.
@@ -211,12 +211,10 @@ impl DisambiguationRule {
             // shift the sentence to the right before matching to make sure
             // nothing assumes the sentene starts from absolute index zero
             let shift_delta = Position { byte: 1, char: 1 };
-            let sentence_before_complete =
-                sentence_before.clone().rshift(shift_delta).into_sentence();
+            let sentence_before_complete = sentence_before.clone().rshift(shift_delta);
             let changes = self
                 .apply(&MatchSentence::new(&sentence_before_complete))
                 .lshift(shift_delta);
-
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
@@ -240,12 +238,14 @@ impl DisambiguationRule {
                         .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
-                    let unordered_tags = after.word().tags().iter().collect::<HashSet<&WordData>>();
-                    let unordered_tags_change =
-                        change.after.tags().iter().collect::<HashSet<&WordData>>();
+                    let unordered_tags = after.tags().iter().collect::<HashSet<&WordData>>();
+                    let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
 
-                    after.word().as_str() == change.after.as_str()
-                        && unordered_tags == unordered_tags_change
+                    let pass = unordered_tags == unordered_tags_change;
+                    if !pass {
+                        println!("{:#?} ---- {:#?}", unordered_tags, unordered_tags_change);
+                    }
+                    pass
                 }
             };
 
@@ -475,8 +475,7 @@ impl Rule {
                         .tokenize(&test.text())
                         .expect("test text must not be empty."),
                 )
-                .rshift(shift_delta)
-                .into_sentence();
+                .rshift(shift_delta);
 
             info!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self

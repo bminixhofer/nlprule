@@ -68,7 +68,7 @@ impl<'t> WordId<'t> {
     }
 
     /// Gets the word as string.
-    pub fn as_str(&'t self) -> &'t str {
+    pub fn as_str(&self) -> &str {
         self.0.as_ref()
     }
 
@@ -145,6 +145,10 @@ impl<'t> PosId<'t> {
             InnerPosId::Normal(_, id) => *id,
             InnerPosId::Special(special) => PosIdInt(*special as u16),
         }
+    }
+
+    pub(crate) fn is_special(&self) -> bool {
+        matches!(self.inner, InnerPosId::Special { .. })
     }
 
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.

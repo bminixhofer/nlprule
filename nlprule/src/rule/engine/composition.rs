@@ -62,9 +62,9 @@ impl Matcher {
                         .next()
                         .map_or(false, |token| {
                             if case_sensitive {
-                                token.word().as_str() == input
+                                token.as_str() == input
                             } else {
-                                UniCase::new(token.word().as_str()) == UniCase::new(input)
+                                UniCase::new(token.as_str()) == UniCase::new(input)
                             }
                         })
                 }
@@ -126,13 +126,13 @@ pub struct WordDataMatcher {
 }
 
 impl WordDataMatcher {
-    pub fn is_match(
+    pub fn is_match<'t, I: Iterator<Item = &'t WordData<'t>>>(
         &self,
-        input: &[WordData],
+        mut input: I,
         context: Option<Context>,
         case_sensitive: Option<bool>,
     ) -> bool {
-        input.iter().any(|x| {
+        input.any(|x| {
             let pos_matches = self
                 .pos_matcher
                 .as_ref()
@@ -193,7 +193,7 @@ pub mod concrete {
             let (sentence, _) = context;
 
             self.matcher
-                .is_match(&sentence.index(position).word().text(), Some(context), None)
+                .is_match(&sentence.index(position).text(), Some(context), None)
         }
     }
 
@@ -233,10 +233,10 @@ pub mod concrete {
     impl Atomable for WordDataAtom {
         fn is_match(&self, context: Context, position: usize) -> bool {
             let (sentence, _) = context;
-            let tags = &sentence.index(position).word().tags();
+            let tags = sentence.index(position).tags().iter();
 
             self.matcher
-                .is_match(&tags, Some(context), Some(self.case_sensitive))
+                .is_match(tags, Some(context), Some(self.case_sensitive))
         }
     }
 }
@@ -324,7 +324,7 @@ impl Group {
     pub fn tokens<'a, 't>(
         &'a self,
         sentence: &'t MatchSentence,
-    ) -> impl DoubleEndedIterator<Item = &'t Token<'t>> {
+    ) -> impl DoubleEndedIterator<Item = &'t IncompleteToken<'t>> {
         let start = self.span.char().start;
         let end = self.span.char().end;
 
@@ -357,29 +357,39 @@ impl GraphId {
     }
 }
 
+lazy_static! {
+    static ref SENT_START: IncompleteToken<'static> = IncompleteToken::new(
+        WordId::empty(),
+        Tags::new(vec![WordData::new(
+            WordId::empty(),
+            PosId::special(SpecialPos::SentStart),
+        )],),
+        Span::default(),
+        false,
+        false,
+        Vec::new(),
+    );
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchSentence<'t> {
-    sentence: &'t Sentence<'t>,
-    sent_start: &'t Token<'t>,
+    sentence: &'t IncompleteSentence<'t>,
 }
 
 impl<'t> MatchSentence<'t> {
-    pub fn new(sentence: &'t Sentence<'t>) -> Self {
-        MatchSentence {
-            sentence,
-            sent_start: Token::sent_start(),
-        }
+    pub fn new(sentence: &'t IncompleteSentence<'t>) -> Self {
+        MatchSentence { sentence }
     }
 
-    pub fn index(&self, index: usize) -> &Token {
+    pub fn index(&self, index: usize) -> &IncompleteToken {
         match index {
-            0 => &self.sent_start,
+            0 => &*SENT_START,
             i => &self.sentence.tokens()[i - 1],
         }
     }
 
-    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t Token> {
-        iter::once(self.sent_start).chain(self.sentence.iter())
+    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t IncompleteToken> {
+        iter::once(self.index(0)).chain(self.sentence.iter())
     }
 
     pub fn len(&self) -> usize {

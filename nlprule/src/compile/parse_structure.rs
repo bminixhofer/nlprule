@@ -906,7 +906,11 @@ impl Rule {
     }
 }
 
-fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<Word<'static>, Error> {
+fn parse_tag_form(
+    form: &str,
+    is_sentence_end: bool,
+    info: &mut BuildInfo,
+) -> Result<Tags<'static>, Error> {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]".into());
     }
@@ -914,10 +918,11 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<Word<'static>, Err
     let captures = REGEX
         .captures(form)
         .ok_or_else(|| Error::Unexpected(format!("tag form must match regex, found '{}'", form)))?;
+    // text can never be changed by disambiguation so we don't need to compare it
     let text = captures.get(1).expect("1st regex group exists").as_str();
     let tags = captures.get(2).expect("2nd regex group exists").as_str();
 
-    let tags = tags
+    let mut tag_vec: Vec<_> = tags
         .split(',')
         .filter_map(|x| {
             if x == "</S>" {
@@ -937,7 +942,21 @@ fn parse_tag_form(form: &str, info: &mut BuildInfo) -> Result<Word<'static>, Err
         })
         .collect();
 
-    Ok(Word::new(info.tagger.id_word(text.to_owned().into()), tags))
+    tag_vec.push(
+        WordData::new(
+            info.tagger.id_word(text.to_owned().into()),
+            PosId::special(SpecialPos::None),
+        )
+        .freeze(),
+    );
+
+    if is_sentence_end {
+        tag_vec.push(WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze());
+    }
+
+    let tags = Tags::new(tag_vec);
+
+    Ok(tags)
 }
 
 impl WordData<'static> {
@@ -1258,24 +1277,33 @@ impl DisambiguationRule {
 
                 let test = match example.kind.as_str() {
                     "untouched" => DisambiguationExample::Unchanged(text),
-                    "ambiguous" => DisambiguationExample::Changed(DisambiguationChange {
-                        text,
-                        before: parse_tag_form(
-                            example
-                                .inputform
-                                .as_ref()
-                                .expect("must have inputform when ambiguous example"),
-                            info,
-                        )?,
-                        after: parse_tag_form(
-                            &example
-                                .outputform
-                                .as_ref()
-                                .expect("must have inputform when ambiguous example"),
-                            info,
-                        )?,
-                        char_span: char_span.expect("must have marker when ambiguous example"),
-                    }),
+                    "ambiguous" => {
+                        let char_span = char_span.expect("must have marker when ambiguous example");
+                        // `is_sentence_end` computation is problematic if there is whitespace at the end
+                        // this is not the case in current LT files, and also not clear what LT would to in that case
+                        let is_sentence_end = char_span.end == text.chars().count();
+
+                        DisambiguationExample::Changed(DisambiguationChange {
+                            text,
+                            before: parse_tag_form(
+                                example
+                                    .inputform
+                                    .as_ref()
+                                    .expect("must have inputform when ambiguous example"),
+                                is_sentence_end,
+                                info,
+                            )?,
+                            after: parse_tag_form(
+                                &example
+                                    .outputform
+                                    .as_ref()
+                                    .expect("must have inputform when ambiguous example"),
+                                is_sentence_end,
+                                info,
+                            )?,
+                            char_span,
+                        })
+                    }
                     x => panic!("unknown disambiguation example type {}", x),
                 };
 

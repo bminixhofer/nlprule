@@ -65,6 +65,11 @@ impl<'t> IncompleteSentence<'t> {
         self.tokens.iter()
     }
 
+    /// Gets the tokens in this sentence.
+    pub fn tokens(&self) -> &[IncompleteToken<'t>] {
+        &self.tokens
+    }
+
     /// Gets the amount of tokens in this sentence.
     pub fn len(&self) -> usize {
         self.tokens.len()
@@ -73,22 +78,6 @@ impl<'t> IncompleteSentence<'t> {
     /// Gets the tagger associated with this sentence.
     pub fn tagger(&self) -> &'t Tagger {
         self.tagger
-    }
-
-    /// Converts this incomplete sentence into a [Sentence].
-    pub fn into_sentence(self) -> Sentence<'t> {
-        let tagger = self.tagger();
-
-        Sentence {
-            text: self.text(),
-            tagger,
-            tokens: self
-                .tokens
-                .into_iter()
-                .map(|token| token.into_token())
-                .collect(),
-            span: self.span,
-        }
     }
 
     /// Returns the span of this sentence.
@@ -105,61 +94,6 @@ impl<'t> IncompleteSentence<'t> {
             .map(|x| x.rshift(position))
             .collect();
         self
-    }
-}
-
-/// A Sentence. As opposed to [IncompleteSentence], all information is set and frozen.
-/// Always contains at least one token.
-#[derive(Derivative, Clone)]
-#[derivative(Debug, PartialEq)]
-pub struct Sentence<'t> {
-    text: &'t str,
-    tokens: Vec<Token<'t>>,
-    #[derivative(Debug = "ignore", PartialEq = "ignore")]
-    tagger: &'t Tagger,
-    span: Span,
-}
-
-impl<'t> IntoIterator for Sentence<'t> {
-    type Item = Token<'t>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.tokens.into_iter()
-    }
-}
-
-// is_empty does not make sense because there is always at least one token
-#[allow(clippy::clippy::len_without_is_empty)]
-impl<'t> Sentence<'t> {
-    /// Gets the tokens in this sentence.
-    pub fn tokens(&self) -> &[Token<'t>] {
-        &self.tokens
-    }
-
-    /// Returns an iterator over tokens by reference.
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Token> {
-        self.tokens.iter()
-    }
-
-    /// Gets the text of this sentence.
-    pub fn text(&self) -> &'t str {
-        self.text
-    }
-
-    /// Gets the amount of tokens in this sentence.
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
-
-    /// Gets the tagger associated with this sentence.
-    pub fn tagger(&self) -> &'t Tagger {
-        self.tagger
-    }
-
-    /// Returns the span of this sentence.
-    pub fn span(&self) -> &Span {
-        &self.span
     }
 }
 
@@ -192,8 +126,9 @@ impl<'t> WordData<'t> {
     }
 
     /// Freezes the data hinting that it should never be removed from a word once added.
-    pub fn freeze(&mut self) {
+    pub fn freeze(mut self) -> Self {
         self.frozen = true;
+        self
     }
 
     /// Checks whether the data is frozen i.e. whether it can never be removed from a word once added.
@@ -211,34 +146,62 @@ impl<'t> WordData<'t> {
     }
 }
 
+lazy_static! {
+    static ref UNKNOWN_DATA: WordData<'static> =
+        WordData::new(WordId::empty(), PosId::special(SpecialPos::Unknown));
+}
+
+struct TagIter<'a, 't> {
+    iter: std::slice::Iter<'a, WordData<'t>>,
+    is_empty: Option<bool>,
+}
+
+impl<'a, 't> Iterator for TagIter<'a, 't> {
+    type Item = &'a WordData<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(x) = self.iter.next() {
+            if *x.pos() == PosId::special(SpecialPos::SentStart) {
+                self.is_empty = None;
+            }
+
+            return Some(x);
+        }
+
+        if let Some(true) = self.is_empty.take() {
+            return Some(&*UNKNOWN_DATA);
+        }
+
+        None
+    }
+}
+
 /// Contains all the local information about a token i. e.
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Word<'t> {
-    text: WordId<'t>,
+pub struct Tags<'t> {
     tags: Vec<WordData<'t>>,
 }
 
-impl<'t> Word<'t> {
-    /// Creates a new Word.
-    pub fn new(text: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
-        Word { text, tags }
-    }
-
-    /// The text ID of this token.
-    pub fn text(&self) -> &WordId<'t> {
-        &self.text
+impl<'t> Tags<'t> {
+    /// Creates new [Tags].
+    pub fn new(tags: Vec<WordData<'t>>) -> Self {
+        Tags { tags }
     }
 
     /// Multiple pairs of (lemma, part-of-speech) associated with this token.
     /// Order is in general not significant.
-    pub fn tags(&self) -> &[WordData<'t>] {
-        &self.tags
+    pub fn iter(&self) -> impl Iterator<Item = &WordData<'t>> {
+        TagIter {
+            iter: self.tags.iter(),
+            is_empty: Some(self.is_empty()),
+        }
     }
 
-    /// Gets the word text as string.
-    pub fn as_str(&'t self) -> &'t str {
-        self.text.as_str()
+    /// Checks if there are no ordinary part-of-speech tags. If this is true, this does not imply that `.iter()` will return
+    /// an empty iterator as special tags (e.g. `UNKNOWN`) are not considered in `is_empty()`.
+    pub fn is_empty(&self) -> bool {
+        self.tags.iter().all(|x| x.pos().is_special())
     }
 
     /// Removes all non-frozen tags.
@@ -257,9 +220,8 @@ impl<'t> Word<'t> {
     }
 
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
-    pub fn into_static(self) -> Word<'static> {
-        Word {
-            text: self.text.into_static(),
+    pub fn into_static(self) -> Tags<'static> {
+        Tags {
             tags: self.tags.into_iter().map(|x| x.into_static()).collect(),
         }
     }
@@ -268,7 +230,8 @@ impl<'t> Word<'t> {
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteToken<'t> {
-    word: Word<'t>,
+    text: WordId<'t>,
+    tags: Tags<'t>,
     span: Span,
     is_sentence_end: bool,
     has_space_before: bool,
@@ -277,14 +240,16 @@ pub struct IncompleteToken<'t> {
 
 impl<'t> IncompleteToken<'t> {
     pub(crate) fn new(
-        word: Word<'t>,
+        text: WordId<'t>,
+        tags: Tags<'t>,
         span: Span,
         is_sentence_end: bool,
         has_space_before: bool,
         chunks: Vec<String>,
     ) -> Self {
         IncompleteToken {
-            word,
+            text,
+            tags,
             span,
             is_sentence_end,
             has_space_before,
@@ -292,45 +257,24 @@ impl<'t> IncompleteToken<'t> {
         }
     }
 
-    /// Converts this incomplete token to a complete token.
-    pub fn into_token(self) -> Token<'t> {
-        let mut word = self.word.clone();
-
-        word.tags.push(WordData::new(
-            self.word.text.clone(),
-            PosId::special(SpecialPos::None),
-        ));
-
-        if word.tags.iter().all(|x| x.pos.as_str().is_empty()) {
-            word.tags.push(WordData::new(
-                self.word.text.clone(),
-                PosId::special(SpecialPos::Unknown),
-            ));
-        }
-
-        if self.is_sentence_end {
-            word.tags.push(WordData::new(
-                self.word.text,
-                PosId::special(SpecialPos::SentEnd),
-            ));
-        }
-
-        Token {
-            word,
-            span: self.span,
-            has_space_before: self.has_space_before,
-            chunks: self.chunks,
-        }
+    /// Gets the word id for this token.
+    pub fn text(&self) -> &WordId<'t> {
+        &self.text
     }
 
-    /// The word of this token. Contains information about the actual text and part-of-speech tags + lemmas.
-    pub fn word(&self) -> &Word<'t> {
-        &self.word
+    /// Gets the token as string.
+    pub fn as_str(&self) -> &str {
+        self.text.as_str()
+    }
+
+    /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
+    pub fn tags(&self) -> &Tags<'t> {
+        &self.tags
     }
 
     #[allow(missing_docs)]
-    pub fn word_mut(&mut self) -> &mut Word<'t> {
-        &mut self.word
+    pub fn tags_mut(&mut self) -> &mut Tags<'t> {
+        &mut self.tags
     }
 
     /// The span of this sentence.
@@ -341,11 +285,6 @@ impl<'t> IncompleteToken<'t> {
     /// Whether this token is the last token in the sentence-
     pub fn is_sentence_end(&self) -> bool {
         self.is_sentence_end
-    }
-
-    #[allow(missing_docs)]
-    pub fn is_sentence_end_mut(&mut self) -> &mut bool {
-        &mut self.is_sentence_end
     }
 
     /// Whether this token has one or more whitespace characters before.
@@ -368,74 +307,14 @@ impl<'t> IncompleteToken<'t> {
         self.span = self.span.rshift(position);
         self
     }
-}
-
-/// A finished token with all information set.
-/// The main difference to [IncompleteToken] is that all the information is frozen.
-#[derive(Clone, Debug, PartialEq)]
-#[allow(missing_docs)]
-pub struct Token<'t> {
-    word: Word<'t>,
-    span: Span,
-    has_space_before: bool,
-    chunks: Vec<String>,
-}
-
-lazy_static! {
-    static ref SENT_START: Token<'static> = {
-        Token {
-            word: Word::new(
-                WordId::empty(),
-                vec![WordData::new(
-                    WordId::empty(),
-                    PosId::special(SpecialPos::SentStart),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-            span: Span::default(),
-            has_space_before: false,
-            chunks: Vec::new(),
-        }
-    };
-}
-
-impl<'t> Token<'t> {
-    /// The word of this token. Contains information about the actual text and part-of-speech tags + lemmas.
-    pub fn word(&self) -> &Word<'t> {
-        &self.word
-    }
-
-    /// The span of this sentence.
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-
-    /// Whether this token has one or more whitespace characters before.
-    pub fn has_space_before(&self) -> bool {
-        self.has_space_before
-    }
-
-    /// Chunks associated with this token.
-    pub fn chunks(&self) -> &[String] {
-        &self.chunks
-    }
-
-    pub(crate) fn sent_start() -> &'static Token<'static> {
-        &*SENT_START
-    }
-
-    /// Shift the span of this sentence right by the specified amount.
-    pub fn rshift(mut self, position: Position) -> Self {
-        self.span = self.span.rshift(position);
-        self
-    }
 
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
-    pub fn into_static(self) -> Token<'static> {
-        Token {
-            word: self.word.into_static(),
+    pub fn into_static(self) -> IncompleteToken<'static> {
+        IncompleteToken {
+            text: self.text.into_static(),
+            tags: self.tags.into_static(),
             span: self.span,
+            is_sentence_end: self.is_sentence_end,
             has_space_before: self.has_space_before,
             chunks: self.chunks,
         }

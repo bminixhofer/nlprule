@@ -139,12 +139,12 @@ pub struct SentenceIter<'t> {
 }
 
 impl<'t> Iterator for SentenceIter<'t> {
-    type Item = Sentence<'t>;
+    type Item = IncompleteSentence<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .next()
-            .map(|sentence| self.tokenizer.disambiguate(sentence).into_sentence())
+            .map(|sentence| self.tokenizer.disambiguate(sentence))
     }
 }
 
@@ -210,8 +210,7 @@ impl Tokenizer {
         let mut i = 0;
 
         while i < n {
-            let complete_sentence = sentence.clone().into_sentence();
-            let match_sentence = MatchSentence::new(&complete_sentence);
+            let match_sentence = MatchSentence::new(&sentence);
 
             let result = self.rules[i..n]
                 .maybe_par_iter()
@@ -246,7 +245,7 @@ impl Tokenizer {
     fn get_token_ranges<'t>(
         &self,
         text: &'t str,
-    ) -> impl ExactSizeIterator<Item = Range<usize>> + 't {
+    ) -> impl ExactSizeIterator<Item = Range<usize>> + 't + Clone {
         let mut tokens = Vec::new();
 
         let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
@@ -306,12 +305,14 @@ impl Tokenizer {
             return None;
         }
 
-        let token_strs = self.get_token_ranges(sentence);
-        let n_token_strs = token_strs.len();
+        let token_strs = self
+            .get_token_ranges(sentence)
+            .filter(|range| !sentence[range.clone()].trim().is_empty());
 
-        let mut tokens: Vec<_> = token_strs
+        let n_token_strs = token_strs.clone().count();
+
+        let tokens: Vec<_> = token_strs
             .enumerate()
-            .filter(|(_, range)| !sentence[range.clone()].trim().is_empty())
             .map(|(i, range)| {
                 let byte_start = range.start;
                 let char_start = sentence[..byte_start].chars().count();
@@ -321,17 +322,35 @@ impl Tokenizer {
                 let is_sentence_start = i == 0;
                 let is_sentence_end = i == n_token_strs - 1;
 
+                let id = self.tagger.id_word(token_text.into());
+
+                let mut tag_vec: Vec<_> = self
+                    .tagger
+                    .get_tags_with_options(
+                        token_text,
+                        if is_sentence_start { Some(true) } else { None },
+                        None,
+                    )
+                    .collect();
+
+                tag_vec.push(
+                    WordData::new(
+                        self.tagger().id_word(token_text.into()),
+                        PosId::special(SpecialPos::None),
+                    )
+                    .freeze(),
+                );
+
+                if is_sentence_end {
+                    tag_vec.push(
+                        WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd))
+                            .freeze(),
+                    );
+                }
+
                 IncompleteToken::new(
-                    Word::new(
-                        self.tagger.id_word(token_text.into()),
-                        self.tagger
-                            .get_tags_with_options(
-                                token_text,
-                                if is_sentence_start { Some(true) } else { None },
-                                None,
-                            )
-                            .collect(),
-                    ),
+                    id,
+                    Tags::new(tag_vec),
                     Span::new(
                         byte_start..byte_start + token_text.len(),
                         char_start..char_start + token_text.chars().count(),
@@ -342,9 +361,6 @@ impl Tokenizer {
                 )
             })
             .collect();
-
-        let last_idx = tokens.len() - 1;
-        *tokens[last_idx].is_sentence_end_mut() = true;
 
         let mut sentence = IncompleteSentence::new(tokens, sentence, &self.tagger);
 
