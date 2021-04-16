@@ -433,7 +433,7 @@ impl BinaryBuilder {
         self
     }
 
-    /// Sets the cache directory. The user cache directory at e. g. `~/.cache/nlprule` bz default.
+    /// Sets the cache directory. The user cache directory at e. g. `~/.cache/nlprule` by default.
     pub fn cache_dir(mut self, cache_dir: Option<PathBuf>) -> Self {
         self.cache_dir = cache_dir;
         self
@@ -595,6 +595,7 @@ mod tests {
         let tempdir = tempdir.path();
 
         BinaryBuilder::new(&["en"], tempdir)
+            .cache_dir(Some(tempdir.to_path_buf()))
             .fallback_to_build_dir(true)
             .build()?
             .validate()?;
