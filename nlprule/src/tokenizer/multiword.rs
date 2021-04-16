@@ -38,7 +38,7 @@ pub struct MultiwordTagger {
 
 impl MultiwordTagger {
     /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(&'t self, sentence: &mut IncompleteSentence<'t>) {
+    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) {
         let tagger = sentence.tagger();
 
         let mut start_indices = DefaultHashMap::new();

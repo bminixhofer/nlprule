@@ -89,7 +89,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given sentence by checking all rules.
-    pub fn apply(&self, sentence: &IncompleteSentence) -> Vec<Suggestion> {
+    pub fn apply(&self, sentence: &Sentence) -> Vec<Suggestion> {
         let sentence = MatchSentence::new(sentence);
 
         let mut output: Vec<(usize, Suggestion)> = self

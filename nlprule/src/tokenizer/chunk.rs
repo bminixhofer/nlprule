@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::types::{DefaultHashMap, DefaultHasher, IncompleteSentence};
+use crate::types::{DefaultHashMap, DefaultHasher, Sentence};
 
 fn softmax(vec: &mut Vec<f32>) {
     for x in vec.iter_mut() {
@@ -701,7 +701,7 @@ pub struct Chunker {
 
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
-    pub fn apply(&self, sentence: &mut IncompleteSentence) {
+    pub fn apply(&self, sentence: &mut Sentence) {
         let text = sentence.text().replace('’', "\'");
 
         let mut bi_to_ci: DefaultHashMap<usize, usize> = text

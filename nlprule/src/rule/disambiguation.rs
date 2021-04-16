@@ -52,7 +52,7 @@ pub enum Disambiguation {
 }
 
 impl Disambiguation {
-    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut IncompleteToken<'t>>>) {
+    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut Token<'t>>>) {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {

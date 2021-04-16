@@ -16,20 +16,19 @@ pub(crate) type DefaultHashMap<K, V> = HashMap<K, V>;
 pub(crate) type DefaultHashSet<T> = HashSet<T>;
 pub(crate) type DefaultHasher = hash_map::DefaultHasher;
 
-/// A incomplete sentence containing partially set information about the tokens.
-/// Can be converted to a complete sentence with [into_sentence][IncompleteSentence::into_sentence].
+/// A sentence containing one or more [Token]s.
 #[derive(Derivative, Clone)]
 #[derivative(Debug, PartialEq)]
-pub struct IncompleteSentence<'t> {
+pub struct Sentence<'t> {
     text: &'t str,
-    tokens: Vec<IncompleteToken<'t>>,
+    tokens: Vec<Token<'t>>,
     #[derivative(Debug = "ignore", PartialEq = "ignore")]
     tagger: &'t Tagger,
     span: Span,
 }
 
-impl<'t> IntoIterator for IncompleteSentence<'t> {
-    type Item = IncompleteToken<'t>;
+impl<'t> IntoIterator for Sentence<'t> {
+    type Item = Token<'t>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -39,10 +38,10 @@ impl<'t> IntoIterator for IncompleteSentence<'t> {
 
 // is_empty does not make sense because there is always at least one token
 #[allow(clippy::clippy::len_without_is_empty)]
-impl<'t> IncompleteSentence<'t> {
-    /// Creates a new incomplete sentence.
-    pub(crate) fn new(tokens: Vec<IncompleteToken<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
-        IncompleteSentence {
+impl<'t> Sentence<'t> {
+    /// Creates a new sentence.
+    pub(crate) fn new(tokens: Vec<Token<'t>>, text: &'t str, tagger: &'t Tagger) -> Self {
+        Sentence {
             text,
             tokens,
             tagger,
@@ -56,17 +55,17 @@ impl<'t> IncompleteSentence<'t> {
     }
 
     /// Returns an iterator over tokens by mutable reference.
-    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut IncompleteToken<'t>> {
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Token<'t>> {
         self.tokens.iter_mut()
     }
 
     /// Returns an iterator over tokens by reference.
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &IncompleteToken> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Token> {
         self.tokens.iter()
     }
 
     /// Gets the tokens in this sentence.
-    pub fn tokens(&self) -> &[IncompleteToken<'t>] {
+    pub fn tokens(&self) -> &[Token<'t>] {
         &self.tokens
     }
 
@@ -229,7 +228,7 @@ impl<'t> Tags<'t> {
 
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
-pub struct IncompleteToken<'t> {
+pub struct Token<'t> {
     text: WordId<'t>,
     tags: Tags<'t>,
     span: Span,
@@ -238,7 +237,7 @@ pub struct IncompleteToken<'t> {
     chunks: Vec<String>,
 }
 
-impl<'t> IncompleteToken<'t> {
+impl<'t> Token<'t> {
     pub(crate) fn new(
         text: WordId<'t>,
         tags: Tags<'t>,
@@ -247,7 +246,7 @@ impl<'t> IncompleteToken<'t> {
         has_space_before: bool,
         chunks: Vec<String>,
     ) -> Self {
-        IncompleteToken {
+        Token {
             text,
             tags,
             span,
@@ -309,8 +308,8 @@ impl<'t> IncompleteToken<'t> {
     }
 
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
-    pub fn into_static(self) -> IncompleteToken<'static> {
-        IncompleteToken {
+    pub fn into_static(self) -> Token<'static> {
+        Token {
             text: self.text.into_static(),
             tags: self.tags.into_static(),
             span: self.span,

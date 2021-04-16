@@ -324,7 +324,7 @@ impl Group {
     pub fn tokens<'a, 't>(
         &'a self,
         sentence: &'t MatchSentence,
-    ) -> impl DoubleEndedIterator<Item = &'t IncompleteToken<'t>> {
+    ) -> impl DoubleEndedIterator<Item = &'t Token<'t>> {
         let start = self.span.char().start;
         let end = self.span.char().end;
 
@@ -358,7 +358,7 @@ impl GraphId {
 }
 
 lazy_static! {
-    static ref SENT_START: IncompleteToken<'static> = IncompleteToken::new(
+    static ref SENT_START: Token<'static> = Token::new(
         WordId::empty(),
         Tags::new(vec![WordData::new(
             WordId::empty(),
@@ -373,22 +373,22 @@ lazy_static! {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchSentence<'t> {
-    sentence: &'t IncompleteSentence<'t>,
+    sentence: &'t Sentence<'t>,
 }
 
 impl<'t> MatchSentence<'t> {
-    pub fn new(sentence: &'t IncompleteSentence<'t>) -> Self {
+    pub fn new(sentence: &'t Sentence<'t>) -> Self {
         MatchSentence { sentence }
     }
 
-    pub fn index(&self, index: usize) -> &IncompleteToken {
+    pub fn index(&self, index: usize) -> &Token {
         match index {
             0 => &*SENT_START,
             i => &self.sentence.tokens()[i - 1],
         }
     }
 
-    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t IncompleteToken> {
+    pub fn iter(&'t self) -> impl DoubleEndedIterator<Item = &'t Token> {
         iter::once(self.index(0)).chain(self.sentence.iter())
     }
 

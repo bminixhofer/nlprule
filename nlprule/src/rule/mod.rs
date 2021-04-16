@@ -168,7 +168,7 @@ impl DisambiguationRule {
         Changes(all_spans)
     }
 
-    pub(crate) fn change<'t>(&'t self, sentence: &mut IncompleteSentence<'t>, changes: Changes) {
+    pub(crate) fn change<'t>(&'t self, sentence: &mut Sentence<'t>, changes: Changes) {
         log::info!("applying {}", self.id);
 
         for spans in changes.0 {

@@ -157,11 +157,11 @@ impl PyTagger {
 /// * chunks (List[str]): Chunks of this token. Are not set for some languages (e. g. German).
 #[pyclass(name = "Token", module = "nlprule")]
 pub struct PyToken {
-    token: IncompleteToken<'static>,
+    token: Token<'static>,
 }
 
-impl From<IncompleteToken<'static>> for PyToken {
-    fn from(token: IncompleteToken<'static>) -> Self {
+impl From<Token<'static>> for PyToken {
+    fn from(token: Token<'static>) -> Self {
         PyToken { token }
     }
 }

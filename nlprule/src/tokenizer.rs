@@ -97,7 +97,7 @@ pub struct IncompleteSentenceIter<'t> {
 }
 
 impl<'t> Iterator for IncompleteSentenceIter<'t> {
-    type Item = IncompleteSentence<'t>;
+    type Item = Sentence<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index == self.splits.len() {
@@ -139,7 +139,7 @@ pub struct SentenceIter<'t> {
 }
 
 impl<'t> Iterator for SentenceIter<'t> {
-    type Item = IncompleteSentence<'t>;
+    type Item = Sentence<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -201,9 +201,9 @@ impl Tokenizer {
 
     pub(crate) fn disambiguate_up_to_id<'t>(
         &'t self,
-        mut sentence: IncompleteSentence<'t>,
+        mut sentence: Sentence<'t>,
         id: Option<&Index>,
-    ) -> IncompleteSentence<'t> {
+    ) -> Sentence<'t> {
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == *id).unwrap()
         });
@@ -238,7 +238,7 @@ impl Tokenizer {
 
     /// Apply rule-based disambiguation to the tokens.
     /// This does not change the number of tokens, but can change the content arbitrarily.
-    pub fn disambiguate<'t>(&'t self, sentence: IncompleteSentence<'t>) -> IncompleteSentence<'t> {
+    pub fn disambiguate<'t>(&'t self, sentence: Sentence<'t>) -> Sentence<'t> {
         self.disambiguate_up_to_id(sentence, None)
     }
 
@@ -300,7 +300,7 @@ impl Tokenizer {
 
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
     // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
-    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Option<IncompleteSentence<'t>> {
+    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Option<Sentence<'t>> {
         if sentence.trim().is_empty() {
             return None;
         }
@@ -348,7 +348,7 @@ impl Tokenizer {
                     );
                 }
 
-                IncompleteToken::new(
+                Token::new(
                     id,
                     Tags::new(tag_vec),
                     Span::new(
@@ -362,7 +362,7 @@ impl Tokenizer {
             })
             .collect();
 
-        let mut sentence = IncompleteSentence::new(tokens, sentence, &self.tagger);
+        let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
 
         if let Some(chunker) = &self.chunker {
             chunker.apply(&mut sentence);
