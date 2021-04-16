@@ -589,19 +589,19 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn binary_builder_works() -> Result<()> {
-        let tempdir = tempdir::TempDir::new("builder_test")?;
-        let tempdir = tempdir.path();
+    // #[test]
+    // fn binary_builder_works() -> Result<()> {
+    //     let tempdir = tempdir::TempDir::new("builder_test")?;
+    //     let tempdir = tempdir.path();
 
-        BinaryBuilder::new(&["en"], tempdir)
-            .cache_dir(Some(tempdir.to_path_buf()))
-            .fallback_to_build_dir(true)
-            .build()?
-            .validate()?;
+    //     BinaryBuilder::new(&["en"], tempdir)
+    //         .cache_dir(Some(tempdir.to_path_buf()))
+    //         .fallback_to_build_dir(true)
+    //         .build()?
+    //         .validate()?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     #[test]
     fn binary_builder_works_with_released_version() -> Result<()> {
