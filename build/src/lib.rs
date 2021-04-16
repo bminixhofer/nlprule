@@ -589,6 +589,7 @@ mod tests {
         Ok(())
     }
 
+    // TODO: causes problems in CI, maybe remove `fallback_to_build_dir` altogether?
     // #[test]
     // fn binary_builder_works() -> Result<()> {
     //     let tempdir = tempdir::TempDir::new("builder_test")?;
