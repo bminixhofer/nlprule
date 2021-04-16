@@ -3,7 +3,6 @@
 use crate::types::*;
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
-use indexmap::IndexMap;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt, iter::once};
@@ -182,6 +181,8 @@ struct TaggerFields {
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
     lang_options: TaggerLangOptions,
+    tags_length: usize,
+    groups_length: usize,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -189,30 +190,31 @@ impl From<Tagger> for TaggerFields {
         let mut tag_fst_items = Vec::new();
 
         for (word_id, map) in tagger.tags.iter() {
-            let mut i = 0u8;
             let word = tagger.str_for_word_id(word_id);
 
-            for (inflect_id, pos_ids) in map.iter() {
-                for pos_id in pos_ids {
-                    assert!(i < 255);
-                    i += 1;
+            for (i, (inflect_id, pos_id)) in map.iter().enumerate() {
+                assert!(i < 255);
 
-                    let key: Vec<u8> = word.as_bytes().iter().chain(once(&i)).copied().collect();
-                    let pos_bytes = pos_id.0.to_be_bytes();
-                    let inflect_bytes = inflect_id.0.to_be_bytes();
+                let key: Vec<u8> = word
+                    .as_bytes()
+                    .iter()
+                    .chain(once(&(i as u8)))
+                    .copied()
+                    .collect();
+                let pos_bytes = pos_id.0.to_be_bytes();
+                let inflect_bytes = inflect_id.0.to_be_bytes();
 
-                    let value = u64::from_be_bytes([
-                        inflect_bytes[0],
-                        inflect_bytes[1],
-                        inflect_bytes[2],
-                        inflect_bytes[3],
-                        0,
-                        0,
-                        pos_bytes[0],
-                        pos_bytes[1],
-                    ]);
-                    tag_fst_items.push((key, value));
-                }
+                let value = u64::from_be_bytes([
+                    inflect_bytes[0],
+                    inflect_bytes[1],
+                    inflect_bytes[2],
+                    inflect_bytes[3],
+                    0,
+                    0,
+                    pos_bytes[0],
+                    pos_bytes[1],
+                ]);
+                tag_fst_items.push((key, value));
             }
         }
 
@@ -241,6 +243,8 @@ impl From<Tagger> for TaggerFields {
             word_store_fst,
             tag_store: tagger.tag_store,
             lang_options: tagger.lang_options,
+            tags_length: tagger.tags.len(),
+            groups_length: tagger.groups.len(),
         }
     }
 }
@@ -260,8 +264,8 @@ impl From<TaggerFields> for Tagger {
             );
         }
 
-        let mut tags = DefaultHashMap::new();
-        let mut groups = DefaultHashMap::new();
+        let mut tags = DefaultHashMap::with_capacity(data.tags_length);
+        let mut groups = DefaultHashMap::with_capacity(data.groups_length);
 
         let tag_fst = Map::new(data.tag_fst).unwrap();
         let mut stream = tag_fst.into_stream();
@@ -271,7 +275,7 @@ impl From<TaggerFields> for Tagger {
             let word_id = *word_store.get_by_left(word).unwrap();
 
             let value_bytes = value.to_be_bytes();
-            let inflection_id = WordIdInt(u32::from_be_bytes([
+            let lemma_id = WordIdInt(u32::from_be_bytes([
                 value_bytes[0],
                 value_bytes[1],
                 value_bytes[2],
@@ -279,16 +283,14 @@ impl From<TaggerFields> for Tagger {
             ]));
             let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
 
-            let group = groups.entry(inflection_id).or_insert_with(Vec::new);
+            let group = groups.entry(lemma_id).or_insert_with(Vec::new);
             if !group.contains(&word_id) {
                 group.push(word_id);
             }
 
             tags.entry(word_id)
-                .or_insert_with(IndexMap::new)
-                .entry(inflection_id)
                 .or_insert_with(Vec::new)
-                .push(pos_id);
+                .push((lemma_id, pos_id));
         }
 
         Tagger {
@@ -343,7 +345,7 @@ impl From<TaggerFields> for Tagger {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: DefaultHashMap<WordIdInt, IndexMap<WordIdInt, Vec<PosIdInt>>>,
+    pub(crate) tags: DefaultHashMap<WordIdInt, Vec<(WordIdInt, PosIdInt)>>,
     pub(crate) tag_store: BiMap<String, PosIdInt>,
     pub(crate) word_store: BiMap<String, WordIdInt>,
     pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
@@ -362,13 +364,11 @@ impl Tagger {
         {
             let mut output = Vec::new();
 
-            for (key, value) in map.iter() {
-                for pos_id in value {
-                    output.push(WordData::new(
-                        self.id_word(self.str_for_word_id(key).into()),
-                        self.id_tag(self.str_for_pos_id(pos_id)),
-                    ))
-                }
+            for (lemma_id, pos_id) in map.iter() {
+                output.push(WordData::new(
+                    self.id_word(self.str_for_word_id(lemma_id).into()),
+                    self.id_tag(self.str_for_pos_id(pos_id)),
+                ))
             }
 
             output

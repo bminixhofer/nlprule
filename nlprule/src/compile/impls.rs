@@ -1,6 +1,5 @@
 use bimap::BiMap;
 use fs_err::File;
-use indexmap::IndexMap;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -151,19 +150,17 @@ impl Tagger {
 
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
-            let inflection_id = word_store.get_by_left(inflection).unwrap();
+            let lemma_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            let group = groups.entry(*inflection_id).or_insert_with(Vec::new);
+            let group = groups.entry(*lemma_id).or_insert_with(Vec::new);
             if !group.contains(word_id) {
                 group.push(*word_id);
             }
 
             tags.entry(*word_id)
-                .or_insert_with(IndexMap::new)
-                .entry(*inflection_id)
                 .or_insert_with(Vec::new)
-                .push(*pos_id);
+                .push((*lemma_id, *pos_id));
         }
 
         Ok(Tagger {
