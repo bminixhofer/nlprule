@@ -1,3 +1,9 @@
+# 0.6.2
+
+## Internal improvements
+
+Speed up loading the `Tokenizer` by ~ 25% (#66).
+
 # 0.6.1
 
 ## Fixes
