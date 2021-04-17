@@ -3,7 +3,7 @@
 //! Adapts the approach from https://github.com/trishume/syntect/pull/270 with feature flags for the
 //! different backends.
 
-use lazycell::AtomicLazyCell;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::hash::{Hash, Hasher};
 
@@ -12,14 +12,14 @@ pub use regex_impl::{CaptureMatches, Captures, Match, Matches};
 #[derive(Debug)]
 pub struct Regex {
     regex_str: String,
-    regex: AtomicLazyCell<regex_impl::Regex>,
+    regex: OnceCell<regex_impl::Regex>,
 }
 
 impl Clone for Regex {
     fn clone(&self) -> Self {
         Regex {
             regex_str: self.regex_str.clone(),
-            regex: AtomicLazyCell::new(),
+            regex: OnceCell::new(),
         }
     }
 }
@@ -57,7 +57,7 @@ impl Regex {
     pub fn new(regex_str: String) -> Self {
         Self {
             regex_str,
-            regex: AtomicLazyCell::new(),
+            regex: OnceCell::new(),
         }
     }
 
@@ -68,15 +68,10 @@ impl Regex {
     }
 
     fn regex(&self) -> &regex_impl::Regex {
-        if let Some(regex) = self.regex.borrow() {
-            regex
-        } else {
-            let regex = regex_impl::Regex::new(&self.regex_str).unwrap_or_else(|_| {
-                panic!("regex string should be pre-tested: {}", self.regex_str)
-            });
-            self.regex.fill(regex).ok();
-            self.regex.borrow().unwrap()
-        }
+        self.regex.get_or_init(|| {
+            regex_impl::Regex::new(&self.regex_str)
+                .unwrap_or_else(|_| panic!("regex string should be pre-tested: {}", self.regex_str))
+        })
     }
 
     pub fn is_match(&self, text: &str) -> bool {
