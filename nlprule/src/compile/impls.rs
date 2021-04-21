@@ -23,7 +23,7 @@ use crate::{
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
-        tag::{Tagger, TaggerLangOptions},
+        tag::{Tagger, TaggerLangOptions, WordIdMap},
         Tokenizer, TokenizerLangOptions,
     },
     types::*,
@@ -94,9 +94,6 @@ impl Tagger {
         common_words: &HashSet<String>,
         lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
-        let mut tags = DefaultHashMap::default();
-        let mut groups = DefaultHashMap::default();
-
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
 
@@ -148,19 +145,20 @@ impl Tagger {
             .map(|(i, x)| (x.to_string(), PosIdInt::from_value_unchecked(i as u16)))
             .collect();
 
+        let mut tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>> = WordIdMap::new(word_store.len());
+        let mut groups: WordIdMap<Vec<WordIdInt>> = WordIdMap::new(word_store.len());
+
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
             let lemma_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            let group = groups.entry(*lemma_id).or_insert_with(Vec::new);
+            let group = groups.get_mut_or_default(*lemma_id);
             if !group.contains(word_id) {
                 group.push(*word_id);
             }
 
-            tags.entry(*word_id)
-                .or_insert_with(Vec::new)
-                .push((*lemma_id, *pos_id));
+            tags.get_mut_or_default(*word_id).push((*lemma_id, *pos_id));
         }
 
         Ok(Tagger {

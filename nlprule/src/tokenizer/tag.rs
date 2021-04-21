@@ -181,8 +181,6 @@ struct TaggerFields {
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
     lang_options: TaggerLangOptions,
-    tags_length: usize,
-    groups_length: usize,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -190,7 +188,7 @@ impl From<Tagger> for TaggerFields {
         let mut tag_fst_items = Vec::new();
 
         for (word_id, map) in tagger.tags.iter() {
-            let word = tagger.str_for_word_id(word_id);
+            let word = tagger.str_for_word_id(&word_id);
 
             for (i, (inflect_id, pos_id)) in map.iter().enumerate() {
                 assert!(i < 255);
@@ -243,8 +241,6 @@ impl From<Tagger> for TaggerFields {
             word_store_fst,
             tag_store: tagger.tag_store,
             lang_options: tagger.lang_options,
-            tags_length: tagger.tags.len(),
-            groups_length: tagger.groups.len(),
         }
     }
 }
@@ -264,8 +260,8 @@ impl From<TaggerFields> for Tagger {
             );
         }
 
-        let mut tags = DefaultHashMap::with_capacity(data.tags_length);
-        let mut groups = DefaultHashMap::with_capacity(data.groups_length);
+        let mut tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>> = WordIdMap::new(word_store.len());
+        let mut groups: WordIdMap<Vec<WordIdInt>> = WordIdMap::new(word_store.len());
 
         let tag_fst = Map::new(data.tag_fst).unwrap();
         let mut stream = tag_fst.into_stream();
@@ -283,14 +279,12 @@ impl From<TaggerFields> for Tagger {
             ]));
             let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
 
-            let group = groups.entry(lemma_id).or_insert_with(Vec::new);
+            let group = groups.get_mut_or_default(lemma_id);
             if !group.contains(&word_id) {
                 group.push(word_id);
             }
 
-            tags.entry(word_id)
-                .or_insert_with(Vec::new)
-                .push((lemma_id, pos_id));
+            tags.get_mut_or_default(word_id).push((lemma_id, pos_id));
         }
 
         Tagger {
@@ -300,6 +294,54 @@ impl From<TaggerFields> for Tagger {
             groups,
             lang_options: data.lang_options,
         }
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Clone)]
+pub(crate) struct WordIdMap<T>(Vec<Option<T>>);
+
+impl<T: Clone + Default> WordIdMap<T> {
+    pub fn new(n_ids: usize) -> Self {
+        WordIdMap(vec![None; n_ids])
+    }
+
+    pub fn get(&self, id: &WordIdInt) -> Option<&T> {
+        self.0
+            .get(id.0 as usize)
+            .map(|value| value.as_ref())
+            .flatten()
+    }
+
+    pub fn get_mut(&mut self, id: &WordIdInt) -> Option<&mut T> {
+        self.0
+            .get_mut(id.0 as usize)
+            .map(|value| value.as_mut())
+            .flatten()
+    }
+
+    pub fn get_mut_or_default(&mut self, id: WordIdInt) -> &mut T {
+        if self.get(&id).is_none() {
+            self.insert(id, T::default());
+        }
+
+        self.get_mut(&id).unwrap()
+    }
+
+    pub fn insert(&mut self, id: WordIdInt, value: T) {
+        self.0[id.0 as usize] = Some(value);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (WordIdInt, &T)> {
+        self.0
+            .iter()
+            .enumerate()
+            .filter_map(|(index, maybe_value)| {
+                if let Some(value) = maybe_value {
+                    Some((WordIdInt(index as u32), value))
+                } else {
+                    None
+                }
+            })
     }
 }
 
@@ -345,10 +387,10 @@ impl From<TaggerFields> for Tagger {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: DefaultHashMap<WordIdInt, Vec<(WordIdInt, PosIdInt)>>,
+    pub(crate) tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
     pub(crate) tag_store: BiMap<String, PosIdInt>,
     pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
+    pub(crate) groups: WordIdMap<Vec<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
 }
 
