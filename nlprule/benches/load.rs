@@ -14,18 +14,18 @@ fn parse_rules(c: &mut Criterion) {
     });
 }
 
-
 fn no_warmup_criterion() -> Criterion {
-	let crit = Criterion::default().sample_size(20).warm_up_time(Duration::from_nanos(1));
-	crit
+    Criterion::default()
+        .sample_size(20)
+        .warm_up_time(Duration::from_nanos(1))
 }
 
 criterion_group!(
 name = parse;
 config = no_warmup_criterion();
 targets =
-	parse_rules,
-	parse_tokenizer,
+    parse_rules,
+    parse_tokenizer,
 );
 
 criterion_main!(parse);

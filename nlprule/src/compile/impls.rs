@@ -444,24 +444,32 @@ pub(in crate::compile) struct ContextData {
     outcomes: Vec<usize>,
 }
 
-impl From<ContextData> for chunk::Context {
-    fn from(data: ContextData) -> Self {
-        chunk::Context {
-            parameters: data.parameters,
-            outcomes: data.outcomes,
-        }
-    }
-}
-
 impl From<ModelData> for chunk::Model {
     fn from(data: ModelData) -> Self {
+        let mut outcomes: Vec<usize> = Vec::new();
+        let mut parameters: Vec<f32> = Vec::new();
+
+        let pmap = data
+            .pmap
+            .into_iter()
+            .map(|(key, value)| {
+                assert_eq!(value.outcomes.len(), value.parameters.len());
+
+                let offset = outcomes.len();
+                let length = value.outcomes.len();
+
+                outcomes.extend(value.outcomes);
+                parameters.extend(value.parameters);
+
+                (chunk::hash::hash_str(&key), (offset, length))
+            })
+            .collect::<DefaultHashMap<_, _>>();
+
         chunk::Model {
             outcome_labels: data.outcome_labels,
-            pmap: data
-                .pmap
-                .into_iter()
-                .map(|(key, value)| (chunk::hash::hash_str(&key), value.into()))
-                .collect::<DefaultHashMap<_, _>>(),
+            outcomes,
+            parameters,
+            pmap,
         }
     }
 }
