@@ -324,11 +324,13 @@ impl Tokenizer {
                 IncompleteToken::new(
                     Word::new(
                         self.tagger.id_word(token_text.into()),
-                        self.tagger.get_tags_with_options(
-                            token_text,
-                            if is_sentence_start { Some(true) } else { None },
-                            None,
-                        ),
+                        self.tagger
+                            .get_tags_with_options(
+                                token_text,
+                                if is_sentence_start { Some(true) } else { None },
+                                None,
+                            )
+                            .collect(),
                     ),
                     Span::new(
                         byte_start..byte_start + token_text.len(),

@@ -5,7 +5,12 @@ use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, cell::UnsafeCell, fmt, iter::once};
+use std::{
+    borrow::Cow,
+    cell::UnsafeCell,
+    fmt,
+    iter::{once, FusedIterator},
+};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
@@ -229,6 +234,8 @@ impl From<Tagger> for TaggerFields {
         let anchors = word_store_items
             .iter()
             .map(|(key, _)| key.clone())
+            // The distance between anchors, there are usually more than 300k words, so a step of 1000 allows dividing
+            // the work between threads nicely. Changing this by a factor of 10 only makes a couple of percent difference in speed.
             .step_by(1_000)
             .collect();
 
@@ -253,6 +260,8 @@ impl From<Tagger> for TaggerFields {
     }
 }
 
+/// An (unsafe) shared mutable slice. Can be used if the same index in the slice will never
+/// be used in different threads. See https://stackoverflow.com/a/65182786.
 #[derive(Copy, Clone)]
 struct UnsafeSlice<'a, T> {
     slice: &'a [UnsafeCell<T>],
@@ -295,9 +304,13 @@ impl From<TaggerFields> for Tagger {
         let anchors = data.anchors;
 
         let mut tags: Vec<Option<Vec<(WordIdInt, PosIdInt)>>> = vec![None; word_store.len()];
-
         let tag_slice = UnsafeSlice::new(tags.as_mut_slice());
 
+        // Anchors are strings set at more or less equal distance in the FST.
+        // Here, we iterate from one anchor to the next, on each thread.
+        // Because keys in the FST are sorted, we know that each thread will
+        // deal with a disjoint set of words. Thus, the accessed indices never overlap
+        // and we can use the `UnsafeSlice` to avoid synchronization.
         anchors.maybe_par_iter().enumerate().for_each(|(i, _)| {
             let mut stream_builder = tag_fst.range().ge(anchors[i].as_bytes());
 
@@ -328,6 +341,7 @@ impl From<TaggerFields> for Tagger {
                 } else {
                     if let Some(id) = current_word_id {
                         let word_id_idx = id.0 as usize;
+                        // SAFETY: see above. The word index is unique to this chunk.
                         unsafe { tag_slice.write(word_id_idx, current_vec.take()) };
                     }
 
@@ -339,14 +353,13 @@ impl From<TaggerFields> for Tagger {
             if let Some(vec) = current_vec {
                 let word_id_idx = current_word_id.unwrap().0 as usize;
 
+                // SAFETY: see above. The word index is unique to this chunk.
                 unsafe { tag_slice.write(word_id_idx, Some(vec)) };
             }
         });
 
-        let tags = WordIdMap(tags);
-
         Tagger {
-            tags,
+            tags: WordIdMap(tags),
             tag_store: data.tag_store,
             word_store,
             lang_options: data.lang_options,
@@ -402,6 +415,97 @@ impl<T: Clone + Default> WordIdMap<T> {
     }
 }
 
+pub(crate) enum AddLower {
+    Always,
+    IfEmpty,
+    Never,
+}
+
+struct RawTagIter<'a> {
+    tagger: &'a Tagger,
+    slice_iter: std::slice::Iter<'a, (WordIdInt, PosIdInt)>,
+}
+
+impl<'a> Iterator for RawTagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice_iter.next().map(move |(lemma_id, pos_id)| {
+            WordData::new(
+                self.tagger
+                    .id_word(self.tagger.str_for_word_id(lemma_id).into()),
+                self.tagger.id_tag(self.tagger.str_for_pos_id(pos_id)),
+            )
+        })
+    }
+}
+
+impl<'a> FusedIterator for RawTagIter<'a> {}
+impl<'a> ExactSizeIterator for RawTagIter<'a> {
+    fn len(&self) -> usize {
+        self.slice_iter.len()
+    }
+}
+
+struct StrictTagIter<'a> {
+    tag_iter: RawTagIter<'a>,
+    lower_tag_iter: Option<RawTagIter<'a>>,
+}
+
+impl<'a> Iterator for StrictTagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.tag_iter.next().or_else(|| {
+            self.lower_tag_iter
+                .as_mut()
+                .and_then(|lower_iter| lower_iter.next())
+        })
+    }
+}
+
+impl<'a> FusedIterator for StrictTagIter<'a> {}
+impl<'a> ExactSizeIterator for StrictTagIter<'a> {
+    fn len(&self) -> usize {
+        self.tag_iter.len()
+            + self
+                .lower_tag_iter
+                .as_ref()
+                .map_or(0, |lower_iter| lower_iter.len())
+    }
+}
+
+/// An iterator over [WordData].
+pub struct TagIter<'a> {
+    tagger: &'a Tagger,
+    tag_iter: StrictTagIter<'a>,
+    prefix: Option<&'a str>,
+}
+
+impl<'a> Iterator for TagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.tag_iter.next().map(|data| {
+            let lemma = if let Some(prefix) = &self.prefix {
+                self.tagger
+                    .id_word(format!("{}{}", prefix, data.lemma().as_str().to_lowercase()).into())
+            } else {
+                data.lemma().clone()
+            };
+
+            WordData::new(lemma, *data.pos())
+        })
+    }
+}
+
+impl<'a> FusedIterator for TagIter<'a> {}
+impl<'a> ExactSizeIterator for TagIter<'a> {
+    fn len(&self) -> usize {
+        self.tag_iter.len()
+    }
+}
+
 /// The lexical tagger.
 /// Created from a dictionary that looks like this:
 ///
@@ -448,25 +552,20 @@ pub struct Tagger {
 impl Tagger {
     /// Directly looks up the given word in the `tags` map and returns
     /// corresponding [WordData].
-    // TODO: This could probably return an iterator instead of allocating a `Vec`.
-    fn get_raw(&self, word: &str) -> Vec<WordData> {
-        if let Some(map) = self
+    fn get_raw(&self, word: &str) -> RawTagIter {
+        let slice = if let Some(pairs) = self
             .word_store
             .get_by_left(word)
             .and_then(|x| self.tags.get(x))
         {
-            let mut output = Vec::new();
-
-            for (lemma_id, pos_id) in map.iter() {
-                output.push(WordData::new(
-                    self.id_word(self.str_for_word_id(lemma_id).into()),
-                    self.id_tag(self.str_for_pos_id(pos_id)),
-                ))
-            }
-
-            output
+            pairs.as_slice()
         } else {
-            Vec::new()
+            &[]
+        };
+
+        RawTagIter {
+            tagger: &self,
+            slice_iter: slice.iter(),
         }
     }
 
@@ -476,28 +575,31 @@ impl Tagger {
     }
 
     /// Same as [get_tags] but optionally:
-    /// - Adds tags for the lower variant of the word (if `add_lower` is true).
+    /// - Adds tags for the lower variant of the word (if `add_lower` is `AddLower::Always`).
     /// - Adds tags for the lower variant of the word if no [WordData] is found otherwise.
-    /// (if `add_lower_if_empty` is true).
-    // TODO: `add_lower` and `add_lower_if_empty` might better be collapsed into an enum since
-    /// `add_lower` implies `add_lower_if_empty`.
-    fn get_strict_tags(
-        &self,
-        word: &str,
-        add_lower: bool,
-        add_lower_if_empty: bool,
-    ) -> Vec<WordData> {
-        let mut tags = self.get_raw(&word);
-        let lower = word.to_lowercase();
-
-        if (add_lower || (add_lower_if_empty && tags.is_empty()))
-            && (word != lower
-                && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word)))
+    /// (if `add_lower` is `AddLower::IfEmpty`).
+    fn get_strict_tags(&self, word: &str, add_lower: AddLower) -> StrictTagIter {
+        let tag_iter = self.get_raw(&word);
+        let lower_tag_iter = if (matches!(add_lower, AddLower::Always)
+            || (matches!(add_lower, AddLower::IfEmpty) && tag_iter.len() == 0))
         {
-            tags.extend(self.get_raw(&lower));
-        }
+            let lower = word.to_lowercase();
 
-        tags
+            if (word != lower)
+                && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word))
+            {
+                Some(self.get_raw(&lower))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        StrictTagIter {
+            tag_iter,
+            lower_tag_iter,
+        }
     }
 
     #[allow(dead_code)] // used by compile module
@@ -556,20 +658,31 @@ impl Tagger {
     ///     If `None`, will be set according to the language options.
     /// If true, will attempt to find tags for words which are longer than some cutoff and unknown by looking up tags
     /// for substrings from left to right until tags are found or a minimum length reached.
-    pub fn get_tags_with_options(
-        &self,
-        word: &str,
+    pub fn get_tags_with_options<'a>(
+        &'a self,
+        word: &'a str,
         add_lower: Option<bool>,
         use_compound_split_heuristic: Option<bool>,
-    ) -> Vec<WordData> {
+    ) -> TagIter<'a> {
         let add_lower = add_lower.unwrap_or(self.lang_options.always_add_lower_tags);
         let use_compound_split_heuristic =
             use_compound_split_heuristic.unwrap_or(self.lang_options.use_compound_split_heuristic);
 
-        let mut tags = self.get_strict_tags(word, add_lower, true);
+        let mut tags = TagIter {
+            tagger: &self,
+            tag_iter: self.get_strict_tags(
+                word,
+                if add_lower {
+                    AddLower::Always
+                } else {
+                    AddLower::IfEmpty
+                },
+            ),
+            prefix: None,
+        };
 
         // compound splitting heuristic, seems to work reasonably well
-        if use_compound_split_heuristic && tags.is_empty() {
+        if use_compound_split_heuristic && tags.len() == 0 {
             let n_chars = word.chars().count() as isize;
 
             if n_chars >= 7 {
@@ -589,20 +702,21 @@ impl Tagger {
                         word[i..].to_string()
                     };
 
-                    let next_tags = self.get_strict_tags(&next, add_lower, false);
+                    let next_tags = self.get_strict_tags(
+                        &next,
+                        if add_lower {
+                            AddLower::Always
+                        } else {
+                            AddLower::Never
+                        },
+                    );
 
-                    if !next_tags.is_empty() {
-                        tags = next_tags
-                            .into_iter()
-                            .map(|x| {
-                                let lemma = self.id_word(
-                                    format!("{}{}", &word[..i], x.lemma().as_str().to_lowercase())
-                                        .into(),
-                                );
-
-                                WordData::new(lemma, *x.pos())
-                            })
-                            .collect();
+                    if next_tags.len() != 0 {
+                        tags = TagIter {
+                            tagger: &self,
+                            tag_iter: next_tags,
+                            prefix: Some(&word[..i]),
+                        };
                         break;
                     }
                 }
@@ -617,7 +731,7 @@ impl Tagger {
     ///
     /// # Arguments
     /// * `word`: The word to lookup data for.
-    pub fn get_tags(&self, word: &str) -> Vec<WordData> {
+    pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
     }
 }
