@@ -1,11 +1,11 @@
 //! A dictionary-based tagger.
 
-use crate::types::*;
+use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, fmt, iter::once};
+use std::{borrow::Cow, cell::UnsafeCell, fmt, iter::once};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
@@ -181,6 +181,7 @@ struct TaggerFields {
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
     lang_options: TaggerLangOptions,
+    anchors: Vec<String>,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -225,6 +226,12 @@ impl From<Tagger> for TaggerFields {
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
+        let anchors = word_store_items
+            .iter()
+            .map(|(key, _)| key.clone())
+            .step_by(1_000)
+            .collect();
+
         let tag_fst = Map::from_iter(tag_fst_items)
             .unwrap()
             .into_fst()
@@ -241,7 +248,31 @@ impl From<Tagger> for TaggerFields {
             word_store_fst,
             tag_store: tagger.tag_store,
             lang_options: tagger.lang_options,
+            anchors,
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct UnsafeSlice<'a, T> {
+    slice: &'a [UnsafeCell<T>],
+}
+unsafe impl<'a, T: Send + Sync> Send for UnsafeSlice<'a, T> {}
+unsafe impl<'a, T: Send + Sync> Sync for UnsafeSlice<'a, T> {}
+
+impl<'a, T> UnsafeSlice<'a, T> {
+    pub fn new(slice: &'a mut [T]) -> Self {
+        let ptr = slice as *mut [T] as *const [UnsafeCell<T>];
+        Self {
+            slice: unsafe { &*ptr },
+        }
+    }
+
+    /// SAFETY: It is UB if two threads write to the same index without
+    /// synchronization.
+    pub unsafe fn write(&self, i: usize, value: T) {
+        let ptr = self.slice[i].get();
+        *ptr = value;
     }
 }
 
@@ -260,38 +291,64 @@ impl From<TaggerFields> for Tagger {
             );
         }
 
-        let mut tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>> = WordIdMap::new(word_store.len());
-        let mut groups: WordIdMap<Vec<WordIdInt>> = WordIdMap::new(word_store.len());
-
         let tag_fst = Map::new(data.tag_fst).unwrap();
-        let mut stream = tag_fst.into_stream();
+        let anchors = data.anchors;
 
-        while let Some((key, value)) = stream.next() {
-            let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
-            let word_id = *word_store.get_by_left(word).unwrap();
+        let mut tags: Vec<Option<Vec<(WordIdInt, PosIdInt)>>> = vec![None; word_store.len()];
 
-            let value_bytes = value.to_be_bytes();
-            let lemma_id = WordIdInt(u32::from_be_bytes([
-                value_bytes[0],
-                value_bytes[1],
-                value_bytes[2],
-                value_bytes[3],
-            ]));
-            let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+        let tag_slice = UnsafeSlice::new(tags.as_mut_slice());
 
-            let group = groups.get_mut_or_default(lemma_id);
-            if !group.contains(&word_id) {
-                group.push(word_id);
+        anchors.maybe_par_iter().enumerate().for_each(|(i, _)| {
+            let mut stream_builder = tag_fst.range().ge(anchors[i].as_bytes());
+
+            if i + 1 < anchors.len() {
+                stream_builder = stream_builder.lt(anchors[i + 1].as_bytes());
             }
 
-            tags.get_mut_or_default(word_id).push((lemma_id, pos_id));
-        }
+            let mut stream = stream_builder.into_stream();
+
+            let mut current_word_id: Option<WordIdInt> = None;
+            let mut current_vec: Option<Vec<(WordIdInt, PosIdInt)>> = None;
+
+            while let Some((key, value)) = stream.next() {
+                let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
+                let word_id = *word_store.get_by_left(word).unwrap();
+
+                let value_bytes = value.to_be_bytes();
+                let lemma_id = WordIdInt(u32::from_be_bytes([
+                    value_bytes[0],
+                    value_bytes[1],
+                    value_bytes[2],
+                    value_bytes[3],
+                ]));
+                let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+
+                if current_word_id == Some(word_id) {
+                    current_vec.as_mut().unwrap().push((lemma_id, pos_id));
+                } else {
+                    if let Some(id) = current_word_id {
+                        let word_id_idx = id.0 as usize;
+                        unsafe { tag_slice.write(word_id_idx, current_vec.take()) };
+                    }
+
+                    current_word_id = Some(word_id);
+                    current_vec = Some(vec![(lemma_id, pos_id)]);
+                }
+            }
+
+            if let Some(vec) = current_vec {
+                let word_id_idx = current_word_id.unwrap().0 as usize;
+
+                unsafe { tag_slice.write(word_id_idx, Some(vec)) };
+            }
+        });
+
+        let tags = WordIdMap(tags);
 
         Tagger {
             tags,
             tag_store: data.tag_store,
             word_store,
-            groups,
             lang_options: data.lang_options,
         }
     }
@@ -361,10 +418,8 @@ impl<T: Clone + Default> WordIdMap<T> {
 /// i.e. one word (left) associated with one or more pairs of lemma (middle) and POS (part-of-speech) tag (right).
 /// From this structure, the tagger must be able to look up:
 /// 1. lemma and pos by word: all lemmas and POS tags associated with a given word.
-/// 2. word by lemma: all words associated with a given lemma.
 ///
 /// (1) is called extensively (at least once for every word) so it has to be as fast as possible.
-/// (2) is currently not used in nlprule itself but useful for downstream applications.
 ///
 /// ## Implementation
 ///
@@ -377,20 +432,16 @@ impl<T: Clone + Default> WordIdMap<T> {
 /// to the POS bimap. The word bimap also stores lemmas since there is often a large overlap between known words
 /// and known lemmas.
 ///
-/// These two maps can be used to relatively cheaply in terms of memory allow (1) and (2) while retaining fast lookup.
+/// These two maps can be used to relatively cheaply in terms of memory allow (1) while retaining fast lookup.
 ///
 /// There is a `tags` map which associates a Word ID with *multiple* pairs of
 /// `(lemma_id, pos_id)` where the ID for the lemma is a regular 32-bit Word ID.
-///
-/// And there is a `groups` map which associates Word IDs (for the lemma) with *multiple* Word IDs
-/// (for the words with the same lemma).
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
     pub(crate) tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
     pub(crate) tag_store: BiMap<String, PosIdInt>,
     pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) groups: WordIdMap<Vec<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
 }
 
@@ -568,14 +619,5 @@ impl Tagger {
     /// * `word`: The word to lookup data for.
     pub fn get_tags(&self, word: &str) -> Vec<WordData> {
         self.get_tags_with_options(word, None, None)
-    }
-
-    /// Get the words with the same lemma as the given lemma.
-    pub fn get_group_members(&self, lemma: &str) -> Vec<&str> {
-        self.word_store
-            .get_by_left(lemma)
-            .and_then(|x| self.groups.get(x))
-            .map(|vec| vec.iter().map(|x| self.str_for_word_id(x)).collect())
-            .unwrap_or_else(Vec::new)
     }
 }

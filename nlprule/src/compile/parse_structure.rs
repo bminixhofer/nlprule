@@ -380,6 +380,7 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
         || m.postag_replace.is_some()
         || m.text.is_some()
     {
+        // this would need a fully functional PosReplacer to work
         return Err(Error::Unimplemented(
             "postag, postag_regex, postag_replace and text in `match` are not implemented.".into(),
         ));

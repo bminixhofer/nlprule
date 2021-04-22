@@ -51,35 +51,9 @@ pub struct PosReplacer {
 }
 
 impl PosReplacer {
-    fn apply(&self, text: &str, sentence: &MatchSentence) -> Option<String> {
-        let mut candidates: Vec<_> = sentence
-            .tagger()
-            .get_tags(text)
-            .iter()
-            .map(|x| {
-                let group_words = sentence.tagger().get_group_members(&x.lemma().as_str());
-                let mut data = Vec::new();
-                for word in group_words {
-                    if let Some(i) = sentence
-                        .tagger()
-                        .get_tags(word)
-                        .iter()
-                        .position(|x| self.matcher.is_match(x.pos()))
-                    {
-                        data.push((word.to_string(), i));
-                    }
-                }
-                data
-            })
-            .rev()
-            .flatten()
-            .collect();
-        candidates.sort_by(|(_, a), (_, b)| a.cmp(b));
-        if candidates.is_empty() {
-            None
-        } else {
-            Some(candidates.remove(0).0)
-        }
+    fn apply(&self, _text: &str, _sentence: &MatchSentence) -> Option<String> {
+        // TODO: needs to be implemented with correct ordering, currently rules which would need this are disabled
+        unimplemented!()
     }
 }
 

@@ -146,24 +146,17 @@ impl Tagger {
             .collect();
 
         let mut tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>> = WordIdMap::new(word_store.len());
-        let mut groups: WordIdMap<Vec<WordIdInt>> = WordIdMap::new(word_store.len());
 
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
             let lemma_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            let group = groups.get_mut_or_default(*lemma_id);
-            if !group.contains(word_id) {
-                group.push(*word_id);
-            }
-
             tags.get_mut_or_default(*word_id).push((*lemma_id, *pos_id));
         }
 
         Ok(Tagger {
             tags,
-            groups,
             word_store,
             tag_store,
             lang_options,
