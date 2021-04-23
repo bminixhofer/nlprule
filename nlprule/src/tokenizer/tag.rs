@@ -16,10 +16,14 @@ use std::{
 #[serde(transparent)]
 pub(crate) struct WordIdInt(u32);
 
+#[allow(dead_code)] // used in compile module
 impl WordIdInt {
-    #[allow(dead_code)] // used in compile module
     pub(crate) fn from_value_unchecked(value: u32) -> Self {
         WordIdInt(value)
+    }
+
+    pub fn value(&self) -> u32 {
+        self.0
     }
 }
 
@@ -368,37 +372,14 @@ impl From<TaggerFields> for Tagger {
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
-pub(crate) struct WordIdMap<T>(Vec<Option<T>>);
+pub(crate) struct WordIdMap<T>(pub Vec<Option<T>>);
 
 impl<T: Clone + Default> WordIdMap<T> {
-    pub fn new(n_ids: usize) -> Self {
-        WordIdMap(vec![None; n_ids])
-    }
-
     pub fn get(&self, id: &WordIdInt) -> Option<&T> {
         self.0
             .get(id.0 as usize)
             .map(|value| value.as_ref())
             .flatten()
-    }
-
-    pub fn get_mut(&mut self, id: &WordIdInt) -> Option<&mut T> {
-        self.0
-            .get_mut(id.0 as usize)
-            .map(|value| value.as_mut())
-            .flatten()
-    }
-
-    pub fn get_mut_or_default(&mut self, id: WordIdInt) -> &mut T {
-        if self.get(&id).is_none() {
-            self.insert(id, T::default());
-        }
-
-        self.get_mut(&id).unwrap()
-    }
-
-    pub fn insert(&mut self, id: WordIdInt, value: T) {
-        self.0[id.0 as usize] = Some(value);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (WordIdInt, &T)> {

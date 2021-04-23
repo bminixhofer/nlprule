@@ -145,18 +145,25 @@ impl Tagger {
             .map(|(i, x)| (x.to_string(), PosIdInt::from_value_unchecked(i as u16)))
             .collect();
 
-        let mut tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>> = WordIdMap::new(word_store.len());
+        let mut tags: Vec<Option<Vec<(WordIdInt, PosIdInt)>>> = vec![None; word_store.len()];
 
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
             let lemma_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            tags.get_mut_or_default(*word_id).push((*lemma_id, *pos_id));
+            match &mut tags[word_id.value() as usize] {
+                Some(vec) => {
+                    vec.push((*lemma_id, *pos_id));
+                }
+                None => {
+                    tags[word_id.value() as usize] = Some(vec![(*lemma_id, *pos_id)]);
+                }
+            }
         }
 
         Ok(Tagger {
-            tags,
+            tags: WordIdMap(tags),
             word_store,
             tag_store,
             lang_options,
