@@ -18,12 +18,6 @@ fn softmax(vec: &mut Vec<f32>) {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct Context {
-    pub(crate) parameters: Vec<f32>,
-    pub(crate) outcomes: Vec<usize>,
-}
-
 #[derive(Debug, Clone)]
 struct Sequence<'a> {
     outcomes: Vec<&'a str>,
@@ -122,41 +116,39 @@ pub(crate) mod hash {
 #[derive(Serialize, Deserialize)]
 struct ModelFields {
     outcome_labels: Vec<String>,
-    // stores each hash and the length of the context of the hash
-    // this is kind of close to gzip compression already and it is difficult
-    // where to draw the line. The chunker model should have a custom
-    // serialization implementation anyway for bf16 compression so this is OK here.
-    cols: Vec<(u64, u8)>,
-    // stores the context outcome labels
-    rows: Vec<u8>,
-    // stores the context parameter values
-    values: Vec<bf16>,
+    pmap: Vec<(u64, u8)>,
+    outcomes: Vec<u8>,
+    parameters: Vec<bf16>,
 }
 
 impl From<Model> for ModelFields {
     fn from(model: Model) -> Self {
-        let mut cols = Vec::new();
-        let mut rows = Vec::new();
-        let mut values = Vec::new();
+        let mut pmap: Vec<_> = model.pmap.into_iter().collect();
+        pmap.sort_by_key(|(_, (offset, _))| *offset);
 
-        for (key, context) in model.pmap.iter() {
-            assert_eq!(context.outcomes.len(), context.parameters.len());
-            assert!(context.outcomes.len() <= std::u8::MAX as usize);
-            cols.push((*key, context.outcomes.len() as u8));
+        let pmap = pmap
+            .into_iter()
+            .map(|(key, (_, length))| {
+                assert!(length <= u8::MAX as usize);
+                (key, length as u8)
+            })
+            .collect();
 
-            for (label, value) in context.outcomes.iter().zip(context.parameters.iter()) {
-                assert!(*label <= std::u8::MAX as usize);
-
-                rows.push(*label as u8);
-                values.push(bf16::from_f32(*value));
-            }
-        }
+        let outcomes = model
+            .outcomes
+            .into_iter()
+            .map(|outcome| {
+                assert!(outcome <= u8::MAX as usize);
+                outcome as u8
+            })
+            .collect();
+        let parameters = model.parameters.into_iter().map(bf16::from_f32).collect();
 
         ModelFields {
             outcome_labels: model.outcome_labels,
-            cols,
-            rows,
-            values,
+            pmap,
+            outcomes,
+            parameters,
         }
     }
 }
@@ -164,35 +156,30 @@ impl From<Model> for ModelFields {
 impl From<ModelFields> for Model {
     fn from(data: ModelFields) -> Self {
         let mut pmap = DefaultHashMap::new();
+        let mut offset = 0;
 
-        let mut row_iter = data.rows.iter();
-        let mut value_iter = data.values.iter();
+        for (key, length) in data.pmap {
+            pmap.insert(key, (offset, length as usize));
 
-        for (key, n) in data.cols.iter() {
-            let outcomes: Vec<_> = (0..*n as usize)
-                .map(|_| *row_iter.next().expect("checked in From<Model> impl") as usize)
-                .collect();
-            let parameters: Vec<_> = (0..*n as usize)
-                .map(|_| {
-                    value_iter
-                        .next()
-                        .expect("checked in From<Model> impl")
-                        .to_f32()
-                })
-                .collect();
-
-            pmap.insert(
-                *key,
-                Context {
-                    outcomes,
-                    parameters,
-                },
-            );
+            offset += length as usize;
         }
+
+        let outcomes = data
+            .outcomes
+            .into_iter()
+            .map(|outcome| outcome as usize)
+            .collect();
+        let parameters = data
+            .parameters
+            .into_iter()
+            .map(|parameter| parameter.to_f32())
+            .collect();
 
         Model {
             outcome_labels: data.outcome_labels,
             pmap,
+            outcomes,
+            parameters,
         }
     }
 }
@@ -201,7 +188,9 @@ impl From<ModelFields> for Model {
 #[serde(from = "ModelFields", into = "ModelFields")]
 pub(crate) struct Model {
     pub(crate) outcome_labels: Vec<String>,
-    pub(crate) pmap: DefaultHashMap<u64, Context>,
+    pub(crate) outcomes: Vec<usize>,
+    pub(crate) parameters: Vec<f32>,
+    pub(crate) pmap: DefaultHashMap<u64, (usize, usize)>,
 }
 
 impl Model {
@@ -209,8 +198,11 @@ impl Model {
         let mut prior =
             vec![(1. / (self.outcome_labels.len() as f32)).ln(); self.outcome_labels.len()];
 
-        for context in context.iter().filter_map(|x| self.pmap.get(&x)) {
-            for (idx, param) in context.outcomes.iter().zip(context.parameters.iter()) {
+        for (offset, length) in context.iter().filter_map(|x| self.pmap.get(&x)) {
+            let outcomes = &self.outcomes[*offset..*offset + length];
+            let parameters = &self.parameters[*offset..*offset + length];
+
+            for (idx, param) in outcomes.iter().zip(parameters.iter()) {
                 prior[*idx] += param;
             }
         }

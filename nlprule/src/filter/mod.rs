@@ -27,12 +27,11 @@ impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {
     fn keep(&self, sentence: &MatchSentence, graph: &MatchGraph) -> bool {
         graph.by_id(self.id).tokens(sentence).all(|token| {
             if let Some(captures) = self.regexp.captures(&token.word().as_str()) {
-                let tags = sentence
+                let mut tags = sentence
                     .tagger()
                     .get_tags(&captures.get(1).unwrap().as_str());
 
-                tags.iter()
-                    .any(|x| self.postag_regexp.is_match(x.pos().as_str()))
+                tags.any(|x| self.postag_regexp.is_match(x.pos().as_str()))
             } else {
                 false
             }

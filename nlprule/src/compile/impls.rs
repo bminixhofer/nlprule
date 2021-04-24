@@ -23,7 +23,7 @@ use crate::{
     tokenizer::{
         chunk,
         multiword::{MultiwordTagger, MultiwordTaggerFields},
-        tag::{Tagger, TaggerLangOptions},
+        tag::{Tagger, TaggerLangOptions, WordIdMap},
         Tokenizer, TokenizerLangOptions,
     },
     types::*,
@@ -94,9 +94,6 @@ impl Tagger {
         common_words: &HashSet<String>,
         lang_options: TaggerLangOptions,
     ) -> std::io::Result<Self> {
-        let mut tags = DefaultHashMap::default();
-        let mut groups = DefaultHashMap::default();
-
         let mut tag_store = HashSet::new();
         let mut word_store = HashSet::new();
 
@@ -148,24 +145,25 @@ impl Tagger {
             .map(|(i, x)| (x.to_string(), PosIdInt::from_value_unchecked(i as u16)))
             .collect();
 
+        let mut tags: Vec<Option<Vec<(WordIdInt, PosIdInt)>>> = vec![None; word_store.len()];
+
         for (word, inflection, tag) in lines.iter() {
             let word_id = word_store.get_by_left(word).unwrap();
             let lemma_id = word_store.get_by_left(inflection).unwrap();
             let pos_id = tag_store.get_by_left(tag).unwrap();
 
-            let group = groups.entry(*lemma_id).or_insert_with(Vec::new);
-            if !group.contains(word_id) {
-                group.push(*word_id);
+            match &mut tags[word_id.value() as usize] {
+                Some(vec) => {
+                    vec.push((*lemma_id, *pos_id));
+                }
+                None => {
+                    tags[word_id.value() as usize] = Some(vec![(*lemma_id, *pos_id)]);
+                }
             }
-
-            tags.entry(*word_id)
-                .or_insert_with(Vec::new)
-                .push((*lemma_id, *pos_id));
         }
 
         Ok(Tagger {
-            tags,
-            groups,
+            tags: WordIdMap(tags),
             word_store,
             tag_store,
             lang_options,
@@ -453,24 +451,32 @@ pub(in crate::compile) struct ContextData {
     outcomes: Vec<usize>,
 }
 
-impl From<ContextData> for chunk::Context {
-    fn from(data: ContextData) -> Self {
-        chunk::Context {
-            parameters: data.parameters,
-            outcomes: data.outcomes,
-        }
-    }
-}
-
 impl From<ModelData> for chunk::Model {
     fn from(data: ModelData) -> Self {
+        let mut outcomes: Vec<usize> = Vec::new();
+        let mut parameters: Vec<f32> = Vec::new();
+
+        let pmap = data
+            .pmap
+            .into_iter()
+            .map(|(key, value)| {
+                assert_eq!(value.outcomes.len(), value.parameters.len());
+
+                let offset = outcomes.len();
+                let length = value.outcomes.len();
+
+                outcomes.extend(value.outcomes);
+                parameters.extend(value.parameters);
+
+                (chunk::hash::hash_str(&key), (offset, length))
+            })
+            .collect::<DefaultHashMap<_, _>>();
+
         chunk::Model {
             outcome_labels: data.outcome_labels,
-            pmap: data
-                .pmap
-                .into_iter()
-                .map(|(key, value)| (chunk::hash::hash_str(&key), value.into()))
-                .collect::<DefaultHashMap<_, _>>(),
+            outcomes,
+            parameters,
+            pmap,
         }
     }
 }

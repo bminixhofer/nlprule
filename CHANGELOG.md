@@ -1,3 +1,21 @@
+# 0.6.4
+
+## Internal improvements
+
+- Decrease time it takes to load the `Tokenizer` by ~ 40% (#70).
+- Tag lookup is backed by a vector instead of a hashmap now.
+
+## Breaking changes
+
+- The tagger now returns iterators over tags instead of allocating a vector.
+- Remove `get_group_members` function.
+
+# 0.6.3
+
+## Fixes
+
+- Fix a bug where calling `Rule::suggest` in parallel across threads would cause a panic (#68, thanks @drahnr!)
+
 # 0.6.2
 
 ## Internal improvements

@@ -140,17 +140,6 @@ impl PyTagger {
             .map(|x| (x.lemma().as_str().to_string(), x.pos().as_str().to_string()))
             .collect()
     }
-
-    /// Get the words with the same lemma as the given lemma.
-    ///
-    /// Arguments:
-    ///     lemma (str): The lemma.
-    ///
-    /// Returns:
-    ///     group_members (List[str]): The words in the dictionary with the same lemma.
-    fn get_group_members(&self, lemma: &str) -> Vec<&str> {
-        self.tagger.get_group_members(&lemma.to_string())
-    }
 }
 
 impl PyTagger {

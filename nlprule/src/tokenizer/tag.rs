@@ -1,20 +1,29 @@
 //! A dictionary-based tagger.
 
-use crate::types::*;
+use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, fmt, iter::once};
+use std::{
+    borrow::Cow,
+    cell::UnsafeCell,
+    fmt,
+    iter::{once, FusedIterator},
+};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
 pub(crate) struct WordIdInt(u32);
 
+#[allow(dead_code)] // used in compile module
 impl WordIdInt {
-    #[allow(dead_code)] // used in compile module
     pub(crate) fn from_value_unchecked(value: u32) -> Self {
         WordIdInt(value)
+    }
+
+    pub fn value(&self) -> u32 {
+        self.0
     }
 }
 
@@ -181,8 +190,7 @@ struct TaggerFields {
     word_store_fst: Vec<u8>,
     tag_store: BiMap<String, PosIdInt>,
     lang_options: TaggerLangOptions,
-    tags_length: usize,
-    groups_length: usize,
+    anchors: Vec<String>,
 }
 
 impl From<Tagger> for TaggerFields {
@@ -190,7 +198,7 @@ impl From<Tagger> for TaggerFields {
         let mut tag_fst_items = Vec::new();
 
         for (word_id, map) in tagger.tags.iter() {
-            let word = tagger.str_for_word_id(word_id);
+            let word = tagger.str_for_word_id(&word_id);
 
             for (i, (inflect_id, pos_id)) in map.iter().enumerate() {
                 assert!(i < 255);
@@ -227,6 +235,14 @@ impl From<Tagger> for TaggerFields {
             .collect();
         word_store_items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
+        let anchors = word_store_items
+            .iter()
+            .map(|(key, _)| key.clone())
+            // The distance between anchors, there are usually more than 300k words, so a step of 1000 allows dividing
+            // the work between threads nicely. Changing this by a factor of 10 only makes a couple of percent difference in speed.
+            .step_by(1_000)
+            .collect();
+
         let tag_fst = Map::from_iter(tag_fst_items)
             .unwrap()
             .into_fst()
@@ -243,9 +259,33 @@ impl From<Tagger> for TaggerFields {
             word_store_fst,
             tag_store: tagger.tag_store,
             lang_options: tagger.lang_options,
-            tags_length: tagger.tags.len(),
-            groups_length: tagger.groups.len(),
+            anchors,
         }
+    }
+}
+
+/// An (unsafe) shared mutable slice. Can be used if the same index in the slice will never
+/// be used in different threads. See https://stackoverflow.com/a/65182786.
+#[derive(Copy, Clone)]
+struct UnsafeSlice<'a, T> {
+    slice: &'a [UnsafeCell<T>],
+}
+unsafe impl<'a, T: Send + Sync> Send for UnsafeSlice<'a, T> {}
+unsafe impl<'a, T: Send + Sync> Sync for UnsafeSlice<'a, T> {}
+
+impl<'a, T> UnsafeSlice<'a, T> {
+    pub fn new(slice: &'a mut [T]) -> Self {
+        let ptr = slice as *mut [T] as *const [UnsafeCell<T>];
+        Self {
+            slice: unsafe { &*ptr },
+        }
+    }
+
+    /// SAFETY: It is UB if two threads write to the same index without
+    /// synchronization.
+    pub unsafe fn write(&self, i: usize, value: T) {
+        let ptr = self.slice[i].get();
+        *ptr = value;
     }
 }
 
@@ -264,42 +304,186 @@ impl From<TaggerFields> for Tagger {
             );
         }
 
-        let mut tags = DefaultHashMap::with_capacity(data.tags_length);
-        let mut groups = DefaultHashMap::with_capacity(data.groups_length);
-
         let tag_fst = Map::new(data.tag_fst).unwrap();
-        let mut stream = tag_fst.into_stream();
+        let anchors = data.anchors;
 
-        while let Some((key, value)) = stream.next() {
-            let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
-            let word_id = *word_store.get_by_left(word).unwrap();
+        let mut tags: Vec<Option<Vec<(WordIdInt, PosIdInt)>>> = vec![None; word_store.len()];
+        let tag_slice = UnsafeSlice::new(tags.as_mut_slice());
 
-            let value_bytes = value.to_be_bytes();
-            let lemma_id = WordIdInt(u32::from_be_bytes([
-                value_bytes[0],
-                value_bytes[1],
-                value_bytes[2],
-                value_bytes[3],
-            ]));
-            let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+        // Anchors are strings set at more or less equal distance in the FST.
+        // Here, we iterate from one anchor to the next, on each thread.
+        // Because keys in the FST are sorted, we know that each thread will
+        // deal with a disjoint set of words. Thus, the accessed indices never overlap
+        // and we can use the `UnsafeSlice` to avoid synchronization.
+        anchors.maybe_par_iter().enumerate().for_each(|(i, _)| {
+            let mut stream_builder = tag_fst.range().ge(anchors[i].as_bytes());
 
-            let group = groups.entry(lemma_id).or_insert_with(Vec::new);
-            if !group.contains(&word_id) {
-                group.push(word_id);
+            if i + 1 < anchors.len() {
+                stream_builder = stream_builder.lt(anchors[i + 1].as_bytes());
             }
 
-            tags.entry(word_id)
-                .or_insert_with(Vec::new)
-                .push((lemma_id, pos_id));
-        }
+            let mut stream = stream_builder.into_stream();
+
+            let mut current_word_id: Option<WordIdInt> = None;
+            let mut current_vec: Option<Vec<(WordIdInt, PosIdInt)>> = None;
+
+            while let Some((key, value)) = stream.next() {
+                let word = std::str::from_utf8(&key[..key.len() - 1]).unwrap();
+                let word_id = *word_store.get_by_left(word).unwrap();
+
+                let value_bytes = value.to_be_bytes();
+                let lemma_id = WordIdInt(u32::from_be_bytes([
+                    value_bytes[0],
+                    value_bytes[1],
+                    value_bytes[2],
+                    value_bytes[3],
+                ]));
+                let pos_id = PosIdInt(u16::from_be_bytes([value_bytes[6], value_bytes[7]]));
+
+                if current_word_id == Some(word_id) {
+                    current_vec.as_mut().unwrap().push((lemma_id, pos_id));
+                } else {
+                    if let Some(id) = current_word_id {
+                        let word_id_idx = id.0 as usize;
+                        // SAFETY: see above. The word index is unique to this chunk.
+                        unsafe { tag_slice.write(word_id_idx, current_vec.take()) };
+                    }
+
+                    current_word_id = Some(word_id);
+                    current_vec = Some(vec![(lemma_id, pos_id)]);
+                }
+            }
+
+            if let Some(vec) = current_vec {
+                let word_id_idx = current_word_id.unwrap().0 as usize;
+
+                // SAFETY: see above. The word index is unique to this chunk.
+                unsafe { tag_slice.write(word_id_idx, Some(vec)) };
+            }
+        });
 
         Tagger {
-            tags,
+            tags: WordIdMap(tags),
             tag_store: data.tag_store,
             word_store,
-            groups,
             lang_options: data.lang_options,
         }
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Clone)]
+pub(crate) struct WordIdMap<T>(pub Vec<Option<T>>);
+
+impl<T: Clone + Default> WordIdMap<T> {
+    pub fn get(&self, id: &WordIdInt) -> Option<&T> {
+        self.0
+            .get(id.0 as usize)
+            .map(|value| value.as_ref())
+            .flatten()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (WordIdInt, &T)> {
+        self.0
+            .iter()
+            .enumerate()
+            .filter_map(|(index, maybe_value)| {
+                if let Some(value) = maybe_value {
+                    Some((WordIdInt(index as u32), value))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+pub(crate) enum AddLower {
+    Always,
+    IfEmpty,
+    Never,
+}
+
+struct RawTagIter<'a> {
+    tagger: &'a Tagger,
+    slice_iter: std::slice::Iter<'a, (WordIdInt, PosIdInt)>,
+}
+
+impl<'a> Iterator for RawTagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice_iter.next().map(move |(lemma_id, pos_id)| {
+            WordData::new(
+                self.tagger
+                    .id_word(self.tagger.str_for_word_id(lemma_id).into()),
+                self.tagger.id_tag(self.tagger.str_for_pos_id(pos_id)),
+            )
+        })
+    }
+}
+
+impl<'a> FusedIterator for RawTagIter<'a> {}
+impl<'a> ExactSizeIterator for RawTagIter<'a> {
+    fn len(&self) -> usize {
+        self.slice_iter.len()
+    }
+}
+
+struct StrictTagIter<'a> {
+    tag_iter: RawTagIter<'a>,
+    lower_tag_iter: Option<RawTagIter<'a>>,
+}
+
+impl<'a> Iterator for StrictTagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.tag_iter.next().or_else(|| {
+            self.lower_tag_iter
+                .as_mut()
+                .and_then(|lower_iter| lower_iter.next())
+        })
+    }
+}
+
+impl<'a> FusedIterator for StrictTagIter<'a> {}
+impl<'a> ExactSizeIterator for StrictTagIter<'a> {
+    fn len(&self) -> usize {
+        self.tag_iter.len()
+            + self
+                .lower_tag_iter
+                .as_ref()
+                .map_or(0, |lower_iter| lower_iter.len())
+    }
+}
+
+/// An iterator over [WordData].
+pub struct TagIter<'a> {
+    tagger: &'a Tagger,
+    tag_iter: StrictTagIter<'a>,
+    prefix: Option<&'a str>,
+}
+
+impl<'a> Iterator for TagIter<'a> {
+    type Item = WordData<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.tag_iter.next().map(|data| {
+            let lemma = if let Some(prefix) = &self.prefix {
+                self.tagger
+                    .id_word(format!("{}{}", prefix, data.lemma().as_str().to_lowercase()).into())
+            } else {
+                data.lemma().clone()
+            };
+
+            WordData::new(lemma, *data.pos())
+        })
+    }
+}
+
+impl<'a> FusedIterator for TagIter<'a> {}
+impl<'a> ExactSizeIterator for TagIter<'a> {
+    fn len(&self) -> usize {
+        self.tag_iter.len()
     }
 }
 
@@ -319,10 +503,8 @@ impl From<TaggerFields> for Tagger {
 /// i.e. one word (left) associated with one or more pairs of lemma (middle) and POS (part-of-speech) tag (right).
 /// From this structure, the tagger must be able to look up:
 /// 1. lemma and pos by word: all lemmas and POS tags associated with a given word.
-/// 2. word by lemma: all words associated with a given lemma.
 ///
 /// (1) is called extensively (at least once for every word) so it has to be as fast as possible.
-/// (2) is currently not used in nlprule itself but useful for downstream applications.
 ///
 /// ## Implementation
 ///
@@ -335,45 +517,36 @@ impl From<TaggerFields> for Tagger {
 /// to the POS bimap. The word bimap also stores lemmas since there is often a large overlap between known words
 /// and known lemmas.
 ///
-/// These two maps can be used to relatively cheaply in terms of memory allow (1) and (2) while retaining fast lookup.
+/// These two maps can be used to relatively cheaply in terms of memory allow (1) while retaining fast lookup.
 ///
 /// There is a `tags` map which associates a Word ID with *multiple* pairs of
 /// `(lemma_id, pos_id)` where the ID for the lemma is a regular 32-bit Word ID.
-///
-/// And there is a `groups` map which associates Word IDs (for the lemma) with *multiple* Word IDs
-/// (for the words with the same lemma).
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: DefaultHashMap<WordIdInt, Vec<(WordIdInt, PosIdInt)>>,
+    pub(crate) tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
     pub(crate) tag_store: BiMap<String, PosIdInt>,
     pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) groups: DefaultHashMap<WordIdInt, Vec<WordIdInt>>,
     pub(crate) lang_options: TaggerLangOptions,
 }
 
 impl Tagger {
     /// Directly looks up the given word in the `tags` map and returns
     /// corresponding [WordData].
-    // TODO: This could probably return an iterator instead of allocating a `Vec`.
-    fn get_raw(&self, word: &str) -> Vec<WordData> {
-        if let Some(map) = self
+    fn get_raw(&self, word: &str) -> RawTagIter {
+        let slice = if let Some(pairs) = self
             .word_store
             .get_by_left(word)
             .and_then(|x| self.tags.get(x))
         {
-            let mut output = Vec::new();
-
-            for (lemma_id, pos_id) in map.iter() {
-                output.push(WordData::new(
-                    self.id_word(self.str_for_word_id(lemma_id).into()),
-                    self.id_tag(self.str_for_pos_id(pos_id)),
-                ))
-            }
-
-            output
+            pairs.as_slice()
         } else {
-            Vec::new()
+            &[]
+        };
+
+        RawTagIter {
+            tagger: &self,
+            slice_iter: slice.iter(),
         }
     }
 
@@ -383,28 +556,31 @@ impl Tagger {
     }
 
     /// Same as [get_tags] but optionally:
-    /// - Adds tags for the lower variant of the word (if `add_lower` is true).
+    /// - Adds tags for the lower variant of the word (if `add_lower` is `AddLower::Always`).
     /// - Adds tags for the lower variant of the word if no [WordData] is found otherwise.
-    /// (if `add_lower_if_empty` is true).
-    // TODO: `add_lower` and `add_lower_if_empty` might better be collapsed into an enum since
-    /// `add_lower` implies `add_lower_if_empty`.
-    fn get_strict_tags(
-        &self,
-        word: &str,
-        add_lower: bool,
-        add_lower_if_empty: bool,
-    ) -> Vec<WordData> {
-        let mut tags = self.get_raw(&word);
-        let lower = word.to_lowercase();
-
-        if (add_lower || (add_lower_if_empty && tags.is_empty()))
-            && (word != lower
-                && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word)))
+    /// (if `add_lower` is `AddLower::IfEmpty`).
+    fn get_strict_tags(&self, word: &str, add_lower: AddLower) -> StrictTagIter {
+        let tag_iter = self.get_raw(&word);
+        let lower_tag_iter = if (matches!(add_lower, AddLower::Always)
+            || (matches!(add_lower, AddLower::IfEmpty) && tag_iter.len() == 0))
         {
-            tags.extend(self.get_raw(&lower));
-        }
+            let lower = word.to_lowercase();
 
-        tags
+            if (word != lower)
+                && (crate::utils::is_title_case(word) || crate::utils::is_uppercase(word))
+            {
+                Some(self.get_raw(&lower))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        StrictTagIter {
+            tag_iter,
+            lower_tag_iter,
+        }
     }
 
     #[allow(dead_code)] // used by compile module
@@ -463,20 +639,31 @@ impl Tagger {
     ///     If `None`, will be set according to the language options.
     /// If true, will attempt to find tags for words which are longer than some cutoff and unknown by looking up tags
     /// for substrings from left to right until tags are found or a minimum length reached.
-    pub fn get_tags_with_options(
-        &self,
-        word: &str,
+    pub fn get_tags_with_options<'a>(
+        &'a self,
+        word: &'a str,
         add_lower: Option<bool>,
         use_compound_split_heuristic: Option<bool>,
-    ) -> Vec<WordData> {
+    ) -> TagIter<'a> {
         let add_lower = add_lower.unwrap_or(self.lang_options.always_add_lower_tags);
         let use_compound_split_heuristic =
             use_compound_split_heuristic.unwrap_or(self.lang_options.use_compound_split_heuristic);
 
-        let mut tags = self.get_strict_tags(word, add_lower, true);
+        let mut tags = TagIter {
+            tagger: &self,
+            tag_iter: self.get_strict_tags(
+                word,
+                if add_lower {
+                    AddLower::Always
+                } else {
+                    AddLower::IfEmpty
+                },
+            ),
+            prefix: None,
+        };
 
         // compound splitting heuristic, seems to work reasonably well
-        if use_compound_split_heuristic && tags.is_empty() {
+        if use_compound_split_heuristic && tags.len() == 0 {
             let n_chars = word.chars().count() as isize;
 
             if n_chars >= 7 {
@@ -496,20 +683,21 @@ impl Tagger {
                         word[i..].to_string()
                     };
 
-                    let next_tags = self.get_strict_tags(&next, add_lower, false);
+                    let next_tags = self.get_strict_tags(
+                        &next,
+                        if add_lower {
+                            AddLower::Always
+                        } else {
+                            AddLower::Never
+                        },
+                    );
 
-                    if !next_tags.is_empty() {
-                        tags = next_tags
-                            .into_iter()
-                            .map(|x| {
-                                let lemma = self.id_word(
-                                    format!("{}{}", &word[..i], x.lemma().as_str().to_lowercase())
-                                        .into(),
-                                );
-
-                                WordData::new(lemma, *x.pos())
-                            })
-                            .collect();
+                    if next_tags.len() != 0 {
+                        tags = TagIter {
+                            tagger: &self,
+                            tag_iter: next_tags,
+                            prefix: Some(&word[..i]),
+                        };
                         break;
                     }
                 }
@@ -524,16 +712,7 @@ impl Tagger {
     ///
     /// # Arguments
     /// * `word`: The word to lookup data for.
-    pub fn get_tags(&self, word: &str) -> Vec<WordData> {
+    pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
-    }
-
-    /// Get the words with the same lemma as the given lemma.
-    pub fn get_group_members(&self, lemma: &str) -> Vec<&str> {
-        self.word_store
-            .get_by_left(lemma)
-            .and_then(|x| self.groups.get(x))
-            .map(|vec| vec.iter().map(|x| self.str_for_word_id(x)).collect())
-            .unwrap_or_else(Vec::new)
     }
 }
