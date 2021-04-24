@@ -139,7 +139,7 @@ pub struct SentenceIter<'t> {
 }
 
 impl<'t> Iterator for SentenceIter<'t> {
-    type Item = Sentence<'t>;
+    type Item = Result<Sentence<'t>, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -203,7 +203,7 @@ impl Tokenizer {
         &'t self,
         mut sentence: Sentence<'t>,
         id: Option<&Index>,
-    ) -> Sentence<'t> {
+    ) -> Result<Sentence<'t>, crate::Error> {
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == *id).unwrap()
         });
@@ -217,28 +217,38 @@ impl Tokenizer {
                 .enumerate()
                 .filter_map(|(j, rule)| {
                     let changes = rule.apply(&match_sentence);
-                    if changes.is_empty() {
-                        None
-                    } else {
-                        Some((j + i, changes))
+
+                    match changes {
+                        Ok(changes) => {
+                            if changes.is_empty() {
+                                None
+                            } else {
+                                Some(Ok((j + i, changes)))
+                            }
+                        }
+                        Err(err) => Some(Err(err)),
                     }
                 })
-                .find_first(|_| true);
+                .find_first(|_| true)
+                .transpose()?;
 
             if let Some((index, changes)) = result {
-                self.rules[index].change(&mut sentence, changes);
+                self.rules[index].change(&mut sentence, changes)?;
                 i = index + 1;
             } else {
                 i = n;
             }
         }
 
-        sentence
+        Ok(sentence)
     }
 
     /// Apply rule-based disambiguation to the tokens.
     /// This does not change the number of tokens, but can change the content arbitrarily.
-    pub fn disambiguate<'t>(&'t self, sentence: Sentence<'t>) -> Sentence<'t> {
+    pub fn disambiguate<'t>(
+        &'t self,
+        sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::Error> {
         self.disambiguate_up_to_id(sentence, None)
     }
 
@@ -324,52 +334,29 @@ impl Tokenizer {
 
                 let id = self.tagger.id_word(token_text.into());
 
-                let mut tag_vec: Vec<_> = self
-                    .tagger
-                    .get_tags_with_options(
-                        token_text,
-                        if is_sentence_start { Some(true) } else { None },
-                        None,
-                    )
-                    .collect();
-
-                tag_vec.push(
-                    WordData::new(
-                        self.tagger().id_word(token_text.into()),
-                        PosId::special(SpecialPos::None),
-                    )
-                    .freeze(),
-                );
-
-                if is_sentence_end {
-                    tag_vec.push(
-                        WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd))
-                            .freeze(),
-                    );
-                }
-
                 Token::new(
                     id,
-                    Tags::new(tag_vec),
                     Span::new(
                         byte_start..byte_start + token_text.len(),
                         char_start..char_start + token_text.chars().count(),
                     ),
+                    is_sentence_start,
                     is_sentence_end,
                     sentence[..byte_start].ends_with(char::is_whitespace),
-                    Vec::new(),
                 )
             })
             .collect();
 
         let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
 
+        self.tagger.apply(&mut sentence).unwrap();
+
         if let Some(chunker) = &self.chunker {
-            chunker.apply(&mut sentence);
+            chunker.apply(&mut sentence).unwrap();
         }
 
         if let Some(multiword_tagger) = &self.multiword_tagger {
-            multiword_tagger.apply(&mut sentence);
+            multiword_tagger.apply(&mut sentence).unwrap();
         }
 
         Some(sentence)

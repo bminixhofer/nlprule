@@ -25,14 +25,14 @@ fn handles_whitespace_correctly() {
 
     let mut sentences = TOKENIZER.pipe(text);
     assert_eq!(
-        &text[sentences.next().unwrap().span().byte().clone()],
+        &text[sentences.next().unwrap().unwrap().span().byte().clone()],
         "  hello.\t"
     );
     assert_eq!(
-        &text[sentences.next().unwrap().span().byte().clone()],
+        &text[sentences.next().unwrap().unwrap().span().byte().clone()],
         "test.\t"
     );
-    assert_eq!(sentences.next(), None);
+    assert!(sentences.next().is_none());
 }
 
 #[quickcheck]
@@ -43,10 +43,12 @@ fn can_tokenize_anything(text: String) -> bool {
 
 #[test]
 fn suggest_indices_are_relative_to_input_text() {
-    let suggestions = RULES.suggest(
-        "I can due his homework for 10€. I can due his homework.",
-        &*TOKENIZER,
-    );
+    let suggestions = RULES
+        .suggest(
+            "I can due his homework for 10€. I can due his homework.",
+            &*TOKENIZER,
+        )
+        .unwrap();
 
     assert_eq!(*suggestions[0].span().char(), 6..9);
     assert_eq!(*suggestions[0].span().byte(), 6..9);
@@ -62,7 +64,7 @@ fn suggest_indices_are_relative_to_input_text() {
 fn sentence_spans_correct() {
     let text = "A short test. A test with emoji 😊.";
 
-    let sentences: Vec<_> = TOKENIZER.pipe(text).collect();
+    let sentences: Vec<_> = TOKENIZER.pipe(text).collect::<Result<_, _>>().unwrap();
     assert_eq!(sentences.len(), 2);
 
     assert_eq!(*sentences[0].span().char(), 0..14);
@@ -100,6 +102,8 @@ fn no_gaps_between_sentences(text: String) {
     let mut contains_sentence = false;
 
     for sentence in TOKENIZER.pipe(&text) {
+        let sentence = sentence.unwrap();
+
         assert_eq!(sentence.span().start(), prev_pos);
         prev_pos += sentence.span().len();
 
@@ -116,6 +120,7 @@ fn rules_can_be_disabled_enabled() {
     // enabled by default
     assert!(!rules
         .suggest("I can due his homework", &*TOKENIZER)
+        .unwrap()
         .is_empty());
 
     rules
@@ -129,15 +134,22 @@ fn rules_can_be_disabled_enabled() {
     // disabled now
     assert!(rules
         .suggest("I can due his homework", &*TOKENIZER)
+        .unwrap()
         .is_empty());
 
     // disabled by default
-    assert!(rules.suggest("I can not go", &*TOKENIZER).is_empty());
+    assert!(rules
+        .suggest("I can not go", &*TOKENIZER)
+        .unwrap()
+        .is_empty());
 
     rules
         .select_mut(&"typos/can_not".try_into().unwrap())
         .for_each(|x| x.enable());
 
     // enabled now
-    assert!(!rules.suggest("I can not go", &*TOKENIZER).is_empty());
+    assert!(!rules
+        .suggest("I can not go", &*TOKENIZER)
+        .unwrap()
+        .is_empty());
 }

@@ -89,7 +89,7 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given sentence by checking all rules.
-    pub fn apply(&self, sentence: &Sentence) -> Vec<Suggestion> {
+    pub fn apply(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, crate::Error> {
         let sentence = MatchSentence::new(sentence);
 
         let mut output: Vec<(usize, Suggestion)> = self
@@ -101,11 +101,16 @@ impl Rules {
                 let mut output = Vec::new();
 
                 for suggestion in rule.apply(&sentence) {
-                    output.push((i, suggestion));
+                    match suggestion {
+                        Ok(suggestion) => output.push((i, suggestion)),
+                        Err(err) => return Err(err),
+                    }
                 }
 
-                output
+                Ok(output)
             })
+            .collect::<Result<Vec<Vec<_>>, crate::Error>>()?
+            .into_iter()
             .flatten()
             .collect();
 
@@ -119,7 +124,7 @@ impl Rules {
 
         let mut mask = vec![false; sentence.text().chars().count()];
 
-        output
+        Ok(output
             .into_iter()
             .filter_map(|(_, suggestion)| {
                 let span = suggestion.span().clone().lshift(sentence.span().start());
@@ -131,29 +136,33 @@ impl Rules {
                     None
                 }
             })
-            .collect()
+            .collect())
     }
 
     /// Compute the suggestions for a text by checking all rules.
-    pub fn suggest(&self, text: &str, tokenizer: &Tokenizer) -> Vec<Suggestion> {
+    pub fn suggest(
+        &self,
+        text: &str,
+        tokenizer: &Tokenizer,
+    ) -> Result<Vec<Suggestion>, crate::Error> {
         if text.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let mut suggestions = Vec::new();
 
         // get suggestions sentence by sentence
         for sentence in tokenizer.pipe(text) {
-            suggestions.extend(self.apply(&sentence));
+            suggestions.extend(self.apply(&sentence?)?);
         }
 
-        suggestions
+        Ok(suggestions)
     }
 
     /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
-    pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> String {
-        let suggestions = self.suggest(text, tokenizer);
-        apply_suggestions(text, &suggestions)
+    pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> Result<String, crate::Error> {
+        let suggestions = self.suggest(text, tokenizer)?;
+        Ok(apply_suggestions(text, &suggestions))
     }
 }
 

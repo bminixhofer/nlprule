@@ -93,6 +93,8 @@ pub enum Error {
     Serialization(#[from] bincode::Error),
     #[error(transparent)]
     IdError(#[from] rule::id::Error),
+    #[error("unset token property: {0}")]
+    Unset(&'static str),
 }
 
 /// Gets the canonical filename for the tokenizer binary for a language code in ISO 639-1 (two-letter) format.

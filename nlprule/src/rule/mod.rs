@@ -38,7 +38,7 @@ pub(crate) struct Unification {
 }
 
 impl Unification {
-    pub fn keep(&self, graph: &MatchGraph, sentence: &MatchSentence) -> bool {
+    pub fn keep(&self, graph: &MatchGraph, sentence: &MatchSentence) -> Result<bool, crate::Error> {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
@@ -48,18 +48,14 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && PosFilter::and(filter, token.tags());
+                        *mask_val = *mask_val && PosFilter::and(filter, token.tags()?);
                     }
                 }
             }
         }
 
         let result = filter_mask.iter().any(|x| *x);
-        if negate {
-            !result
-        } else {
-            result
-        }
+        Ok(if negate { !result } else { result })
     }
 }
 
@@ -131,16 +127,21 @@ impl DisambiguationRule {
         &self.id
     }
 
-    pub(crate) fn apply<'t>(&'t self, sentence: &MatchSentence<'t>) -> Changes {
+    pub(crate) fn apply<'t>(
+        &'t self,
+        sentence: &MatchSentence<'t>,
+    ) -> Result<Changes, crate::Error> {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
-            return Changes::default();
+            return Ok(Changes::default());
         }
 
         let mut all_spans = Vec::new();
 
         for graph in self.engine.get_matches(sentence, self.start, self.end) {
+            let graph = graph?;
+
             if let Some(unification) = &self.unification {
-                if !unification.keep(&graph, sentence) {
+                if !unification.keep(&graph, sentence)? {
                     continue;
                 }
             }
@@ -165,10 +166,14 @@ impl DisambiguationRule {
             all_spans.push(spans);
         }
 
-        Changes(all_spans)
+        Ok(Changes(all_spans))
     }
 
-    pub(crate) fn change<'t>(&'t self, sentence: &mut Sentence<'t>, changes: Changes) {
+    pub(crate) fn change<'t>(
+        &'t self,
+        sentence: &mut Sentence<'t>,
+        changes: Changes,
+    ) -> Result<(), crate::Error> {
         log::info!("applying {}", self.id);
 
         for spans in changes.0 {
@@ -185,8 +190,10 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(groups);
+            self.disambiguations.apply(groups)?;
         }
+
+        Ok(())
     }
 
     /// Often there are examples associated with a rule.
@@ -201,12 +208,14 @@ impl DisambiguationRule {
             };
 
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence_before = tokenizer.disambiguate_up_to_id(
-                tokenizer
-                    .tokenize(text)
-                    .expect("test text must not be empty"),
-                Some(&self.id),
-            );
+            let sentence_before = tokenizer
+                .disambiguate_up_to_id(
+                    tokenizer
+                        .tokenize(text)
+                        .expect("test text must not be empty"),
+                    Some(&self.id),
+                )
+                .unwrap();
 
             // shift the sentence to the right before matching to make sure
             // nothing assumes the sentene starts from absolute index zero
@@ -214,11 +223,12 @@ impl DisambiguationRule {
             let sentence_before_complete = sentence_before.clone().rshift(shift_delta);
             let changes = self
                 .apply(&MatchSentence::new(&sentence_before_complete))
+                .unwrap()
                 .lshift(shift_delta);
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut sentence_after, changes);
+                self.change(&mut sentence_after, changes).unwrap();
             }
 
             info!("Tokens: {:#?}", sentence_before);
@@ -238,7 +248,8 @@ impl DisambiguationRule {
                         .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
-                    let unordered_tags = after.tags().iter().collect::<HashSet<&WordData>>();
+                    let unordered_tags =
+                        after.tags().unwrap().iter().collect::<HashSet<&WordData>>();
                     let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
 
                     let pass = unordered_tags == unordered_tags_change;
@@ -280,82 +291,92 @@ pub struct Suggestions<'a, 't> {
     sentence: &'t MatchSentence<'t>,
 }
 
+impl<'a, 't> Suggestions<'a, 't> {
+    fn suggest_from_graph(
+        graph: Result<MatchGraph, crate::Error>,
+        rule: &'a Rule,
+        sentence: &'t MatchSentence<'t>,
+    ) -> Result<Option<Suggestion>, crate::Error> {
+        let graph = graph?;
+
+        if let Some(unification) = &rule.unification {
+            if !unification.keep(&graph, sentence)? {
+                return Ok(None);
+            }
+        }
+
+        let start_group = graph.by_id(rule.start);
+        let end_group = graph.by_id(rule.end);
+
+        let replacements: Vec<String> = rule
+            .suggesters
+            .iter()
+            .filter_map(|x| x.apply(sentence, &graph, rule.start, rule.end))
+            .collect();
+
+        let start = if replacements
+            .iter()
+            .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
+        {
+            let first_token = graph.groups()[graph.get_index(rule.start)..]
+                .iter()
+                .find_map(|x| x.tokens(sentence).next())
+                .unwrap();
+
+            let idx = sentence
+                .iter()
+                .position(|x| std::ptr::eq(x, first_token))
+                .unwrap_or(0);
+
+            if idx > 0 {
+                sentence.index(idx - 1).span().end()
+            } else {
+                start_group.span.start()
+            }
+        } else {
+            start_group.span.start()
+        };
+        let end = end_group.span.end();
+
+        // this should never happen, but just return None instead of raising an Error
+        // `end` COULD be equal to `start` if the suggestion is to insert text at this position
+        if end < start {
+            return Ok(None);
+        }
+
+        let text_before = sentence.slice(Span::from_positions(start, end));
+
+        // fix e. g. "Super , dass"
+        let replacements: Vec<String> = replacements
+            .into_iter()
+            .filter(|suggestion| *suggestion != text_before)
+            .map(|x| utils::fix_nospace_chars(&x))
+            .collect();
+
+        Ok(if !replacements.is_empty() {
+            Some(Suggestion::new(
+                rule.id.to_string(),
+                rule.message
+                    .apply(sentence, &graph, rule.start, rule.end)
+                    .expect("Rules must have a message."),
+                Span::from_positions(start, end),
+                replacements,
+            ))
+        } else {
+            None
+        })
+    }
+}
+
 impl<'a, 't> Iterator for Suggestions<'a, 't> {
-    type Item = Suggestion;
+    type Item = Result<Suggestion, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let rule = self.rule;
         let sentence = self.sentence;
-        let (start, end) = (self.rule.start, self.rule.end);
 
-        self.matches.find_map(|graph| {
-            if let Some(unification) = &rule.unification {
-                if !unification.keep(&graph, sentence) {
-                    return None;
-                }
-            }
-
-            let start_group = graph.by_id(start);
-            let end_group = graph.by_id(end);
-
-            let replacements: Vec<String> = rule
-                .suggesters
-                .iter()
-                .filter_map(|x| x.apply(sentence, &graph, start, end))
-                .collect();
-
-            let start = if replacements
-                .iter()
-                .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
-            {
-                let first_token = graph.groups()[graph.get_index(start)..]
-                    .iter()
-                    .find_map(|x| x.tokens(sentence).next())
-                    .unwrap();
-
-                let idx = sentence
-                    .iter()
-                    .position(|x| std::ptr::eq(x, first_token))
-                    .unwrap_or(0);
-
-                if idx > 0 {
-                    sentence.index(idx - 1).span().end()
-                } else {
-                    start_group.span.start()
-                }
-            } else {
-                start_group.span.start()
-            };
-            let end = end_group.span.end();
-
-            // this should never happen, but just return None instead of raising an Error
-            // `end` COULD be equal to `start` if the suggestion is to insert text at this position
-            if end < start {
-                return None;
-            }
-
-            let text_before = sentence.slice(Span::from_positions(start, end));
-
-            // fix e. g. "Super , dass"
-            let replacements: Vec<String> = replacements
-                .into_iter()
-                .filter(|suggestion| *suggestion != text_before)
-                .map(|x| utils::fix_nospace_chars(&x))
-                .collect();
-
-            if !replacements.is_empty() {
-                Some(Suggestion::new(
-                    rule.id.to_string(),
-                    rule.message
-                        .apply(sentence, &graph, rule.start, rule.end)
-                        .expect("Rules must have a message."),
-                    Span::from_positions(start, end),
-                    replacements,
-                ))
-            } else {
-                None
-            }
-        })
+        self.matches
+            .find_map(|graph| Suggestions::suggest_from_graph(graph, rule, sentence).transpose())
     }
 }
 
@@ -475,12 +496,13 @@ impl Rule {
                         .tokenize(&test.text())
                         .expect("test text must not be empty."),
                 )
+                .unwrap()
                 .rshift(shift_delta);
 
             info!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self
                 .apply(&MatchSentence::new(&sentence))
-                .map(|s| s.lshift(shift_delta))
+                .map(|s| s.unwrap().lshift(shift_delta))
                 .collect();
 
             let pass = if suggestions.len() > 1 {

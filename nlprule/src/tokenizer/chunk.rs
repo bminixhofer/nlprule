@@ -701,7 +701,9 @@ pub struct Chunker {
 
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
-    pub fn apply(&self, sentence: &mut Sentence) {
+    pub fn apply(&self, sentence: &mut Sentence) -> Result<(), crate::Error> {
+        sentence.init_chunks();
+
         let text = sentence.text().replace('’', "\'");
 
         let mut bi_to_ci: DefaultHashMap<usize, usize> = text
@@ -757,8 +759,12 @@ impl Chunker {
                     let contains_nns = sentence
                         .iter()
                         .find(|token| *token.span().char() == char_span)
-                        .map(|token| token.tags().iter().any(|tag| tag.pos().as_str() == "NNS"))
-                        .unwrap_or(false);
+                        .map(|token| {
+                            token
+                                .tags()
+                                .map(|tags| tags.iter().any(|tag| tag.pos().as_str() == "NNS"))
+                        })
+                        .unwrap_or(Ok(false))?;
 
                     if contains_nns {
                         number = "plural";
@@ -791,9 +797,13 @@ impl Chunker {
         for token in sentence.iter_mut() {
             for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
                 if char_span == token.span().char() {
-                    *token.chunks_mut() = (*chunk).clone();
+                    *token
+                        .chunks_mut()
+                        .expect("chunks are initialized in chunker") = (*chunk).clone();
                 }
             }
         }
+
+        Ok(())
     }
 }

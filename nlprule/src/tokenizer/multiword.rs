@@ -38,7 +38,7 @@ pub struct MultiwordTagger {
 
 impl MultiwordTagger {
     /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) {
+    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) -> Result<(), crate::Error> {
         let tagger = sentence.tagger();
 
         let mut start_indices = DefaultHashMap::new();
@@ -66,11 +66,13 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
-                    token.tags_mut().push(
+                    token.tags_mut()?.push(
                         WordData::new(tagger.id_word(word.as_str().into()), pos.clone()).freeze(),
                     );
                 }
             }
         }
+
+        Ok(())
     }
 }

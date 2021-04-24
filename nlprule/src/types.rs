@@ -226,33 +226,49 @@ impl<'t> Tags<'t> {
     }
 }
 
+lazy_static! {
+    pub(crate) static ref SENT_START: Token<'static> = Token {
+        text: WordId::empty(),
+        span: Span::default(),
+        is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
+        is_sentence_end: false,
+        has_space_before: false,
+        tags: Some(Tags::new(vec![WordData::new(
+            WordId::empty(),
+            PosId::special(SpecialPos::SentStart),
+        )],)),
+        chunks: Some(Vec::new()),
+    };
+}
+
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'t> {
     text: WordId<'t>,
-    tags: Tags<'t>,
     span: Span,
+    is_sentence_start: bool,
     is_sentence_end: bool,
     has_space_before: bool,
-    chunks: Vec<String>,
+    tags: Option<Tags<'t>>,
+    chunks: Option<Vec<String>>,
 }
 
 impl<'t> Token<'t> {
     pub(crate) fn new(
         text: WordId<'t>,
-        tags: Tags<'t>,
         span: Span,
+        is_sentence_start: bool,
         is_sentence_end: bool,
         has_space_before: bool,
-        chunks: Vec<String>,
     ) -> Self {
         Token {
             text,
-            tags,
             span,
+            is_sentence_start,
             is_sentence_end,
             has_space_before,
-            chunks,
+            tags: None,
+            chunks: None,
         }
     }
 
@@ -262,18 +278,11 @@ impl<'t> Token<'t> {
     }
 
     /// Gets the token as string.
-    pub fn as_str(&self) -> &str {
-        self.text.as_str()
-    }
-
-    /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
-    pub fn tags(&self) -> &Tags<'t> {
-        &self.tags
-    }
-
-    #[allow(missing_docs)]
-    pub fn tags_mut(&mut self) -> &mut Tags<'t> {
-        &mut self.tags
+    pub fn as_str(&self) -> &'t str {
+        // we know that the token text can never be changed, and it is created
+        // from a slice of the input text, so the `WordId` will always contain
+        // a borrowed Cow.
+        self.text.as_ref_str()
     }
 
     /// The span of this sentence.
@@ -281,7 +290,12 @@ impl<'t> Token<'t> {
         &self.span
     }
 
-    /// Whether this token is the last token in the sentence-
+    /// Whether this token is the first token in the sentence.
+    pub fn is_sentence_start(&self) -> bool {
+        self.is_sentence_start
+    }
+
+    /// Whether this token is the last token in the sentence.
     pub fn is_sentence_end(&self) -> bool {
         self.is_sentence_end
     }
@@ -289,16 +303,6 @@ impl<'t> Token<'t> {
     /// Whether this token has one or more whitespace characters before.
     pub fn has_space_before(&self) -> bool {
         self.has_space_before
-    }
-
-    /// Chunks associated with this token.
-    pub fn chunks(&self) -> &[String] {
-        &self.chunks
-    }
-
-    #[allow(missing_docs)]
-    pub fn chunks_mut(&mut self) -> &mut Vec<String> {
-        &mut self.chunks
     }
 
     /// Shift the span of this token right by the specified amount.
@@ -311,12 +315,46 @@ impl<'t> Token<'t> {
     pub fn into_static(self) -> Token<'static> {
         Token {
             text: self.text.into_static(),
-            tags: self.tags.into_static(),
+            tags: self.tags.map(Tags::into_static),
             span: self.span,
+            is_sentence_start: self.is_sentence_start,
             is_sentence_end: self.is_sentence_end,
             has_space_before: self.has_space_before,
             chunks: self.chunks,
         }
+    }
+}
+
+impl<'t> Sentence<'t> {
+    pub fn init_tags(&mut self) {
+        for token in self.iter_mut() {
+            token.tags = Some(Tags::new(Vec::new()));
+        }
+    }
+
+    pub fn init_chunks(&mut self) {
+        for token in self.iter_mut() {
+            token.chunks = Some(Vec::new());
+        }
+    }
+}
+
+impl<'t> Token<'t> {
+    /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
+    pub fn tags(&self) -> Result<&Tags<'t>, crate::Error> {
+        self.tags.as_ref().ok_or(crate::Error::Unset("tags"))
+    }
+
+    pub fn tags_mut(&mut self) -> Result<&mut Tags<'t>, crate::Error> {
+        self.tags.as_mut().ok_or(crate::Error::Unset("tags"))
+    }
+
+    pub fn chunks(&self) -> Result<&[String], crate::Error> {
+        self.chunks.as_deref().ok_or(crate::Error::Unset("chunks"))
+    }
+
+    pub fn chunks_mut(&mut self) -> Result<&mut Vec<String>, crate::Error> {
+        self.chunks.as_mut().ok_or(crate::Error::Unset("chunks"))
     }
 }
 

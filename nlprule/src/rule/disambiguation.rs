@@ -52,21 +52,21 @@ pub enum Disambiguation {
 }
 
 impl Disambiguation {
-    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut Token<'t>>>) {
+    pub fn apply<'t>(&'t self, groups: Vec<Vec<&mut Token<'t>>>) -> Result<(), crate::Error> {
         match self {
             Disambiguation::Remove(data_or_filters) => {
                 for (group, data_or_filter) in groups.into_iter().zip(data_or_filters) {
                     for token in group.into_iter() {
                         match data_or_filter {
                             either::Left(data) => {
-                                token.tags_mut().retain(|x| {
+                                token.tags_mut()?.retain(|x| {
                                     !(x.pos() == data.pos()
                                         && (data.lemma().as_str().is_empty()
                                             || x.lemma() == data.lemma()))
                                 });
                             }
                             either::Right(filter) => {
-                                filter.remove(token.tags_mut());
+                                filter.remove(token.tags_mut()?);
                             }
                         }
                     }
@@ -79,7 +79,7 @@ impl Disambiguation {
                             either::Left(limit) => {
                                 for token in group.into_iter() {
                                     let last = token
-                                        .tags()
+                                        .tags()?
                                         .iter()
                                         .next()
                                         .and_then(|x| {
@@ -91,18 +91,18 @@ impl Disambiguation {
                                         })
                                         .unwrap_or_else(|| token.text().clone());
 
-                                    token.tags_mut().retain(|x| x.pos() == limit.pos());
+                                    token.tags_mut()?.retain(|x| x.pos() == limit.pos());
 
-                                    if token.tags().is_empty() {
+                                    if token.tags()?.is_empty() {
                                         if *retain_last {
                                             token
-                                                .tags_mut()
+                                                .tags_mut()?
                                                 .push(WordData::new(last, limit.pos().clone()));
                                         } else {
                                             let lemma = token.text().clone();
 
                                             token
-                                                .tags_mut()
+                                                .tags_mut()?
                                                 .push(WordData::new(lemma, limit.pos().clone()));
                                         }
                                     }
@@ -110,7 +110,7 @@ impl Disambiguation {
                             }
                             either::Right(filter) => {
                                 for token in group.into_iter() {
-                                    filter.keep(token.tags_mut());
+                                    filter.keep(token.tags_mut()?);
                                 }
                             }
                         }
@@ -129,8 +129,8 @@ impl Disambiguation {
                             data.pos().clone(),
                         );
 
-                        token.tags_mut().push(data);
-                        token.tags_mut().retain(|x| !x.pos().as_str().is_empty());
+                        token.tags_mut()?.push(data);
+                        token.tags_mut()?.retain(|x| !x.pos().as_str().is_empty());
                     }
                 }
             }
@@ -146,8 +146,8 @@ impl Disambiguation {
                             data.pos().clone(),
                         );
 
-                        token.tags_mut().clear();
-                        token.tags_mut().push(data);
+                        token.tags_mut()?.clear();
+                        token.tags_mut()?.push(data);
                     }
                 }
             }
@@ -160,14 +160,14 @@ impl Disambiguation {
                     for token in group.iter() {
                         if *use_mask_val {
                             for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                                *mask_val = *mask_val && PosFilter::and(filter, token.tags());
+                                *mask_val = *mask_val && PosFilter::and(filter, token.tags()?);
                             }
                         }
                     }
                 }
 
                 if !filter_mask.iter().any(|x| *x) {
-                    return;
+                    return Ok(());
                 }
 
                 let to_apply: Vec<_> = filter_mask
@@ -188,16 +188,16 @@ impl Disambiguation {
                 {
                     if *use_mask_val {
                         for token in group.into_iter() {
-                            let before = token.tags().clone();
+                            let before = token.tags()?.clone();
 
-                            PosFilter::apply(&to_apply, token.tags_mut());
+                            PosFilter::apply(&to_apply, token.tags_mut()?);
 
                             if let Some(disambig) = disambig {
-                                disambig.keep(token.tags_mut());
+                                disambig.keep(token.tags_mut()?);
                             }
 
-                            if token.tags().is_empty() {
-                                *token.tags_mut() = before;
+                            if token.tags()?.is_empty() {
+                                *token.tags_mut()? = before;
                             }
                         }
                     }
@@ -205,6 +205,8 @@ impl Disambiguation {
             }
             Disambiguation::Nop => {}
         }
+
+        Ok(())
     }
 }
 

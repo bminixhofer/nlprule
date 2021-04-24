@@ -72,6 +72,13 @@ impl<'t> WordId<'t> {
         self.0.as_ref()
     }
 
+    pub fn as_ref_str(&self) -> &'t str {
+        match &self.0 {
+            Cow::Borrowed(x) => *x,
+            Cow::Owned(_) => panic!("can not get `&'t str` reference from owned Cow!"),
+        }
+    }
+
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
     pub fn into_static(self) -> WordId<'static> {
         WordId(self.0.into_owned().into(), self.1)
@@ -724,5 +731,41 @@ impl Tagger {
     /// * `word`: The word to lookup data for.
     pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
+    }
+
+    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) -> Result<(), crate::Error> {
+        sentence.init_tags();
+
+        for token in sentence.iter_mut() {
+            let mut tag_vec: Vec<_> = self
+                .get_tags_with_options(
+                    token.as_str(),
+                    if token.is_sentence_start() {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    None,
+                )
+                .collect();
+
+            tag_vec.push(
+                WordData::new(
+                    self.id_word(token.as_str().into()),
+                    PosId::special(SpecialPos::None),
+                )
+                .freeze(),
+            );
+
+            if token.is_sentence_end() {
+                tag_vec.push(
+                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
+                );
+            }
+
+            *token.tags_mut().expect("tags are initialized in tagger") = Tags::new(tag_vec);
+        }
+
+        Ok(())
     }
 }
