@@ -1,8 +1,9 @@
 //! A dictionary-based tagger.
 
-use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
+use crate::{properties::*, types::*, utils::parallelism::MaybeParallelRefIterator};
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
+use lazy_static::lazy_static;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -547,6 +548,15 @@ pub struct Tagger {
     pub(crate) lang_options: TaggerLangOptions,
 }
 
+impl WriteProperties for Tagger {
+    fn properties(&self) -> PropertiesMut {
+        lazy_static! {
+            static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
+        }
+        *PROPERTIES
+    }
+}
+
 impl Tagger {
     /// Directly looks up the given word in the `tags` map and returns
     /// corresponding [WordData].
@@ -733,8 +743,11 @@ impl Tagger {
         self.get_tags_with_options(word, None, None)
     }
 
-    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) -> Result<(), crate::Error> {
-        sentence.init_tags();
+    pub fn apply<'t>(
+        &'t self,
+        sentence: &mut Sentence<'t>,
+    ) -> Result<(), crate::properties::Error> {
+        let props = self.property_guard(sentence)?;
 
         for token in sentence.iter_mut() {
             let mut tag_vec: Vec<_> = self
@@ -763,7 +776,7 @@ impl Tagger {
                 );
             }
 
-            *token.tags_mut().expect("tags are initialized in tagger") = Tags::new(tag_vec);
+            *props.tags_mut(token)? = Tags::new(tag_vec);
         }
 
         Ok(())

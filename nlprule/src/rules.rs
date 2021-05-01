@@ -1,9 +1,11 @@
 //! Sets of grammatical error correction rules.
 
+use crate::properties::*;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
 use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, tokenizer::Tokenizer, Error};
 use fs_err::File;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read, Write},
@@ -38,6 +40,16 @@ impl Default for RulesLangOptions {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
+    #[serde(skip)]
+    pub(crate) properties: OnceCell<Properties>,
+}
+
+impl ReadProperties for Rules {
+    fn properties(&self) -> Properties {
+        *self
+            .properties
+            .get_or_init(|| self.rules.iter().map(ReadProperties::properties).collect())
+    }
 }
 
 impl Rules {
@@ -89,8 +101,8 @@ impl Rules {
     }
 
     /// Compute the suggestions for the given sentence by checking all rules.
-    pub fn apply(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, crate::Error> {
-        let sentence = MatchSentence::new(sentence);
+    pub fn apply(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, crate::properties::Error> {
+        let sentence = MatchSentence::new(sentence, self.property_guard(sentence)?);
 
         let mut output: Vec<(usize, Suggestion)> = self
             .rules
@@ -109,7 +121,7 @@ impl Rules {
 
                 Ok(output)
             })
-            .collect::<Result<Vec<Vec<_>>, crate::Error>>()?
+            .collect::<Result<Vec<Vec<_>>, crate::properties::Error>>()?
             .into_iter()
             .flatten()
             .collect();
@@ -144,7 +156,7 @@ impl Rules {
         &self,
         text: &str,
         tokenizer: &Tokenizer,
-    ) -> Result<Vec<Suggestion>, crate::Error> {
+    ) -> Result<Vec<Suggestion>, crate::properties::Error> {
         if text.is_empty() {
             return Ok(Vec::new());
         }
@@ -160,7 +172,11 @@ impl Rules {
     }
 
     /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
-    pub fn correct(&self, text: &str, tokenizer: &Tokenizer) -> Result<String, crate::Error> {
+    pub fn correct(
+        &self,
+        text: &str,
+        tokenizer: &Tokenizer,
+    ) -> Result<String, crate::properties::Error> {
         let suggestions = self.suggest(text, tokenizer)?;
         Ok(apply_suggestions(text, &suggestions))
     }
@@ -231,6 +247,9 @@ where
 {
     fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
         let rules: Vec<Rule> = iter.into_iter().map(|x| x.into()).collect();
-        Self { rules }
+        Self {
+            rules,
+            properties: OnceCell::default(),
+        }
     }
 }

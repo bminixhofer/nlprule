@@ -28,7 +28,9 @@ fn main() {
     let mut passes = 0;
     for rule in rules {
         if opts.ids.is_empty() || opts.ids.contains(&rule.id().to_string()) {
-            passes += rule.test(&tokenizer) as usize;
+            if let Ok(true) = rule.test(&tokenizer) {
+                passes += 1;
+            }
         }
     }
 

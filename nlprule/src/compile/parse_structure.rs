@@ -902,6 +902,7 @@ impl Rule {
             category_name: String::new(),
             category_type: None,
             enabled: true,
+            properties: Default::default(),
         })
     }
 }
@@ -1327,6 +1328,7 @@ impl DisambiguationRule {
             disambiguations,
             examples,
             id: Index::default(),
+            properties: Default::default(),
         })
     }
 }

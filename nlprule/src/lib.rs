@@ -66,7 +66,7 @@
 //! ---
 //! Binaries are distributed with [Github releases](https://github.com/bminixhofer/nlprule/releases).
 
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 use std::io;
 
 use thiserror::Error;
@@ -74,6 +74,7 @@ use thiserror::Error;
 #[cfg(feature = "compile")]
 pub mod compile;
 mod filter;
+pub mod properties;
 pub mod rule;
 pub mod rules;
 pub mod tokenizer;

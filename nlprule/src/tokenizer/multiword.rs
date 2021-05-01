@@ -1,7 +1,9 @@
 //! Checks if the input text contains multi-token phrases from a finite list (might contain e. g. city names) and assigns lemmas and part-of-speech tags accordingly.
 
+use crate::properties::*;
 use crate::types::*;
 use aho_corasick::AhoCorasick;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -36,9 +38,23 @@ pub struct MultiwordTagger {
     multiwords: Vec<(String, PosId<'static>)>,
 }
 
+impl WriteProperties for MultiwordTagger {
+    fn properties(&self) -> PropertiesMut {
+        lazy_static! {
+            static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
+        }
+        *PROPERTIES
+    }
+}
+
 impl MultiwordTagger {
     /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) -> Result<(), crate::Error> {
+    pub fn apply<'t>(
+        &'t self,
+        sentence: &mut Sentence<'t>,
+    ) -> Result<(), crate::properties::Error> {
+        let props = self.property_guard(sentence)?;
+
         let tagger = sentence.tagger();
 
         let mut start_indices = DefaultHashMap::new();
@@ -66,7 +82,7 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
-                    token.tags_mut()?.push(
+                    props.tags_mut(token)?.push(
                         WordData::new(tagger.id_word(word.as_str().into()), pos.clone()).freeze(),
                     );
                 }

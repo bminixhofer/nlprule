@@ -1,4 +1,7 @@
+use std::iter;
+
 use crate::{
+    properties::*,
     types::*,
     utils::regex::{CaptureMatches, Regex},
 };
@@ -18,7 +21,7 @@ impl TokenEngine {
         &'t self,
         sentence: &'t MatchSentence,
         i: usize,
-    ) -> Result<Option<MatchGraph<'t>>, crate::Error> {
+    ) -> Result<Option<MatchGraph<'t>>, crate::properties::Error> {
         if let Some(graph) = self.composition.apply(sentence, i)? {
             let mut blocked = false;
 
@@ -63,6 +66,20 @@ pub enum Engine {
     Text(Box<Regex>, DefaultHashMap<GraphId, usize>),
 }
 
+impl ReadProperties for Engine {
+    fn properties(&self) -> Properties {
+        match &self {
+            Engine::Token(engine) => engine
+                .antipatterns
+                .iter()
+                .map(|x| x.properties())
+                .chain(iter::once(engine.composition.properties()))
+                .collect(),
+            Engine::Text(_, _) => Properties::default(),
+        }
+    }
+}
+
 struct TokenMatches<'a> {
     engine: &'a TokenEngine,
     index: usize,
@@ -88,7 +105,7 @@ pub struct EngineMatches<'a, 't> {
 }
 
 impl<'a, 't> Iterator for EngineMatches<'a, 't> {
-    type Item = Result<MatchGraph<'t>, crate::Error>;
+    type Item = Result<MatchGraph<'t>, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let sentence = self.sentence;

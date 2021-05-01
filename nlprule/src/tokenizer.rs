@@ -5,6 +5,7 @@
 //! [DisambiguationRule][crate::rule::DisambiguationRule]s.
 
 use crate::{
+    properties::*,
     rule::id::{Index, Selector},
     rule::MatchSentence,
     types::*,
@@ -12,6 +13,7 @@ use crate::{
     Error,
 };
 use fs_err::File;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, Read, Write},
@@ -139,7 +141,7 @@ pub struct SentenceIter<'t> {
 }
 
 impl<'t> Iterator for SentenceIter<'t> {
-    type Item = Result<Sentence<'t>, crate::Error>;
+    type Item = Result<Sentence<'t>, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -157,6 +159,16 @@ pub struct Tokenizer {
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
     pub(crate) lang_options: TokenizerLangOptions,
+    #[serde(skip)]
+    pub(crate) properties: OnceCell<PropertiesMut>,
+}
+
+impl WriteProperties for Tokenizer {
+    fn properties(&self) -> PropertiesMut {
+        *self
+            .properties
+            .get_or_init(|| self.rules.iter().map(WriteProperties::properties).collect())
+    }
 }
 
 impl Tokenizer {
@@ -203,14 +215,16 @@ impl Tokenizer {
         &'t self,
         mut sentence: Sentence<'t>,
         id: Option<&Index>,
-    ) -> Result<Sentence<'t>, crate::Error> {
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
         let n = id.map_or(self.rules.len(), |id| {
             self.rules.iter().position(|x| x.id == *id).unwrap()
         });
         let mut i = 0;
 
+        let guard = self.property_guard(&mut sentence)?;
+
         while i < n {
-            let match_sentence = MatchSentence::new(&sentence);
+            let match_sentence = MatchSentence::new(&sentence, guard.downgrade());
 
             let result = self.rules[i..n]
                 .maybe_par_iter()
@@ -248,7 +262,7 @@ impl Tokenizer {
     pub fn disambiguate<'t>(
         &'t self,
         sentence: Sentence<'t>,
-    ) -> Result<Sentence<'t>, crate::Error> {
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
         self.disambiguate_up_to_id(sentence, None)
     }
 

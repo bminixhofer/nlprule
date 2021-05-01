@@ -1,10 +1,12 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
 use half::bf16;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::{cmp::Ordering, collections::BinaryHeap};
 
+use crate::properties::*;
 use crate::types::{DefaultHashMap, DefaultHasher, Sentence};
 
 fn softmax(vec: &mut Vec<f32>) {
@@ -699,10 +701,21 @@ pub struct Chunker {
     pub(crate) chunk_model: MaxentChunker,
 }
 
+impl WriteProperties for Chunker {
+    fn properties(&self) -> PropertiesMut {
+        lazy_static! {
+            static ref PROPERTIES: PropertiesMut = Properties::default()
+                .read(&[Property::Tags])
+                .write(&[Property::Chunks]);
+        }
+        *PROPERTIES
+    }
+}
+
 impl Chunker {
     /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
-    pub fn apply(&self, sentence: &mut Sentence) -> Result<(), crate::Error> {
-        sentence.init_chunks();
+    pub fn apply(&self, sentence: &mut Sentence) -> Result<(), crate::properties::Error> {
+        let props = self.property_guard(sentence)?;
 
         let text = sentence.text().replace('’', "\'");
 
@@ -760,8 +773,8 @@ impl Chunker {
                         .iter()
                         .find(|token| *token.span().char() == char_span)
                         .map(|token| {
-                            token
-                                .tags()
+                            props
+                                .tags(token)
                                 .map(|tags| tags.iter().any(|tag| tag.pos().as_str() == "NNS"))
                         })
                         .unwrap_or(Ok(false))?;
@@ -797,9 +810,7 @@ impl Chunker {
         for token in sentence.iter_mut() {
             for (chunk, (_, char_span)) in chunks.iter().zip(internal_chunks.iter()) {
                 if char_span == token.span().char() {
-                    *token
-                        .chunks_mut()
-                        .expect("chunks are initialized in chunker") = (*chunk).clone();
+                    *props.chunks_mut(token)? = (*chunk).clone();
                 }
             }
         }

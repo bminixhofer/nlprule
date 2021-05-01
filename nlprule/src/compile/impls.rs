@@ -352,7 +352,10 @@ impl Rules {
             );
         }
 
-        Rules { rules }
+        Rules {
+            rules,
+            properties: Default::default(),
+        }
     }
 }
 
@@ -435,6 +438,7 @@ impl Tokenizer {
             multiword_tagger,
             rules,
             lang_options,
+            properties: Default::default(),
         })
     }
 }

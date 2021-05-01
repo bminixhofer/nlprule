@@ -26,7 +26,7 @@ fn main() {
     let mut passes = 0;
 
     for rule in rules {
-        if rule.test(&tokenizer) {
+        if let Ok(true) = rule.test(&tokenizer) {
             passes += 1;
         } else if opts.stop_at_error {
             break;

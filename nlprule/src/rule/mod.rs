@@ -1,16 +1,19 @@
 //! Implementations related to single rules.
 
-use crate::types::*;
 use crate::{
     filter::{Filter, Filterable},
+    properties::*,
     tokenizer::Tokenizer,
+    types::*,
     utils,
 };
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use log::{error, info, warn};
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::fmt;
+use std::{collections::HashSet, iter};
 
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
@@ -37,8 +40,21 @@ pub(crate) struct Unification {
     pub(crate) filters: Vec<Vec<PosFilter>>,
 }
 
+impl ReadProperties for Unification {
+    fn properties(&self) -> Properties {
+        lazy_static! {
+            static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
+        }
+        *PROPERTIES
+    }
+}
+
 impl Unification {
-    pub fn keep(&self, graph: &MatchGraph, sentence: &MatchSentence) -> Result<bool, crate::Error> {
+    pub fn keep(
+        &self,
+        graph: &MatchGraph,
+        sentence: &MatchSentence,
+    ) -> Result<bool, crate::properties::Error> {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
@@ -48,7 +64,8 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && PosFilter::and(filter, token.tags()?);
+                        *mask_val =
+                            *mask_val && PosFilter::and(filter, sentence.guard().tags(token)?);
                     }
                 }
             }
@@ -87,6 +104,19 @@ pub struct DisambiguationRule {
     pub(crate) end: GraphId,
     pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
     pub(crate) unification: Option<Unification>,
+    #[serde(skip)]
+    pub(crate) properties: OnceCell<PropertiesMut>,
+}
+
+impl WriteProperties for DisambiguationRule {
+    fn properties(&self) -> PropertiesMut {
+        *self.properties.get_or_init(|| {
+            iter::once(self.engine.properties())
+                .chain(self.unification.iter().map(|x| x.properties()))
+                .collect::<Properties>()
+                .write(&[Property::Tags])
+        })
+    }
 }
 
 #[derive(Default, Debug)]
@@ -130,7 +160,7 @@ impl DisambiguationRule {
     pub(crate) fn apply<'t>(
         &'t self,
         sentence: &MatchSentence<'t>,
-    ) -> Result<Changes, crate::Error> {
+    ) -> Result<Changes, crate::properties::Error> {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
             return Ok(Changes::default());
         }
@@ -173,8 +203,10 @@ impl DisambiguationRule {
         &'t self,
         sentence: &mut Sentence<'t>,
         changes: Changes,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), crate::properties::Error> {
         log::info!("applying {}", self.id);
+
+        let guard = self.property_guard(sentence)?;
 
         for spans in changes.0 {
             let mut groups = Vec::new();
@@ -190,7 +222,7 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(groups)?;
+            self.disambiguations.apply(groups, guard)?;
         }
 
         Ok(())
@@ -198,7 +230,7 @@ impl DisambiguationRule {
 
     /// Often there are examples associated with a rule.
     /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
+    pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
         let mut passes = Vec::new();
 
         for (i, test) in self.examples.iter().enumerate() {
@@ -220,9 +252,14 @@ impl DisambiguationRule {
             // shift the sentence to the right before matching to make sure
             // nothing assumes the sentene starts from absolute index zero
             let shift_delta = Position { byte: 1, char: 1 };
-            let sentence_before_complete = sentence_before.clone().rshift(shift_delta);
+            let mut sentence_before_complete = sentence_before.clone().rshift(shift_delta);
+
+            let guard = self.property_guard(&mut sentence_before_complete)?;
             let changes = self
-                .apply(&MatchSentence::new(&sentence_before_complete))
+                .apply(&MatchSentence::new(
+                    &sentence_before_complete,
+                    guard.downgrade(),
+                ))
                 .unwrap()
                 .lshift(shift_delta);
             let mut sentence_after = sentence_before.clone();
@@ -280,7 +317,7 @@ impl DisambiguationRule {
             passes.push(pass);
         }
 
-        passes.iter().all(|x| *x)
+        Ok(passes.iter().all(|x| *x))
     }
 }
 
@@ -293,10 +330,10 @@ pub struct Suggestions<'a, 't> {
 
 impl<'a, 't> Suggestions<'a, 't> {
     fn suggest_from_graph(
-        graph: Result<MatchGraph, crate::Error>,
+        graph: Result<MatchGraph, crate::properties::Error>,
         rule: &'a Rule,
         sentence: &'t MatchSentence<'t>,
-    ) -> Result<Option<Suggestion>, crate::Error> {
+    ) -> Result<Option<Suggestion>, crate::properties::Error> {
         let graph = graph?;
 
         if let Some(unification) = &rule.unification {
@@ -369,7 +406,7 @@ impl<'a, 't> Suggestions<'a, 't> {
 }
 
 impl<'a, 't> Iterator for Suggestions<'a, 't> {
-    type Item = Result<Suggestion, crate::Error>;
+    type Item = Result<Suggestion, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let rule = self.rule;
@@ -411,6 +448,18 @@ pub struct Rule {
     pub(crate) category_type: Option<String>,
     pub(crate) unification: Option<Unification>,
     pub(crate) enabled: bool,
+    #[serde(skip)]
+    pub(crate) properties: OnceCell<Properties>,
+}
+
+impl ReadProperties for Rule {
+    fn properties(&self) -> Properties {
+        *self.properties.get_or_init(|| {
+            iter::once(self.engine.properties())
+                .chain(self.unification.iter().map(|x| x.properties()))
+                .collect()
+        })
+    }
 }
 
 impl fmt::Display for Rule {
@@ -480,7 +529,7 @@ impl Rule {
 
     /// Grammar rules always have at least one example associated with them.
     /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
+    pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
         let mut passes = Vec::new();
 
         // make sure relative position is handled correctly
@@ -501,7 +550,10 @@ impl Rule {
 
             info!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self
-                .apply(&MatchSentence::new(&sentence))
+                .apply(&MatchSentence::new(
+                    &sentence,
+                    self.property_guard(&sentence)?,
+                ))
                 .map(|s| s.unwrap().lshift(shift_delta))
                 .collect();
 
@@ -529,6 +581,6 @@ impl Rule {
             passes.push(pass);
         }
 
-        passes.iter().all(|x| *x)
+        Ok(passes.iter().all(|x| *x))
     }
 }

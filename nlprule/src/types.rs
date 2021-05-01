@@ -69,6 +69,12 @@ impl<'t> Sentence<'t> {
         &self.tokens
     }
 
+    /// Gets the first token in this sentence. There is always at least one token in the sentence
+    /// so this will never panic.
+    pub fn first(&self) -> &Token<'t> {
+        &self.tokens[0]
+    }
+
     /// Gets the amount of tokens in this sentence.
     pub fn len(&self) -> usize {
         self.tokens.len()
@@ -177,7 +183,7 @@ impl<'a, 't> Iterator for TagIter<'a, 't> {
 
 /// Contains all the local information about a token i. e.
 /// the text itself and the [WordData]s associated with the word.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Tags<'t> {
     tags: Vec<WordData<'t>>,
 }
@@ -249,8 +255,8 @@ pub struct Token<'t> {
     is_sentence_start: bool,
     is_sentence_end: bool,
     has_space_before: bool,
-    tags: Option<Tags<'t>>,
-    chunks: Option<Vec<String>>,
+    pub tags: Option<Tags<'t>>,
+    pub chunks: Option<Vec<String>>,
 }
 
 impl<'t> Token<'t> {
@@ -321,20 +327,6 @@ impl<'t> Token<'t> {
             is_sentence_end: self.is_sentence_end,
             has_space_before: self.has_space_before,
             chunks: self.chunks,
-        }
-    }
-}
-
-impl<'t> Sentence<'t> {
-    pub fn init_tags(&mut self) {
-        for token in self.iter_mut() {
-            token.tags = Some(Tags::new(Vec::new()));
-        }
-    }
-
-    pub fn init_chunks(&mut self) {
-        for token in self.iter_mut() {
-            token.chunks = Some(Vec::new());
         }
     }
 }
