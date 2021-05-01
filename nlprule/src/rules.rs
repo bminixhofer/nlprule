@@ -44,11 +44,14 @@ pub struct Rules {
     pub(crate) properties: OnceCell<Properties>,
 }
 
-impl ReadProperties for Rules {
+impl Suggest for Rules {
     fn properties(&self) -> Properties {
-        *self
-            .properties
-            .get_or_init(|| self.rules.iter().map(ReadProperties::properties).collect())
+        *self.properties.get_or_init(|| {
+            self.rules
+                .iter()
+                .map(|rule| rule.compute_properties())
+                .collect()
+        })
     }
 }
 

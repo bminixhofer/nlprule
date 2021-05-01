@@ -163,11 +163,21 @@ pub struct Tokenizer {
     pub(crate) properties: OnceCell<PropertiesMut>,
 }
 
-impl WriteProperties for Tokenizer {
+impl Transform for Tokenizer {
     fn properties(&self) -> PropertiesMut {
-        *self
-            .properties
-            .get_or_init(|| self.rules.iter().map(WriteProperties::properties).collect())
+        *self.properties.get_or_init(|| {
+            self.rules
+                .iter()
+                .map(|rule| rule.compute_properties())
+                .collect()
+        })
+    }
+
+    fn transform<'t>(
+        &'t self,
+        _sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        unimplemented!()
     }
 }
 
@@ -247,7 +257,7 @@ impl Tokenizer {
                 .transpose()?;
 
             if let Some((index, changes)) = result {
-                self.rules[index].change(&mut sentence, changes)?;
+                self.rules[index].change(&mut sentence, changes, guard)?;
                 i = index + 1;
             } else {
                 i = n;
@@ -363,14 +373,14 @@ impl Tokenizer {
 
         let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
 
-        self.tagger.apply(&mut sentence).unwrap();
+        sentence = self.tagger.transform(sentence).unwrap();
 
         if let Some(chunker) = &self.chunker {
-            chunker.apply(&mut sentence).unwrap();
+            sentence = chunker.transform(sentence).unwrap();
         }
 
         if let Some(multiword_tagger) = &self.multiword_tagger {
-            multiword_tagger.apply(&mut sentence).unwrap();
+            sentence = multiword_tagger.transform(sentence).unwrap();
         }
 
         Some(sentence)

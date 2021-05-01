@@ -701,7 +701,7 @@ pub struct Chunker {
     pub(crate) chunk_model: MaxentChunker,
 }
 
-impl WriteProperties for Chunker {
+impl Transform for Chunker {
     fn properties(&self) -> PropertiesMut {
         lazy_static! {
             static ref PROPERTIES: PropertiesMut = Properties::default()
@@ -710,12 +710,12 @@ impl WriteProperties for Chunker {
         }
         *PROPERTIES
     }
-}
 
-impl Chunker {
-    /// Populates the `.chunks` field of the passed tokens by predicting with the maximum entropy model.
-    pub fn apply(&self, sentence: &mut Sentence) -> Result<(), crate::properties::Error> {
-        let props = self.property_guard(sentence)?;
+    fn transform<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        let props = self.property_guard(&mut sentence)?;
 
         let text = sentence.text().replace('’', "\'");
 
@@ -815,6 +815,6 @@ impl Chunker {
             }
         }
 
-        Ok(())
+        Ok(sentence)
     }
 }

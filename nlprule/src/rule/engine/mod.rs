@@ -66,20 +66,6 @@ pub enum Engine {
     Text(Box<Regex>, DefaultHashMap<GraphId, usize>),
 }
 
-impl ReadProperties for Engine {
-    fn properties(&self) -> Properties {
-        match &self {
-            Engine::Token(engine) => engine
-                .antipatterns
-                .iter()
-                .map(|x| x.properties())
-                .chain(iter::once(engine.composition.properties()))
-                .collect(),
-            Engine::Text(_, _) => Properties::default(),
-        }
-    }
-}
-
 struct TokenMatches<'a> {
     engine: &'a TokenEngine,
     index: usize,
@@ -165,6 +151,18 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 }
 
 impl Engine {
+    pub fn compute_properties(&self) -> Properties {
+        match &self {
+            Engine::Token(engine) => engine
+                .antipatterns
+                .iter()
+                .map(|x| x.compute_properties())
+                .chain(iter::once(engine.composition.compute_properties()))
+                .collect(),
+            Engine::Text(_, _) => Properties::default(),
+        }
+    }
+
     pub fn get_matches<'a, 't>(
         &'a self,
         sentence: &'t MatchSentence,

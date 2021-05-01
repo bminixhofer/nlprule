@@ -10,7 +10,6 @@ use crate::{
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::{collections::HashSet, iter};
@@ -40,15 +39,6 @@ pub(crate) struct Unification {
     pub(crate) filters: Vec<Vec<PosFilter>>,
 }
 
-impl ReadProperties for Unification {
-    fn properties(&self) -> Properties {
-        lazy_static! {
-            static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
-        }
-        *PROPERTIES
-    }
-}
-
 impl Unification {
     pub fn keep(
         &self,
@@ -73,6 +63,13 @@ impl Unification {
 
         let result = filter_mask.iter().any(|x| *x);
         Ok(if negate { !result } else { result })
+    }
+
+    pub fn compute_properties(&self) -> Properties {
+        lazy_static! {
+            static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
+        }
+        *PROPERTIES
     }
 }
 
@@ -104,19 +101,6 @@ pub struct DisambiguationRule {
     pub(crate) end: GraphId,
     pub(crate) examples: Vec<disambiguation::DisambiguationExample>,
     pub(crate) unification: Option<Unification>,
-    #[serde(skip)]
-    pub(crate) properties: OnceCell<PropertiesMut>,
-}
-
-impl WriteProperties for DisambiguationRule {
-    fn properties(&self) -> PropertiesMut {
-        *self.properties.get_or_init(|| {
-            iter::once(self.engine.properties())
-                .chain(self.unification.iter().map(|x| x.properties()))
-                .collect::<Properties>()
-                .write(&[Property::Tags])
-        })
-    }
 }
 
 #[derive(Default, Debug)]
@@ -152,6 +136,13 @@ impl Changes {
 }
 
 impl DisambiguationRule {
+    pub fn compute_properties(&self) -> PropertiesMut {
+        iter::once(self.engine.compute_properties())
+            .chain(self.unification.iter().map(|x| x.compute_properties()))
+            .collect::<Properties>()
+            .write(&[Property::Tags])
+    }
+
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &Index {
         &self.id
@@ -203,10 +194,9 @@ impl DisambiguationRule {
         &'t self,
         sentence: &mut Sentence<'t>,
         changes: Changes,
+        guard: PropertyGuardMut,
     ) -> Result<(), crate::properties::Error> {
         log::info!("applying {}", self.id);
-
-        let guard = self.property_guard(sentence)?;
 
         for spans in changes.0 {
             let mut groups = Vec::new();
@@ -254,7 +244,10 @@ impl DisambiguationRule {
             let shift_delta = Position { byte: 1, char: 1 };
             let mut sentence_before_complete = sentence_before.clone().rshift(shift_delta);
 
-            let guard = self.property_guard(&mut sentence_before_complete)?;
+            let guard = self
+                .compute_properties()
+                .build(&mut sentence_before_complete)?;
+
             let changes = self
                 .apply(&MatchSentence::new(
                     &sentence_before_complete,
@@ -265,7 +258,7 @@ impl DisambiguationRule {
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut sentence_after, changes).unwrap();
+                self.change(&mut sentence_after, changes, guard).unwrap();
             }
 
             info!("Tokens: {:#?}", sentence_before);
@@ -448,18 +441,6 @@ pub struct Rule {
     pub(crate) category_type: Option<String>,
     pub(crate) unification: Option<Unification>,
     pub(crate) enabled: bool,
-    #[serde(skip)]
-    pub(crate) properties: OnceCell<Properties>,
-}
-
-impl ReadProperties for Rule {
-    fn properties(&self) -> Properties {
-        *self.properties.get_or_init(|| {
-            iter::once(self.engine.properties())
-                .chain(self.unification.iter().map(|x| x.properties()))
-                .collect()
-        })
-    }
 }
 
 impl fmt::Display for Rule {
@@ -482,6 +463,12 @@ impl Rule {
     /// Hints whether the rule should be enabled in a rule set.
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    pub fn compute_properties(&self) -> Properties {
+        iter::once(self.engine.compute_properties())
+            .chain(self.unification.iter().map(|x| x.compute_properties()))
+            .collect()
     }
 
     /// Get a unique identifier of this rule.
@@ -552,7 +539,7 @@ impl Rule {
             let suggestions: Vec<_> = self
                 .apply(&MatchSentence::new(
                     &sentence,
-                    self.property_guard(&sentence)?,
+                    self.compute_properties().build(&sentence)?,
                 ))
                 .map(|s| s.unwrap().lshift(shift_delta))
                 .collect();

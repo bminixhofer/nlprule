@@ -164,7 +164,7 @@ pub trait Atomable: Send + Sync {
     fn is_match(&self, context: Context, position: usize)
         -> Result<bool, crate::properties::Error>;
 
-    fn properties(&self) -> Properties {
+    fn compute_properties(&self) -> Properties {
         Properties::default()
     }
 }
@@ -228,7 +228,7 @@ pub mod concrete {
             ))
         }
 
-        fn properties(&self) -> Properties {
+        fn compute_properties(&self) -> Properties {
             lazy_static! {
                 static ref PROPERTIES: Properties = Properties::default().read(&[Property::Chunks]);
             }
@@ -273,7 +273,7 @@ pub mod concrete {
                 .is_match(tags, Some(context), Some(self.case_sensitive)))
         }
 
-        fn properties(&self) -> Properties {
+        fn compute_properties(&self) -> Properties {
             lazy_static! {
                 static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
             }
@@ -328,8 +328,8 @@ impl Atomable for AndAtom {
         Ok(true)
     }
 
-    fn properties(&self) -> Properties {
-        self.atoms.iter().map(|x| x.properties()).collect()
+    fn compute_properties(&self) -> Properties {
+        self.atoms.iter().map(Atom::compute_properties).collect()
     }
 }
 
@@ -353,8 +353,8 @@ impl Atomable for OrAtom {
         Ok(false)
     }
 
-    fn properties(&self) -> Properties {
-        self.atoms.iter().map(|x| x.properties()).collect()
+    fn compute_properties(&self) -> Properties {
+        self.atoms.iter().map(Atom::compute_properties).collect()
     }
 }
 
@@ -372,8 +372,8 @@ impl Atomable for NotAtom {
         Ok(!self.atom.is_match(context, position)?)
     }
 
-    fn properties(&self) -> Properties {
-        self.atom.properties()
+    fn compute_properties(&self) -> Properties {
+        self.atom.compute_properties()
     }
 }
 
@@ -401,8 +401,8 @@ impl Atomable for OffsetAtom {
         )
     }
 
-    fn properties(&self) -> Properties {
-        self.atom.properties()
+    fn compute_properties(&self) -> Properties {
+        self.atom.compute_properties()
     }
 }
 
@@ -603,16 +603,14 @@ pub struct Composition {
     pub(crate) can_stop_mask: Vec<bool>,
 }
 
-impl ReadProperties for Composition {
-    fn properties(&self) -> Properties {
+impl Composition {
+    pub fn compute_properties(&self) -> Properties {
         self.parts
             .iter()
-            .map(|part| part.atom.properties())
+            .map(|part| part.atom.compute_properties())
             .collect()
     }
-}
 
-impl Composition {
     fn next_can_match(
         &self,
         context: Context,

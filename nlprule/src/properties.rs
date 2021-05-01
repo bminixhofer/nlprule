@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::types::*;
 use thiserror::Error;
 
-pub trait ReadProperties {
+pub trait Suggest {
     fn properties(&self) -> Properties {
         Properties::default()
     }
@@ -13,7 +13,7 @@ pub trait ReadProperties {
     }
 }
 
-pub trait WriteProperties {
+pub trait Transform {
     fn properties(&self) -> PropertiesMut {
         PropertiesMut::default()
     }
@@ -21,6 +21,12 @@ pub trait WriteProperties {
     fn property_guard(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
         self.properties().build(sentence)
     }
+
+    fn transform<'t>(&'t self, sentence: Sentence<'t>) -> Result<Sentence<'t>, Error>;
+}
+
+pub trait Tokenize {
+    fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>>>;
 }
 
 #[derive(Error, Debug)]
@@ -288,13 +294,7 @@ impl PropertyGuardMut {
     }
 }
 
-// pub trait Transform {
-//     fn transform<'t>(&'t self, sentences: SentenceIter<'t>) -> SentenceIter<'t>;
-
-//     fn in_properties(&self) ->
-// }
-
-// pub struct Pipeline<T, P>(T, P);
+pub struct Pipeline<T>(T);
 
 // type SentenceIter<'t> = Box<dyn Iterator<Item = Sentence<'t>>>;
 

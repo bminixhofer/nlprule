@@ -38,22 +38,19 @@ pub struct MultiwordTagger {
     multiwords: Vec<(String, PosId<'static>)>,
 }
 
-impl WriteProperties for MultiwordTagger {
+impl Transform for MultiwordTagger {
     fn properties(&self) -> PropertiesMut {
         lazy_static! {
             static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
         }
         *PROPERTIES
     }
-}
 
-impl MultiwordTagger {
-    /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(
+    fn transform<'t>(
         &'t self,
-        sentence: &mut Sentence<'t>,
-    ) -> Result<(), crate::properties::Error> {
-        let props = self.property_guard(sentence)?;
+        mut sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        let props = self.property_guard(&mut sentence)?;
 
         let tagger = sentence.tagger();
 
@@ -89,6 +86,6 @@ impl MultiwordTagger {
             }
         }
 
-        Ok(())
+        Ok(sentence)
     }
 }

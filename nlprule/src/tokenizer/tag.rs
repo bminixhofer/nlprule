@@ -548,12 +548,51 @@ pub struct Tagger {
     pub(crate) lang_options: TaggerLangOptions,
 }
 
-impl WriteProperties for Tagger {
+impl Transform for Tagger {
     fn properties(&self) -> PropertiesMut {
         lazy_static! {
             static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
         }
         *PROPERTIES
+    }
+
+    fn transform<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        let props = self.property_guard(&mut sentence)?;
+
+        for token in sentence.iter_mut() {
+            let mut tag_vec: Vec<_> = self
+                .get_tags_with_options(
+                    token.as_str(),
+                    if token.is_sentence_start() {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    None,
+                )
+                .collect();
+
+            tag_vec.push(
+                WordData::new(
+                    self.id_word(token.as_str().into()),
+                    PosId::special(SpecialPos::None),
+                )
+                .freeze(),
+            );
+
+            if token.is_sentence_end() {
+                tag_vec.push(
+                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
+                );
+            }
+
+            *props.tags_mut(token)? = Tags::new(tag_vec);
+        }
+
+        Ok(sentence)
     }
 }
 
@@ -741,44 +780,5 @@ impl Tagger {
     /// * `word`: The word to lookup data for.
     pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
-    }
-
-    pub fn apply<'t>(
-        &'t self,
-        sentence: &mut Sentence<'t>,
-    ) -> Result<(), crate::properties::Error> {
-        let props = self.property_guard(sentence)?;
-
-        for token in sentence.iter_mut() {
-            let mut tag_vec: Vec<_> = self
-                .get_tags_with_options(
-                    token.as_str(),
-                    if token.is_sentence_start() {
-                        Some(true)
-                    } else {
-                        None
-                    },
-                    None,
-                )
-                .collect();
-
-            tag_vec.push(
-                WordData::new(
-                    self.id_word(token.as_str().into()),
-                    PosId::special(SpecialPos::None),
-                )
-                .freeze(),
-            );
-
-            if token.is_sentence_end() {
-                tag_vec.push(
-                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
-                );
-            }
-
-            *props.tags_mut(token)? = Tags::new(tag_vec);
-        }
-
-        Ok(())
     }
 }
