@@ -90,7 +90,7 @@ impl Default for TokenizerLangOptions {
 }
 
 /// An iterator over [IncompleteSentence]s. Has the same properties as [SentenceIter].
-pub struct IncompleteSentenceIter<'t> {
+pub struct SentenceIter<'t> {
     text: &'t str,
     splits: Vec<Range<usize>>,
     tokenizer: &'t Tokenizer,
@@ -98,7 +98,7 @@ pub struct IncompleteSentenceIter<'t> {
     position: Position,
 }
 
-impl<'t> Iterator for IncompleteSentenceIter<'t> {
+impl<'t> Iterator for SentenceIter<'t> {
     type Item = Sentence<'t>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -119,7 +119,7 @@ impl<'t> Iterator for IncompleteSentenceIter<'t> {
 
         let sentence = self
             .tokenizer
-            .tokenize(&self.text[range.clone()])
+            .tokenize_sentence(&self.text[range.clone()])
             .map(|x| x.rshift(self.position));
 
         self.position += Position {
@@ -135,12 +135,12 @@ impl<'t> Iterator for IncompleteSentenceIter<'t> {
 /// - Preceding whitespace is always included so the first sentence always starts at byte and char index zero.
 /// - There are no gaps between sentences i.e. `sentence[i - 1].span().end() == sentence[i].span().start()`.
 /// - Behavior for trailing whitespace is not defined. Can be included in the last sentence or not be part of any sentence.
-pub struct SentenceIter<'t> {
-    inner: IncompleteSentenceIter<'t>,
+pub struct AnalyzedSentenceIter<'t> {
+    inner: SentenceIter<'t>,
     tokenizer: &'t Tokenizer,
 }
 
-impl<'t> Iterator for SentenceIter<'t> {
+impl<'t> Iterator for AnalyzedSentenceIter<'t> {
     type Item = Result<Sentence<'t>, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -154,6 +154,7 @@ impl<'t> Iterator for SentenceIter<'t> {
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Tokenizer {
     pub(crate) rules: Vec<DisambiguationRule>,
+    pub(crate) whitelist: DefaultHashSet<String>,
     pub(crate) chunker: Option<Chunker>,
     pub(crate) sentencizer: srx::Rules,
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
@@ -178,6 +179,18 @@ impl Transform for Tokenizer {
         _sentence: Sentence<'t>,
     ) -> Result<Sentence<'t>, crate::properties::Error> {
         unimplemented!()
+    }
+}
+
+impl Tokenize for Tokenizer {
+    fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
+        Box::new(SentenceIter {
+            text,
+            splits: self.sentencizer.split_ranges(text),
+            tokenizer: &self,
+            index: 0,
+            position: Position::default(),
+        })
     }
 }
 
@@ -287,7 +300,7 @@ impl Tokenizer {
             let mut tokens = Vec::new();
             for pretoken in split(text, split_char) {
                 // if the token is in the dictionary, we add it right away
-                if self.tagger.id_word(pretoken.into()).1.is_some() {
+                if self.whitelist.contains(pretoken) {
                     tokens.push(pretoken);
                 } else {
                     // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
@@ -333,8 +346,7 @@ impl Tokenizer {
     }
 
     /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
-    // NB: this is not public because it could be easily misused by passing a text instead of one sentence.
-    pub(crate) fn tokenize<'t>(&'t self, sentence: &'t str) -> Option<Sentence<'t>> {
+    pub(crate) fn tokenize_sentence<'t>(&'t self, sentence: &'t str) -> Option<Sentence<'t>> {
         if sentence.trim().is_empty() {
             return None;
         }
@@ -356,10 +368,8 @@ impl Tokenizer {
                 let is_sentence_start = i == 0;
                 let is_sentence_end = i == n_token_strs - 1;
 
-                let id = self.tagger.id_word(token_text.into());
-
                 Token::new(
-                    id,
+                    token_text,
                     Span::new(
                         byte_start..byte_start + token_text.len(),
                         char_start..char_start + token_text.chars().count(),
@@ -384,24 +394,5 @@ impl Tokenizer {
         }
 
         Some(sentence)
-    }
-
-    /// Splits the text into sentences and tokenizes each sentence.
-    pub fn sentencize<'t>(&'t self, text: &'t str) -> IncompleteSentenceIter<'t> {
-        IncompleteSentenceIter {
-            text,
-            splits: self.sentencizer.split_ranges(text),
-            tokenizer: &self,
-            index: 0,
-            position: Position::default(),
-        }
-    }
-
-    /// Applies the entire tokenization pipeline including sentencization, tagging, chunking and disambiguation.
-    pub fn pipe<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
-        SentenceIter {
-            inner: self.sentencize(text),
-            tokenizer: &self,
-        }
     }
 }

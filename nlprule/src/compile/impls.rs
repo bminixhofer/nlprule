@@ -371,6 +371,14 @@ impl Tokenizer {
         let rules = super::parse_structure::read_disambiguation_rules(path);
         let mut error = None;
 
+        let mut whitelist = DefaultHashSet::new();
+
+        for (word, _) in build_info.tagger().word_store() {
+            if word.contains(|c| lang_options.extra_split_chars.contains(&c)) {
+                whitelist.insert(word.to_owned());
+            }
+        }
+
         let rules: Vec<_> = rules
             .into_iter()
             .filter_map(|x| match x {
@@ -438,6 +446,7 @@ impl Tokenizer {
             multiword_tagger,
             rules,
             lang_options,
+            whitelist,
             properties: Default::default(),
         })
     }

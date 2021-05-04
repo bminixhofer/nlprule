@@ -59,6 +59,12 @@ impl<'t> fmt::Debug for WordId<'t> {
     }
 }
 
+impl<'t> Default for WordId<'t> {
+    fn default() -> Self {
+        WordId::empty()
+    }
+}
+
 impl<'t> WordId<'t> {
     pub(crate) fn id(&self) -> &Option<WordIdInt> {
         &self.1
@@ -589,7 +595,7 @@ impl Transform for Tagger {
                 );
             }
 
-            *props.tags_mut(token)? = Tags::new(tag_vec);
+            *props.tags_mut(token)? = Tags::new(self.id_word(token.as_str().into()), tag_vec);
         }
 
         Ok(sentence)

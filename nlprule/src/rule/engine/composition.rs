@@ -202,9 +202,18 @@ pub mod concrete {
         ) -> Result<bool, crate::properties::Error> {
             let (sentence, _) = context;
 
-            Ok(self
-                .matcher
-                .is_match(&sentence.index(position).text(), Some(context), None))
+            Ok(self.matcher.is_match(
+                sentence.guard().tags(sentence.index(position))?.id(),
+                Some(context),
+                None,
+            ))
+        }
+
+        fn compute_properties(&self) -> Properties {
+            lazy_static! {
+                static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
+            }
+            *PROPERTIES
         }
     }
 
@@ -455,17 +464,22 @@ impl GraphId {
 #[derive(Debug, Clone)]
 pub struct MatchSentence<'t> {
     sentence: &'t Sentence<'t>,
+    sent_start: Token<'t>,
     guard: PropertyGuard,
 }
 
 impl<'t> MatchSentence<'t> {
     pub fn new(sentence: &'t Sentence<'t>, guard: PropertyGuard) -> Self {
-        MatchSentence { sentence, guard }
+        MatchSentence {
+            sentence,
+            sent_start: Token::sent_start(),
+            guard,
+        }
     }
 
     pub fn index(&self, index: usize) -> &Token {
         match index {
-            0 => &*crate::types::SENT_START,
+            0 => &self.sent_start,
             i => &self.sentence.tokens()[i - 1],
         }
     }

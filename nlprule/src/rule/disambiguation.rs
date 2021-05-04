@@ -82,18 +82,19 @@ impl Disambiguation {
                         match data_or_filter {
                             either::Left(limit) => {
                                 for token in group.into_iter() {
-                                    let last = guard
-                                        .tags(token)?
-                                        .iter()
-                                        .next()
-                                        .and_then(|x| {
-                                            if *x.lemma() != WordId::empty() {
-                                                Some(x.lemma().clone())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .unwrap_or_else(|| token.text().clone());
+                                    let last = {
+                                        let tags = guard.tags(token)?;
+                                        tags.iter()
+                                            .next()
+                                            .and_then(|x| {
+                                                if *x.lemma() != WordId::empty() {
+                                                    Some(x.lemma().clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .unwrap_or_else(|| tags.id().clone())
+                                    };
 
                                     guard.tags_mut(token)?.retain(|x| x.pos() == limit.pos());
 
@@ -103,7 +104,7 @@ impl Disambiguation {
                                                 .tags_mut(token)?
                                                 .push(WordData::new(last, limit.pos().clone()));
                                         } else {
-                                            let lemma = token.text().clone();
+                                            let lemma = guard.tags(token)?.id().clone();
 
                                             guard
                                                 .tags_mut(token)?
@@ -126,7 +127,7 @@ impl Disambiguation {
                     for token in group.into_iter() {
                         let data = WordData::new(
                             if data.lemma().as_str().is_empty() {
-                                token.text().clone()
+                                guard.tags(token)?.id().clone()
                             } else {
                                 data.lemma().clone()
                             },
@@ -145,7 +146,7 @@ impl Disambiguation {
                     for token in group.into_iter() {
                         let data = WordData::new(
                             if data.lemma().as_str().is_empty() {
-                                token.text().clone()
+                                guard.tags(token)?.id().clone()
                             } else {
                                 data.lemma().clone()
                             },
@@ -223,8 +224,8 @@ impl Disambiguation {
 pub struct DisambiguationChange {
     pub text: String,
     pub char_span: Range<usize>,
-    pub before: Tags<'static>,
-    pub after: Tags<'static>,
+    pub before: DefaultHashSet<WordData<'static>>,
+    pub after: DefaultHashSet<WordData<'static>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

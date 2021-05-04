@@ -3,7 +3,7 @@
 use crate::properties::*;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, tokenizer::Tokenizer, Error};
+use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, Error};
 use fs_err::File;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ impl Default for RulesLangOptions {
 }
 
 /// A set of grammatical error correction rules.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Rules {
     pub(crate) rules: Vec<Rule>,
     #[serde(skip)]
@@ -52,6 +52,56 @@ impl Suggest for Rules {
                 .map(|rule| rule.compute_properties())
                 .collect()
         })
+    }
+
+    fn suggest(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, crate::properties::Error> {
+        let sentence = MatchSentence::new(sentence, self.property_guard(sentence)?);
+
+        let mut output: Vec<(usize, Suggestion)> = self
+            .rules
+            .maybe_par_iter()
+            .enumerate()
+            .filter(|(_, rule)| rule.enabled())
+            .map(|(i, rule)| {
+                let mut output = Vec::new();
+
+                for suggestion in rule.apply(&sentence) {
+                    match suggestion {
+                        Ok(suggestion) => output.push((i, suggestion)),
+                        Err(err) => return Err(err),
+                    }
+                }
+
+                Ok(output)
+            })
+            .collect::<Result<Vec<Vec<_>>, crate::properties::Error>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        output.sort_by(|(ia, a), (ib, b)| {
+            a.span()
+                .char()
+                .start
+                .cmp(&b.span().char().start)
+                .then_with(|| ib.cmp(ia))
+        });
+
+        let mut mask = vec![false; sentence.text().chars().count()];
+
+        Ok(output
+            .into_iter()
+            .filter_map(|(_, suggestion)| {
+                let span = suggestion.span().clone().lshift(sentence.span().start());
+
+                if mask[span.char().clone()].iter().all(|x| !x) {
+                    mask[span.char().clone()].iter_mut().for_each(|x| *x = true);
+                    Some(suggestion)
+                } else {
+                    None
+                }
+            })
+            .collect())
     }
 }
 
@@ -102,106 +152,6 @@ impl Rules {
             selector: Some(selector),
         }
     }
-
-    /// Compute the suggestions for the given sentence by checking all rules.
-    pub fn apply(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, crate::properties::Error> {
-        let sentence = MatchSentence::new(sentence, self.property_guard(sentence)?);
-
-        let mut output: Vec<(usize, Suggestion)> = self
-            .rules
-            .maybe_par_iter()
-            .enumerate()
-            .filter(|(_, rule)| rule.enabled())
-            .map(|(i, rule)| {
-                let mut output = Vec::new();
-
-                for suggestion in rule.apply(&sentence) {
-                    match suggestion {
-                        Ok(suggestion) => output.push((i, suggestion)),
-                        Err(err) => return Err(err),
-                    }
-                }
-
-                Ok(output)
-            })
-            .collect::<Result<Vec<Vec<_>>, crate::properties::Error>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        output.sort_by(|(ia, a), (ib, b)| {
-            a.span()
-                .char()
-                .start
-                .cmp(&b.span().char().start)
-                .then_with(|| ib.cmp(ia))
-        });
-
-        let mut mask = vec![false; sentence.text().chars().count()];
-
-        Ok(output
-            .into_iter()
-            .filter_map(|(_, suggestion)| {
-                let span = suggestion.span().clone().lshift(sentence.span().start());
-
-                if mask[span.char().clone()].iter().all(|x| !x) {
-                    mask[span.char().clone()].iter_mut().for_each(|x| *x = true);
-                    Some(suggestion)
-                } else {
-                    None
-                }
-            })
-            .collect())
-    }
-
-    /// Compute the suggestions for a text by checking all rules.
-    pub fn suggest(
-        &self,
-        text: &str,
-        tokenizer: &Tokenizer,
-    ) -> Result<Vec<Suggestion>, crate::properties::Error> {
-        if text.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut suggestions = Vec::new();
-
-        // get suggestions sentence by sentence
-        for sentence in tokenizer.pipe(text) {
-            suggestions.extend(self.apply(&sentence?)?);
-        }
-
-        Ok(suggestions)
-    }
-
-    /// Correct a text by first tokenizing, then finding all suggestions and choosing the first replacement of each suggestion.
-    pub fn correct(
-        &self,
-        text: &str,
-        tokenizer: &Tokenizer,
-    ) -> Result<String, crate::properties::Error> {
-        let suggestions = self.suggest(text, tokenizer)?;
-        Ok(apply_suggestions(text, &suggestions))
-    }
-}
-
-/// Correct a text by applying suggestions to it.
-/// In the case of multiple possible replacements, always chooses the first one.
-pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
-    let mut offset: isize = 0;
-    let mut chars: Vec<_> = text.chars().collect();
-
-    for suggestion in suggestions {
-        let replacement: Vec<_> = suggestion.replacements()[0].chars().collect();
-        chars.splice(
-            (suggestion.span().char().start as isize + offset) as usize
-                ..(suggestion.span().char().end as isize + offset) as usize,
-            replacement.iter().cloned(),
-        );
-        offset = offset + replacement.len() as isize - suggestion.span().char().len() as isize;
-    }
-
-    chars.into_iter().collect()
 }
 
 /// An iterator over references to rules.

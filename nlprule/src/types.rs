@@ -185,13 +185,18 @@ impl<'a, 't> Iterator for TagIter<'a, 't> {
 /// the text itself and the [WordData]s associated with the word.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Tags<'t> {
+    id: WordId<'t>,
     tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Tags<'t> {
     /// Creates new [Tags].
-    pub fn new(tags: Vec<WordData<'t>>) -> Self {
-        Tags { tags }
+    pub fn new(id: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
+        Tags { id, tags }
+    }
+
+    pub fn id(&self) -> &WordId<'t> {
+        &self.id
     }
 
     /// Multiple pairs of (lemma, part-of-speech) associated with this token.
@@ -227,30 +232,16 @@ impl<'t> Tags<'t> {
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
     pub fn into_static(self) -> Tags<'static> {
         Tags {
+            id: self.id.into_static(),
             tags: self.tags.into_iter().map(|x| x.into_static()).collect(),
         }
     }
 }
 
-lazy_static! {
-    pub(crate) static ref SENT_START: Token<'static> = Token {
-        text: WordId::empty(),
-        span: Span::default(),
-        is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
-        is_sentence_end: false,
-        has_space_before: false,
-        tags: Some(Tags::new(vec![WordData::new(
-            WordId::empty(),
-            PosId::special(SpecialPos::SentStart),
-        )],)),
-        chunks: Some(Vec::new()),
-    };
-}
-
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'t> {
-    text: WordId<'t>,
+    text: &'t str,
     span: Span,
     is_sentence_start: bool,
     is_sentence_end: bool,
@@ -261,7 +252,7 @@ pub struct Token<'t> {
 
 impl<'t> Token<'t> {
     pub(crate) fn new(
-        text: WordId<'t>,
+        text: &'t str,
         span: Span,
         is_sentence_start: bool,
         is_sentence_end: bool,
@@ -278,17 +269,27 @@ impl<'t> Token<'t> {
         }
     }
 
-    /// Gets the word id for this token.
-    pub fn text(&self) -> &WordId<'t> {
-        &self.text
+    pub(crate) fn sent_start<'a>() -> Token<'a> {
+        Token {
+            text: "",
+            span: Span::default(),
+            is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
+            is_sentence_end: false,
+            has_space_before: false,
+            tags: Some(Tags::new(
+                WordId::empty(),
+                vec![WordData::new(
+                    WordId::empty(),
+                    PosId::special(SpecialPos::SentStart),
+                )],
+            )),
+            chunks: Some(Vec::new()),
+        }
     }
 
     /// Gets the token as string.
     pub fn as_str(&self) -> &'t str {
-        // we know that the token text can never be changed, and it is created
-        // from a slice of the input text, so the `WordId` will always contain
-        // a borrowed Cow.
-        self.text.as_ref_str()
+        self.text
     }
 
     /// The span of this sentence.
@@ -315,19 +316,6 @@ impl<'t> Token<'t> {
     pub fn rshift(mut self, position: Position) -> Self {
         self.span = self.span.rshift(position);
         self
-    }
-
-    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
-    pub fn into_static(self) -> Token<'static> {
-        Token {
-            text: self.text.into_static(),
-            tags: self.tags.map(Tags::into_static),
-            span: self.span,
-            is_sentence_start: self.is_sentence_start,
-            is_sentence_end: self.is_sentence_end,
-            has_space_before: self.has_space_before,
-            chunks: self.chunks,
-        }
     }
 }
 

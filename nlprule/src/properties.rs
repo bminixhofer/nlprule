@@ -3,6 +3,25 @@ use serde::{Deserialize, Serialize};
 use crate::types::*;
 use thiserror::Error;
 
+/// Correct a text by applying suggestions to it.
+/// In the case of multiple possible replacements, always chooses the first one.
+pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
+    let mut offset: isize = 0;
+    let mut chars: Vec<_> = text.chars().collect();
+
+    for suggestion in suggestions {
+        let replacement: Vec<_> = suggestion.replacements()[0].chars().collect();
+        chars.splice(
+            (suggestion.span().char().start as isize + offset) as usize
+                ..(suggestion.span().char().end as isize + offset) as usize,
+            replacement.iter().cloned(),
+        );
+        offset = offset + replacement.len() as isize - suggestion.span().char().len() as isize;
+    }
+
+    chars.into_iter().collect()
+}
+
 pub trait Suggest {
     fn properties(&self) -> Properties {
         Properties::default()
@@ -10,6 +29,34 @@ pub trait Suggest {
 
     fn property_guard(&self, sentence: &Sentence) -> Result<PropertyGuard, Error> {
         self.properties().build(sentence)
+    }
+
+    fn suggest(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, Error>;
+
+    fn correct(&self, sentence: &Sentence) -> Result<String, Error> {
+        let suggestions = self.suggest(sentence)?;
+        Ok(apply_suggestions(sentence.text(), &suggestions))
+    }
+}
+
+impl<'a, T> Suggest for &'a T
+where
+    T: Suggest,
+{
+    fn properties(&self) -> Properties {
+        (*self).properties()
+    }
+
+    fn property_guard(&self, sentence: &Sentence) -> Result<PropertyGuard, Error> {
+        (*self).property_guard(sentence)
+    }
+
+    fn suggest(&self, sentence: &Sentence) -> Result<Vec<Suggestion>, Error> {
+        (*self).suggest(sentence)
+    }
+
+    fn correct(&self, sentence: &Sentence) -> Result<String, Error> {
+        (*self).correct(sentence)
     }
 }
 
@@ -25,8 +72,34 @@ pub trait Transform {
     fn transform<'t>(&'t self, sentence: Sentence<'t>) -> Result<Sentence<'t>, Error>;
 }
 
+impl<'a, T> Transform for &'a T
+where
+    T: Transform,
+{
+    fn properties(&self) -> PropertiesMut {
+        (*self).properties()
+    }
+
+    fn property_guard(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
+        (*self).property_guard(sentence)
+    }
+
+    fn transform<'t>(&'t self, sentence: Sentence<'t>) -> Result<Sentence<'t>, Error> {
+        (*self).transform(sentence)
+    }
+}
+
 pub trait Tokenize {
-    fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>>>;
+    fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't>;
+}
+
+impl<'a, T> Tokenize for &'a T
+where
+    T: Tokenize,
+{
+    fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
+        (*self).tokenize(text)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -63,6 +136,20 @@ impl Bitset {
     pub fn union(mut self, other: Bitset) -> Self {
         self.0 |= other.0;
         self
+    }
+
+    pub fn intersection(mut self, other: Bitset) -> Self {
+        self.0 &= other.0;
+        self
+    }
+
+    pub fn inverse(mut self) -> Self {
+        self.0 = !self.0;
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -162,6 +249,19 @@ impl PropertiesMut {
         self.write_mask = self.write_mask.union(properties.read_mask);
 
         self
+    }
+
+    pub fn chain(mut self, next: PropertiesMut) -> Result<Self, Error> {
+        if !next
+            .read_mask
+            .intersection(self.write_mask.inverse())
+            .is_empty()
+        {
+            unimplemented!()
+        }
+
+        self.write_mask = self.write_mask.union(next.write_mask);
+        Ok(self)
     }
 
     pub fn build(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
@@ -296,33 +396,54 @@ impl PropertyGuardMut {
 
 pub struct Pipeline<T>(T);
 
-// type SentenceIter<'t> = Box<dyn Iterator<Item = Sentence<'t>>>;
+macro_rules! impl_pipeline {
+    ( $first:ident, $last:ident, $($name:ident),*) => {
+        impl<$first: Tokenize, $($name: Transform,)* $last: Transform> Tokenize for Pipeline<($first, $($name,)* $last)> {
+            #[allow(non_snake_case)]
+            fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
+                let (ref $first, $(ref $name,)* ref $last) = self.0;
+                let sentences = $first.tokenize(text).map(move |mut sentence| {
+                    $(sentence = $name.transform(sentence).unwrap();)*
+                    sentence = $last.transform(sentence).unwrap();
+                    sentence
+                });
 
-// macro_rules! impl_pipeline {
-//     ( $first:ident, $($name:ident),+) => {
-//         impl<$first: Tokenize, $($name: Transform,)+> Tokenize for Pipeline<($first, $($name,)+)> {
-//             #[allow(non_snake_case)]
-//             fn tokenize<'t>(&'t self, text: &'t str) -> SentenceIter<'t> {
-//                 let (ref $first, $(ref $name),+) = self.0;
-//                 let sentences = $first.tokenize(text);
-//                 $(let sentences = $name.transform(sentences);)+
-//                 sentences
-//             }
-//         }
+                Box::new(sentences)
+            }
+        }
 
-//         impl<$first: Transform, $($name: Transform,)+> Transform for Pipeline<($first, $($name,)+)> {
-//             #[allow(non_snake_case)]
-//             fn transform<'t>(&'t self, sentences: SentenceIter<'t>) -> SentenceIter<'t> {
-//                 let (ref $first, $(ref $name),+) = self.0;
-//                 let sentences = $first.transform(sentences);
-//                 $(let sentences = $name.transform(sentences);)+
-//                 sentences
-//             }
-//         }
-//     };
-// }
+        impl<$first: Transform, $($name: Transform,)* $last: Transform> Transform for Pipeline<($first, $($name,)* $last)> {
+            #[allow(non_snake_case)]
+            fn transform<'t>(&'t self, mut sentence: Sentence<'t>) -> Result<Sentence<'t>, crate::properties::Error> {
+                let (ref $first, $(ref $name,)* ref $last) = self.0;
+                sentence = $first.transform(sentence)?;
+                $(sentence = $name.transform(sentence)?;)*
+                sentence = $last.transform(sentence)?;
+                Ok(sentence)
+            }
+        }
 
-// impl_pipeline! { A, B }
-// impl_pipeline! { A, B, C }
-// impl_pipeline! { A, B, C, D }
-// impl_pipeline! { A, B, C, D, E }
+        impl<$first: Tokenize, $($name: Transform,)* $last: Suggest> Pipeline<($first, $($name,)* $last)> {
+            pub fn new(components: ($first,  $($name,)* $last)) -> Self {
+                Pipeline(components)
+            }
+
+            #[allow(non_snake_case)]
+            pub fn suggest<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Vec<Suggestion>> + 't {
+                let (ref $first, $(ref $name,)* ref $last) = self.0;
+                #[allow(unused_mut)]
+                let sentences = $first.tokenize(text).map(move |mut sentence| {
+                    $(sentence = $name.transform(sentence).unwrap();)*
+                    $last.suggest(&sentence).unwrap()
+                });
+
+                sentences
+            }
+        }
+    };
+}
+
+impl_pipeline! { A, B, }
+impl_pipeline! { A, C, B  }
+impl_pipeline! { A, D, B, C }
+impl_pipeline! { A, E, B, C, D }

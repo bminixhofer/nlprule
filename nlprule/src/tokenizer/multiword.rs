@@ -63,7 +63,7 @@ impl Transform for MultiwordTagger {
             .enumerate()
             .map(|(i, x)| {
                 start_indices.insert(byte_index, i);
-                byte_index += x.text().0.len();
+                byte_index += x.as_str().len();
                 end_indices.insert(byte_index, i);
                 byte_index += " ".len();
 

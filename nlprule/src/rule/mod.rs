@@ -233,7 +233,7 @@ impl DisambiguationRule {
             let sentence_before = tokenizer
                 .disambiguate_up_to_id(
                     tokenizer
-                        .tokenize(text)
+                        .tokenize_sentence(text)
                         .expect("test text must not be empty"),
                     Some(&self.id),
                 )
@@ -529,7 +529,7 @@ impl Rule {
             let sentence = tokenizer
                 .disambiguate(
                     tokenizer
-                        .tokenize(&test.text())
+                        .tokenize_sentence(&test.text())
                         .expect("test text must not be empty."),
                 )
                 .unwrap()

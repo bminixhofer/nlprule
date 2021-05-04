@@ -910,7 +910,7 @@ fn parse_tag_form(
     form: &str,
     is_sentence_end: bool,
     info: &mut BuildInfo,
-) -> Result<Tags<'static>, Error> {
+) -> Result<DefaultHashSet<WordData<'static>>, Error> {
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]".into());
     }
@@ -922,7 +922,7 @@ fn parse_tag_form(
     let text = captures.get(1).expect("1st regex group exists").as_str();
     let tags = captures.get(2).expect("2nd regex group exists").as_str();
 
-    let mut tag_vec: Vec<_> = tags
+    let mut tags: DefaultHashSet<_> = tags
         .split(',')
         .filter_map(|x| {
             if x == "</S>" {
@@ -942,7 +942,7 @@ fn parse_tag_form(
         })
         .collect();
 
-    tag_vec.push(
+    tags.insert(
         WordData::new(
             info.tagger.id_word(text.to_owned().into()),
             PosId::special(SpecialPos::None),
@@ -951,10 +951,8 @@ fn parse_tag_form(
     );
 
     if is_sentence_end {
-        tag_vec.push(WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze());
+        tags.insert(WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze());
     }
-
-    let tags = Tags::new(tag_vec);
 
     Ok(tags)
 }
