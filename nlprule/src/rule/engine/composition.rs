@@ -464,22 +464,17 @@ impl GraphId {
 #[derive(Debug, Clone)]
 pub struct MatchSentence<'t> {
     sentence: &'t Sentence<'t>,
-    sent_start: Token<'t>,
     guard: PropertyGuard,
 }
 
 impl<'t> MatchSentence<'t> {
     pub fn new(sentence: &'t Sentence<'t>, guard: PropertyGuard) -> Self {
-        MatchSentence {
-            sentence,
-            sent_start: Token::sent_start(),
-            guard,
-        }
+        MatchSentence { sentence, guard }
     }
 
     pub fn index(&self, index: usize) -> &Token {
         match index {
-            0 => &self.sent_start,
+            0 => &crate::types::SENT_START,
             i => &self.sentence.tokens()[i - 1],
         }
     }

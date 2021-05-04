@@ -224,8 +224,8 @@ impl Disambiguation {
 pub struct DisambiguationChange {
     pub text: String,
     pub char_span: Range<usize>,
-    pub before: DefaultHashSet<WordData<'static>>,
-    pub after: DefaultHashSet<WordData<'static>>,
+    pub before: Tags<'static>,
+    pub after: Tags<'static>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

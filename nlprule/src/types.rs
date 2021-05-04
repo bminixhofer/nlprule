@@ -238,6 +238,24 @@ impl<'t> Tags<'t> {
     }
 }
 
+lazy_static! {
+    pub(crate) static ref SENT_START: Token<'static> = Token {
+        text: "",
+        span: Span::default(),
+        is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
+        is_sentence_end: false,
+        has_space_before: false,
+        tags: Some(Tags::new(
+            WordId::empty(),
+            vec![WordData::new(
+                WordId::empty(),
+                PosId::special(SpecialPos::SentStart),
+            )],
+        )),
+        chunks: Some(Vec::new()),
+    };
+}
+
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'t> {
@@ -266,24 +284,6 @@ impl<'t> Token<'t> {
             has_space_before,
             tags: None,
             chunks: None,
-        }
-    }
-
-    pub(crate) fn sent_start<'a>() -> Token<'a> {
-        Token {
-            text: "",
-            span: Span::default(),
-            is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
-            is_sentence_end: false,
-            has_space_before: false,
-            tags: Some(Tags::new(
-                WordId::empty(),
-                vec![WordData::new(
-                    WordId::empty(),
-                    PosId::special(SpecialPos::SentStart),
-                )],
-            )),
-            chunks: Some(Vec::new()),
         }
     }
 

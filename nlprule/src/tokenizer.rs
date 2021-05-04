@@ -13,6 +13,7 @@ use crate::{
     Error,
 };
 use fs_err::File;
+use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -164,25 +165,32 @@ pub struct Tokenizer {
     pub(crate) properties: OnceCell<PropertiesMut>,
 }
 
-impl Transform for Tokenizer {
-    fn properties(&self) -> PropertiesMut {
-        *self.properties.get_or_init(|| {
-            self.rules
-                .iter()
-                .map(|rule| rule.compute_properties())
-                .collect()
-        })
-    }
+// impl Transform for Tokenizer {
+//     fn properties(&self) -> PropertiesMut {
+//         *self.properties.get_or_init(|| {
+//             self.rules
+//                 .iter()
+//                 .map(|rule| rule.compute_properties())
+//                 .collect()
+//         })
+//     }
 
-    fn transform<'t>(
-        &'t self,
-        _sentence: Sentence<'t>,
-    ) -> Result<Sentence<'t>, crate::properties::Error> {
-        unimplemented!()
-    }
-}
+//     fn transform<'t>(
+//         &'t self,
+//         _sentence: Sentence<'t>,
+//     ) -> Result<Sentence<'t>, crate::properties::Error> {
+//         unimplemented!()
+//     }
+// }
 
 impl Tokenize for Tokenizer {
+    fn properties(&self) -> PropertiesMut {
+        lazy_static! {
+            static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
+        }
+        *PROPERTIES
+    }
+
     fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
         Box::new(SentenceIter {
             text,
@@ -384,14 +392,6 @@ impl Tokenizer {
         let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
 
         sentence = self.tagger.transform(sentence).unwrap();
-
-        if let Some(chunker) = &self.chunker {
-            sentence = chunker.transform(sentence).unwrap();
-        }
-
-        if let Some(multiword_tagger) = &self.multiword_tagger {
-            sentence = multiword_tagger.transform(sentence).unwrap();
-        }
 
         Some(sentence)
     }

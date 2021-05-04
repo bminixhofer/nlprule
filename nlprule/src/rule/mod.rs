@@ -282,11 +282,7 @@ impl DisambiguationRule {
                         after.tags().unwrap().iter().collect::<HashSet<&WordData>>();
                     let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
 
-                    let pass = unordered_tags == unordered_tags_change;
-                    if !pass {
-                        println!("{:#?} ---- {:#?}", unordered_tags, unordered_tags_change);
-                    }
-                    pass
+                    unordered_tags == unordered_tags_change
                 }
             };
 

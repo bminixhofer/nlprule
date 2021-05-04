@@ -14,9 +14,10 @@ lazy_static! {
 
 #[test]
 fn can_tokenize_empty_text() {
-    let tokenizer = Pipeline::<(&Tokenizer, &Rules)>::new((&TOKENIZER, &RULES));
+    let tokenizer =
+        Pipeline::new((&*TOKENIZER, TOKENIZER.chunker().as_ref().unwrap(), &*RULES)).unwrap();
 
-    // let sentences: Vec<_> = TOKENIZER.pipe("").collect();
+    let sentences: Vec<_> = tokenizer.suggest("His homework is due tomorrow.").collect();
     // assert!(sentences.is_empty());
 }
 

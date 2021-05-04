@@ -90,6 +90,14 @@ where
 }
 
 pub trait Tokenize {
+    fn properties(&self) -> PropertiesMut {
+        PropertiesMut::default()
+    }
+
+    fn property_guard(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
+        self.properties().build(sentence)
+    }
+
     fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't>;
 }
 
@@ -97,6 +105,14 @@ impl<'a, T> Tokenize for &'a T
 where
     T: Tokenize,
 {
+    fn properties(&self) -> PropertiesMut {
+        (*self).properties()
+    }
+
+    fn property_guard(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
+        (*self).property_guard(sentence)
+    }
+
     fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
         (*self).tokenize(text)
     }
@@ -105,8 +121,10 @@ where
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("unset token property: {0:?}")]
+    #[error("unset token property: {0:?}.")]
     Unset(Property),
+    #[error("invalid pipeline: properties {0:?} are read without being written.")]
+    InvalidPipeline(Vec<Property>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,6 +168,16 @@ impl Bitset {
 
     pub fn is_empty(&self) -> bool {
         self.0 == 0
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
+        Property::properties().iter().filter_map(move |property| {
+            if self.contains(property) {
+                Some(*property)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -252,12 +280,11 @@ impl PropertiesMut {
     }
 
     pub fn chain(mut self, next: PropertiesMut) -> Result<Self, Error> {
-        if !next
-            .read_mask
-            .intersection(self.write_mask.inverse())
-            .is_empty()
-        {
-            unimplemented!()
+        let next_reads = next.read_mask.intersection(next.write_mask.inverse());
+        let invalid_reads = next_reads.intersection(self.write_mask.inverse());
+
+        if !invalid_reads.is_empty() {
+            return Err(Error::InvalidPipeline(invalid_reads.iter().collect()));
         }
 
         self.write_mask = self.write_mask.union(next.write_mask);
@@ -396,6 +423,11 @@ impl PropertyGuardMut {
 
 pub struct Pipeline<T>(T);
 
+#[allow(clippy::new_ret_no_self)]
+pub trait CreatePipe<T> {
+    fn new(components: T) -> Result<Pipeline<T>, Error>;
+}
+
 macro_rules! impl_pipeline {
     ( $first:ident, $last:ident, $($name:ident),*) => {
         impl<$first: Tokenize, $($name: Transform,)* $last: Transform> Tokenize for Pipeline<($first, $($name,)* $last)> {
@@ -423,15 +455,24 @@ macro_rules! impl_pipeline {
             }
         }
 
-        impl<$first: Tokenize, $($name: Transform,)* $last: Suggest> Pipeline<($first, $($name,)* $last)> {
-            pub fn new(components: ($first,  $($name,)* $last)) -> Self {
-                Pipeline(components)
-            }
+        impl<$first: Tokenize, $($name: Transform,)* $last: Suggest> CreatePipe<($first, $($name,)* $last)> for Pipeline<($first, $($name,)* $last)> {
+            #[allow(non_snake_case, unused_mut)]
+            fn new(components: ($first,  $($name,)* $last)) -> Result<Self, Error> {
+                let (ref $first, $(ref $name,)* ref $last) = components;
 
-            #[allow(non_snake_case)]
+                let mut properties = PropertiesMut::default().chain($first.properties())?;
+                $(properties = properties.chain($name.properties())?;)*
+                properties.chain($last.properties().write(&[]))?;
+
+                Ok(Pipeline(components))
+            }
+        }
+
+        impl<$first: Tokenize, $($name: Transform,)* $last: Suggest> Pipeline<($first, $($name,)* $last)> {
+            #[allow(non_snake_case, unused_mut)]
             pub fn suggest<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Vec<Suggestion>> + 't {
                 let (ref $first, $(ref $name,)* ref $last) = self.0;
-                #[allow(unused_mut)]
+
                 let sentences = $first.tokenize(text).map(move |mut sentence| {
                     $(sentence = $name.transform(sentence).unwrap();)*
                     $last.suggest(&sentence).unwrap()
