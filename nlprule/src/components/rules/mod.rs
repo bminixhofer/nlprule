@@ -1,47 +1,111 @@
-//! Sets of grammatical error correction rules.
+use serde::{Deserialize, Serialize};
+use std::iter::FromIterator;
+
+use fs_err::File;
 
 use crate::properties::*;
+use crate::rule::Rule;
 use crate::types::*;
 use crate::utils::parallelism::MaybeParallelRefIterator;
-use crate::{rule::id::Selector, rule::MatchSentence, rule::Rule, Error};
-use fs_err::File;
-use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
-use std::{
-    io::{BufReader, Read, Write},
-    iter::FromIterator,
-    path::Path,
+use crate::{
+    properties::Transform,
+    rule::{
+        id::{Index, Selector},
+        DisambiguationRule, MatchSentence,
+    },
+    types::Sentence,
 };
+use once_cell::sync::OnceCell;
 
-/// Language-dependent options for a rule set.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RulesLangOptions {
-    /// Whether to allow errors while constructing the rules.
-    pub allow_errors: bool,
-    /// Grammar Rule selectors to use in this set.
-    #[serde(default)]
-    pub ids: Vec<Selector>,
-    /// Grammar Rule selectors to ignore in this set.
-    #[serde(default)]
-    pub ignore_ids: Vec<Selector>,
+use super::Component;
+
+mod compile;
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Disambiguator {
+    rules: Vec<DisambiguationRule>,
 }
 
-impl Default for RulesLangOptions {
-    fn default() -> Self {
-        RulesLangOptions {
-            allow_errors: true,
-            ids: Vec::new(),
-            ignore_ids: Vec::new(),
+impl Transform for Disambiguator {
+    fn transform<'t>(
+        &'t self,
+        sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        self.disambiguate_up_to_id(sentence, None)
+    }
+}
+
+impl Component for Disambiguator {
+    fn name() -> &'static str {
+        "disambiguator"
+    }
+}
+
+impl Disambiguator {
+    /// Gets all disambigation rules in the order they are applied.
+    pub fn rules(&self) -> &[DisambiguationRule] {
+        &self.rules
+    }
+
+    pub(crate) fn disambiguate_up_to_id<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+        id: Option<&Index>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        let n = id.map_or(self.rules.len(), |id| {
+            self.rules.iter().position(|x| x.id == *id).unwrap()
+        });
+        let mut i = 0;
+
+        let guard = self.property_guard(&mut sentence)?;
+
+        while i < n {
+            let match_sentence = MatchSentence::new(&sentence, guard.downgrade());
+
+            let result = self.rules[i..n]
+                .maybe_par_iter()
+                .enumerate()
+                .filter_map(|(j, rule)| {
+                    let changes = rule.apply(&match_sentence);
+
+                    match changes {
+                        Ok(changes) => {
+                            if changes.is_empty() {
+                                None
+                            } else {
+                                Some(Ok((j + i, changes)))
+                            }
+                        }
+                        Err(err) => Some(Err(err)),
+                    }
+                })
+                .find_first(|_| true)
+                .transpose()?;
+
+            if let Some((index, changes)) = result {
+                self.rules[index].change(&mut sentence, changes, guard)?;
+                i = index + 1;
+            } else {
+                i = n;
+            }
         }
+
+        Ok(sentence)
     }
 }
 
 /// A set of grammatical error correction rules.
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Rules {
-    pub(crate) rules: Vec<Rule>,
+    rules: Vec<Rule>,
     #[serde(skip)]
-    pub(crate) properties: OnceCell<Properties>,
+    properties: OnceCell<Properties>,
+}
+
+impl Component for Rules {
+    fn name() -> &'static str {
+        "rules"
+    }
 }
 
 impl Suggest for Rules {
@@ -106,27 +170,6 @@ impl Suggest for Rules {
 }
 
 impl Rules {
-    /// Creates a new rule set from a path to a binary.
-    ///
-    /// # Errors
-    /// - If the file can not be opened.
-    /// - If the file content can not be deserialized to a rules set.
-    pub fn new<P: AsRef<Path>>(p: P) -> Result<Self, Error> {
-        let reader = BufReader::new(File::open(p.as_ref())?);
-        let rules: Rules = bincode::deserialize_from(reader)?;
-        Ok(rules)
-    }
-
-    /// Creates a new rules set from a reader.
-    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
-        Ok(bincode::deserialize_from(reader)?)
-    }
-
-    /// Serializes this rules set to a writer.
-    pub fn to_writer<W: Write>(&self, writer: W) -> Result<(), Error> {
-        Ok(bincode::serialize_into(writer, &self)?)
-    }
-
     /// All rules ordered by priority.
     pub fn rules(&self) -> &[Rule] {
         &self.rules

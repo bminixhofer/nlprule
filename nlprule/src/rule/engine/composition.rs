@@ -1,6 +1,6 @@
 use std::iter;
 
-use crate::{properties::*, tokenizer::tag::Tagger, types::*, utils::regex::Regex};
+use crate::{components::tagger::Tagger, properties::*, types::*, utils::regex::Regex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};

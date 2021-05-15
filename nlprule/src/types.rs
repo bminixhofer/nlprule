@@ -1,8 +1,7 @@
 //! Fundamental types used by this crate.
 
-use crate::tokenizer::tag::Tagger;
-pub use crate::tokenizer::tag::{PosId, WordId};
-pub(crate) use crate::tokenizer::tag::{PosIdInt, SpecialPos, WordIdInt};
+use crate::components::tagger::Tagger;
+pub(crate) use crate::components::tagger::{PosId, PosIdInt, SpecialPos, WordId, WordIdInt};
 use derivative::Derivative;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};

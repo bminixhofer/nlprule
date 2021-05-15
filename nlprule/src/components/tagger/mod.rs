@@ -3,7 +3,6 @@
 use crate::{properties::*, types::*, utils::parallelism::MaybeParallelRefIterator};
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
-use lazy_static::lazy_static;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,6 +11,8 @@ use std::{
     fmt,
     iter::{once, FusedIterator},
 };
+
+mod compile;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
@@ -548,58 +549,10 @@ impl<'a> ExactSizeIterator for TagIter<'a> {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
-    pub(crate) tag_store: BiMap<String, PosIdInt>,
-    pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) lang_options: TaggerLangOptions,
-}
-
-impl Transform for Tagger {
-    fn properties(&self) -> PropertiesMut {
-        lazy_static! {
-            static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
-        }
-        *PROPERTIES
-    }
-
-    fn transform<'t>(
-        &'t self,
-        mut sentence: Sentence<'t>,
-    ) -> Result<Sentence<'t>, crate::properties::Error> {
-        let props = self.property_guard(&mut sentence)?;
-
-        for token in sentence.iter_mut() {
-            let mut tag_vec: Vec<_> = self
-                .get_tags_with_options(
-                    token.as_str(),
-                    if token.is_sentence_start() {
-                        Some(true)
-                    } else {
-                        None
-                    },
-                    None,
-                )
-                .collect();
-
-            tag_vec.push(
-                WordData::new(
-                    self.id_word(token.as_str().into()),
-                    PosId::special(SpecialPos::None),
-                )
-                .freeze(),
-            );
-
-            if token.is_sentence_end() {
-                tag_vec.push(
-                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
-                );
-            }
-
-            *props.tags_mut(token)? = Tags::new(self.id_word(token.as_str().into()), tag_vec);
-        }
-
-        Ok(sentence)
-    }
+    tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
+    tag_store: BiMap<String, PosIdInt>,
+    word_store: BiMap<String, WordIdInt>,
+    lang_options: TaggerLangOptions,
 }
 
 impl Tagger {
@@ -786,5 +739,43 @@ impl Tagger {
     /// * `word`: The word to lookup data for.
     pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
+    }
+
+    pub fn transform<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+        guard: PropertyGuardMut,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        for token in sentence.iter_mut() {
+            let mut tag_vec: Vec<_> = self
+                .get_tags_with_options(
+                    token.as_str(),
+                    if token.is_sentence_start() {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    None,
+                )
+                .collect();
+
+            tag_vec.push(
+                WordData::new(
+                    self.id_word(token.as_str().into()),
+                    PosId::special(SpecialPos::None),
+                )
+                .freeze(),
+            );
+
+            if token.is_sentence_end() {
+                tag_vec.push(
+                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
+                );
+            }
+
+            *guard.tags_mut(token)? = Tags::new(self.id_word(token.as_str().into()), tag_vec);
+        }
+
+        Ok(sentence)
     }
 }

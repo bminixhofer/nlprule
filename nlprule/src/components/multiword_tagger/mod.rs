@@ -6,9 +6,13 @@ use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
+use super::Component;
+
+mod compile;
+
 #[derive(Serialize, Deserialize)]
-pub(crate) struct MultiwordTaggerFields {
-    pub(crate) multiwords: Vec<(String, PosId<'static>)>,
+struct MultiwordTaggerFields {
+    multiwords: Vec<(String, PosId<'static>)>,
 }
 
 impl From<MultiwordTaggerFields> for MultiwordTagger {
@@ -87,5 +91,11 @@ impl Transform for MultiwordTagger {
         }
 
         Ok(sentence)
+    }
+}
+
+impl Component for MultiwordTagger {
+    fn name() -> &'static str {
+        "multiword_tagger"
     }
 }

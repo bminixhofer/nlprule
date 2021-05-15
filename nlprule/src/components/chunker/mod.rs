@@ -1,5 +1,7 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
+mod compile;
+
 use half::bf16;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -8,6 +10,8 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 
 use crate::properties::*;
 use crate::types::{DefaultHashMap, DefaultHasher, Sentence};
+
+use super::Component;
 
 fn softmax(vec: &mut Vec<f32>) {
     for x in vec.iter_mut() {
@@ -816,5 +820,11 @@ impl Transform for Chunker {
         }
 
         Ok(sentence)
+    }
+}
+
+impl Component for Chunker {
+    fn name() -> &'static str {
+        "chunker"
     }
 }

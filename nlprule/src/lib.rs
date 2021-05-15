@@ -71,18 +71,13 @@ use std::io;
 
 use thiserror::Error;
 
-#[cfg(feature = "compile")]
 pub mod compile;
+pub mod components;
 mod filter;
 pub mod properties;
 pub mod rule;
-pub mod rules;
-pub mod tokenizer;
 pub mod types;
 pub(crate) mod utils;
-
-pub use rules::Rules;
-pub use tokenizer::Tokenizer;
 
 #[derive(Error, Debug)]
 #[allow(missing_docs)]

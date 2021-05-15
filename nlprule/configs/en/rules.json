@@ -1,7 +1,0 @@
-{
-    "allow_errors": false,
-    "ignore_ids": [
-        "GRAMMAR/PRP_MD_NN/2",
-        "TYPOS/VERB_APOSTROPHE_S/3"
-    ]
-}

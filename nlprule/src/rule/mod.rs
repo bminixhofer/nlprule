@@ -3,7 +3,6 @@
 use crate::{
     filter::{Filter, Filterable},
     properties::*,
-    tokenizer::Tokenizer,
     types::*,
     utils,
 };
@@ -218,96 +217,96 @@ impl DisambiguationRule {
         Ok(())
     }
 
-    /// Often there are examples associated with a rule.
-    /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
-        let mut passes = Vec::new();
+    // /// Often there are examples associated with a rule.
+    // /// This method checks whether the correct action is taken in the examples.
+    // pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
+    //     let mut passes = Vec::new();
 
-        for (i, test) in self.examples.iter().enumerate() {
-            let text = match test {
-                disambiguation::DisambiguationExample::Unchanged(x) => x.as_str(),
-                disambiguation::DisambiguationExample::Changed(x) => x.text.as_str(),
-            };
+    //     for (i, test) in self.examples.iter().enumerate() {
+    //         let text = match test {
+    //             disambiguation::DisambiguationExample::Unchanged(x) => x.as_str(),
+    //             disambiguation::DisambiguationExample::Changed(x) => x.text.as_str(),
+    //         };
 
-            // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence_before = tokenizer
-                .disambiguate_up_to_id(
-                    tokenizer
-                        .tokenize_sentence(text)
-                        .expect("test text must not be empty"),
-                    Some(&self.id),
-                )
-                .unwrap();
+    //         // by convention examples are always considered as one sentence even if the sentencizer would split
+    //         let sentence_before = tokenizer
+    //             .disambiguate_up_to_id(
+    //                 tokenizer
+    //                     .tokenize_sentence(text)
+    //                     .expect("test text must not be empty"),
+    //                 Some(&self.id),
+    //             )
+    //             .unwrap();
 
-            // shift the sentence to the right before matching to make sure
-            // nothing assumes the sentene starts from absolute index zero
-            let shift_delta = Position { byte: 1, char: 1 };
-            let mut sentence_before_complete = sentence_before.clone().rshift(shift_delta);
+    //         // shift the sentence to the right before matching to make sure
+    //         // nothing assumes the sentene starts from absolute index zero
+    //         let shift_delta = Position { byte: 1, char: 1 };
+    //         let mut sentence_before_complete = sentence_before.clone().rshift(shift_delta);
 
-            let guard = self
-                .compute_properties()
-                .build(&mut sentence_before_complete)?;
+    //         let guard = self
+    //             .compute_properties()
+    //             .build(&mut sentence_before_complete)?;
 
-            let changes = self
-                .apply(&MatchSentence::new(
-                    &sentence_before_complete,
-                    guard.downgrade(),
-                ))
-                .unwrap()
-                .lshift(shift_delta);
-            let mut sentence_after = sentence_before.clone();
+    //         let changes = self
+    //             .apply(&MatchSentence::new(
+    //                 &sentence_before_complete,
+    //                 guard.downgrade(),
+    //             ))
+    //             .unwrap()
+    //             .lshift(shift_delta);
+    //         let mut sentence_after = sentence_before.clone();
 
-            if !changes.is_empty() {
-                self.change(&mut sentence_after, changes, guard).unwrap();
-            }
+    //         if !changes.is_empty() {
+    //             self.change(&mut sentence_after, changes, guard).unwrap();
+    //         }
 
-            info!("Tokens: {:#?}", sentence_before);
+    //         info!("Tokens: {:#?}", sentence_before);
 
-            let pass = match test {
-                disambiguation::DisambiguationExample::Unchanged(_) => {
-                    sentence_before == sentence_after
-                }
-                disambiguation::DisambiguationExample::Changed(change) => {
-                    let _before = sentence_before
-                        .iter()
-                        .find(|x| *x.span().char() == change.char_span)
-                        .unwrap();
+    //         let pass = match test {
+    //             disambiguation::DisambiguationExample::Unchanged(_) => {
+    //                 sentence_before == sentence_after
+    //             }
+    //             disambiguation::DisambiguationExample::Changed(change) => {
+    //                 let _before = sentence_before
+    //                     .iter()
+    //                     .find(|x| *x.span().char() == change.char_span)
+    //                     .unwrap();
 
-                    let after = sentence_after
-                        .iter()
-                        .find(|x| *x.span().char() == change.char_span)
-                        .unwrap();
+    //                 let after = sentence_after
+    //                     .iter()
+    //                     .find(|x| *x.span().char() == change.char_span)
+    //                     .unwrap();
 
-                    let unordered_tags =
-                        after.tags().unwrap().iter().collect::<HashSet<&WordData>>();
-                    let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
+    //                 let unordered_tags =
+    //                     after.tags().unwrap().iter().collect::<HashSet<&WordData>>();
+    //                 let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
 
-                    unordered_tags == unordered_tags_change
-                }
-            };
+    //                 unordered_tags == unordered_tags_change
+    //             }
+    //         };
 
-            if !pass {
-                let error_str = format!(
-                    "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
-                    self.id, test, sentence_before, sentence_after,
-                );
+    //         if !pass {
+    //             let error_str = format!(
+    //                 "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
+    //                 self.id, test, sentence_before, sentence_after,
+    //             );
 
-                if tokenizer
-                    .lang_options()
-                    .known_failures
-                    .contains(&format!("{}:{}", self.id, i))
-                {
-                    warn!("{}", error_str)
-                } else {
-                    error!("{}", error_str)
-                }
-            }
+    //             if tokenizer
+    //                 .lang_options()
+    //                 .known_failures
+    //                 .contains(&format!("{}:{}", self.id, i))
+    //             {
+    //                 warn!("{}", error_str)
+    //             } else {
+    //                 error!("{}", error_str)
+    //             }
+    //         }
 
-            passes.push(pass);
-        }
+    //         passes.push(pass);
+    //     }
 
-        Ok(passes.iter().all(|x| *x))
-    }
+    //     Ok(passes.iter().all(|x| *x))
+    // }
 }
 
 /// An iterator over [Suggestion][crate::types::Suggestion]s.
@@ -510,60 +509,60 @@ impl Rule {
         }
     }
 
-    /// Grammar rules always have at least one example associated with them.
-    /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
-        let mut passes = Vec::new();
+    // /// Grammar rules always have at least one example associated with them.
+    // /// This method checks whether the correct action is taken in the examples.
+    // pub fn test(&self, tokenizer: &Tokenizer) -> Result<bool, crate::properties::Error> {
+    //     let mut passes = Vec::new();
 
-        // make sure relative position is handled correctly
-        // shifting the entire sentence must be a no-op as far as the matcher is concerned
-        // if the suggestions are shifted back
-        let shift_delta = Position { byte: 1, char: 1 };
+    //     // make sure relative position is handled correctly
+    //     // shifting the entire sentence must be a no-op as far as the matcher is concerned
+    //     // if the suggestions are shifted back
+    //     let shift_delta = Position { byte: 1, char: 1 };
 
-        for test in self.examples.iter() {
-            // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence = tokenizer
-                .disambiguate(
-                    tokenizer
-                        .tokenize_sentence(&test.text())
-                        .expect("test text must not be empty."),
-                )
-                .unwrap()
-                .rshift(shift_delta);
+    //     for test in self.examples.iter() {
+    //         // by convention examples are always considered as one sentence even if the sentencizer would split
+    //         let sentence = tokenizer
+    //             .disambiguate(
+    //                 tokenizer
+    //                     .tokenize_sentence(&test.text())
+    //                     .expect("test text must not be empty."),
+    //             )
+    //             .unwrap()
+    //             .rshift(shift_delta);
 
-            info!("Sentence: {:#?}", sentence);
-            let suggestions: Vec<_> = self
-                .apply(&MatchSentence::new(
-                    &sentence,
-                    self.compute_properties().build(&sentence)?,
-                ))
-                .map(|s| s.unwrap().lshift(shift_delta))
-                .collect();
+    //         info!("Sentence: {:#?}", sentence);
+    //         let suggestions: Vec<_> = self
+    //             .apply(&MatchSentence::new(
+    //                 &sentence,
+    //                 self.compute_properties().build(&sentence)?,
+    //             ))
+    //             .map(|s| s.unwrap().lshift(shift_delta))
+    //             .collect();
 
-            let pass = if suggestions.len() > 1 {
-                false
-            } else {
-                match test.suggestion() {
-                    Some(correct_suggestion) => {
-                        suggestions.len() == 1 && correct_suggestion == &suggestions[0]
-                    }
-                    None => suggestions.is_empty(),
-                }
-            };
+    //         let pass = if suggestions.len() > 1 {
+    //             false
+    //         } else {
+    //             match test.suggestion() {
+    //                 Some(correct_suggestion) => {
+    //                     suggestions.len() == 1 && correct_suggestion == &suggestions[0]
+    //                 }
+    //                 None => suggestions.is_empty(),
+    //             }
+    //         };
 
-            if !pass {
-                warn!(
-                    "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
-                    self.id,
-                    test.text(),
-                    test.suggestion(),
-                    suggestions
-                );
-            }
+    //         if !pass {
+    //             warn!(
+    //                 "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
+    //                 self.id,
+    //                 test.text(),
+    //                 test.suggestion(),
+    //                 suggestions
+    //             );
+    //         }
 
-            passes.push(pass);
-        }
+    //         passes.push(pass);
+    //     }
 
-        Ok(passes.iter().all(|x| *x))
-    }
+    //     Ok(passes.iter().all(|x| *x))
+    // }
 }
