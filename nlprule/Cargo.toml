@@ -95,7 +95,3 @@ required-features = ["bin"]
 [[bin]]
 name = "run"
 required-features = ["bin"]
-
-[[bin]]
-name = "test_disambiguation"
-required-features = ["bin"]

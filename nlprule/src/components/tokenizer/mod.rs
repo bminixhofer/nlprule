@@ -78,6 +78,49 @@ impl Tokenize for Tokenizer {
             position: Position::default(),
         })
     }
+
+    fn tokenize_sentence<'t>(&'t self, sentence: &'t str) -> Option<Sentence<'t>> {
+        if sentence.trim().is_empty() {
+            return None;
+        }
+
+        let token_strs = self
+            .get_token_ranges(sentence)
+            .filter(|range| !sentence[range.clone()].trim().is_empty());
+
+        let n_token_strs = token_strs.clone().count();
+
+        let tokens: Vec<_> = token_strs
+            .enumerate()
+            .map(|(i, range)| {
+                let byte_start = range.start;
+                let char_start = sentence[..byte_start].chars().count();
+
+                let token_text = sentence[range].trim();
+
+                let is_sentence_start = i == 0;
+                let is_sentence_end = i == n_token_strs - 1;
+
+                Token::new(
+                    token_text,
+                    Span::new(
+                        byte_start..byte_start + token_text.len(),
+                        char_start..char_start + token_text.chars().count(),
+                    ),
+                    is_sentence_start,
+                    is_sentence_end,
+                    sentence[..byte_start].ends_with(char::is_whitespace),
+                )
+            })
+            .collect();
+
+        let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
+        let guard = self.property_guard(&mut sentence).expect("TODO");
+
+        sentence = self.tagger.transform(sentence, guard).expect("TODO");
+
+        Some(sentence)
+    }
 }
 
 /// An iterator over sentences. Has some key properties:
@@ -191,49 +234,5 @@ impl Tokenizer {
 
             byte_start..byte_start + token.len()
         })
-    }
-
-    /// Tokenize the given sentence. This applies chunking and tagging, but does not do disambiguation.
-    pub(crate) fn tokenize_sentence<'t>(&'t self, sentence: &'t str) -> Option<Sentence<'t>> {
-        if sentence.trim().is_empty() {
-            return None;
-        }
-
-        let token_strs = self
-            .get_token_ranges(sentence)
-            .filter(|range| !sentence[range.clone()].trim().is_empty());
-
-        let n_token_strs = token_strs.clone().count();
-
-        let tokens: Vec<_> = token_strs
-            .enumerate()
-            .map(|(i, range)| {
-                let byte_start = range.start;
-                let char_start = sentence[..byte_start].chars().count();
-
-                let token_text = sentence[range].trim();
-
-                let is_sentence_start = i == 0;
-                let is_sentence_end = i == n_token_strs - 1;
-
-                Token::new(
-                    token_text,
-                    Span::new(
-                        byte_start..byte_start + token_text.len(),
-                        char_start..char_start + token_text.chars().count(),
-                    ),
-                    is_sentence_start,
-                    is_sentence_end,
-                    sentence[..byte_start].ends_with(char::is_whitespace),
-                )
-            })
-            .collect();
-
-        let mut sentence = Sentence::new(tokens, sentence, &self.tagger);
-        let guard = self.property_guard(&mut sentence).expect("TODO");
-
-        sentence = self.tagger.transform(sentence, guard).expect("TOOD");
-
-        Some(sentence)
     }
 }

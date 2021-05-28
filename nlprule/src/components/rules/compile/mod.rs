@@ -22,9 +22,6 @@ pub(crate) struct DisambiguatorLangOptions {
     /// Disambiguation Rule selectors to ignore in this tokenizer.
     #[serde(default)]
     pub ignore_ids: Vec<Selector>,
-    /// Specific examples in the notation `{id}:{example_index}` which are known to fail.
-    #[serde(default)]
-    pub known_failures: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -105,7 +102,10 @@ impl BuildComponent for Disambiguator {
             }
         }
 
-        Ok(Disambiguator { rules })
+        Ok(Disambiguator {
+            rules,
+            properties: Default::default(),
+        })
     }
 }
 

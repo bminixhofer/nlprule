@@ -1,8 +1,0 @@
-{
-    "allow_errors": false,
-    "ignore_ids": [
-        "CASING/DAS_BESTE_AM/1",
-        "TYPOS/PLANT_PLANET/0",
-        "COMPOUNDING/SUB_-S_BEDINGT_BASIERT/1"
-    ]
-}

@@ -1,3 +1,14 @@
+use nlprule::{
+    components::{
+        chunker::Chunker,
+        multiword_tagger::MultiwordTagger,
+        rules::{Disambiguator, Rules},
+        tokenizer::Tokenizer,
+        Component,
+    },
+    properties::{tokenize, CreatePipe, Pipeline, Tokenize},
+};
+
 // use clap::Clap;
 // use nlprule::{rules::Rules, tokenizer::Tokenizer};
 
@@ -42,4 +53,26 @@
 //     }
 // }
 
-fn main() {}
+fn main() -> Result<(), nlprule::Error> {
+    env_logger::init();
+
+    // let tokenizer = Pipeline::new((
+    //     Tokenizer::new("new_storage/en/tokenizer.bin")?,
+    //     MultiwordTagger::new("new_storage/en/multiword_tagger.bin")?,
+    //     Chunker::new("new_storage/en/chunker.bin")?,
+    //     Disambiguator::new("new_storage/en/disambiguator.bin")?,
+    //     Rules::new("new_storage/en/rules.bin")?,
+    // ))?;
+
+    let tokenizer = Pipeline::new((
+        Tokenizer::new("new_storage/de/tokenizer.bin")?,
+        // MultiwordTagger::new("new_storage/de/multiword_tagger.bin")?,
+        // Chunker::new("new_storage/en/chunker.bin")?,
+        Disambiguator::new("new_storage/de/disambiguator.bin")?,
+        Rules::new("new_storage/de/rules.bin")?,
+    ))?;
+
+    tokenizer.test()?;
+
+    Ok(())
+}

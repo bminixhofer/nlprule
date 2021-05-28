@@ -2,7 +2,7 @@ use clap::Clap;
 use fs::{File, OpenOptions};
 use fs_err as fs;
 
-use log::info;
+use log::{info, warn};
 use nlprule::compile::{BuildComponent, BuildInfo, Error};
 use nlprule::components::{
     chunker::Chunker,
@@ -83,16 +83,24 @@ fn main() -> Result<(), Error> {
     macro_rules! build {
         ($component:ty) => {
             info!("Creating component \"{}\".", <$component>::name());
-            let instance = <$component>::build(
+            let instance_result = <$component>::build(
                 serde_json::from_value(paths_value.clone())?,
                 Some(&mut build_info),
-            )?;
-            instance.to_writer(
-                &OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(opts.out_dir.join(format!("{}.bin", <$component>::name())))?,
-            )?;
+            );
+
+            match instance_result {
+                Ok(instance) => {
+                    instance.to_writer(
+                        &OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .open(opts.out_dir.join(format!("{}.bin", <$component>::name())))?,
+                    )?;
+                }
+                Err(error) => {
+                    warn!("Error creating \"{0}\": {1}. This is expected if the component does not exist for this language.", <$component>::name(), error);
+                }
+            }
         };
     }
 

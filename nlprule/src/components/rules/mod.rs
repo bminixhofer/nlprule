@@ -1,3 +1,4 @@
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::iter::FromIterator;
 
@@ -24,14 +25,58 @@ mod compile;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Disambiguator {
     rules: Vec<DisambiguationRule>,
+    #[serde(skip)]
+    properties: OnceCell<PropertiesMut>,
 }
 
 impl Transform for Disambiguator {
+    fn properties(&self) -> PropertiesMut {
+        *self.properties.get_or_init(|| {
+            self.rules
+                .iter()
+                .map(|rule| rule.compute_properties())
+                .collect()
+        })
+    }
+
     fn transform<'t>(
         &'t self,
         sentence: Sentence<'t>,
     ) -> Result<Sentence<'t>, crate::properties::Error> {
         self.disambiguate_up_to_id(sentence, None)
+    }
+
+    fn test<TOK: Tokenize>(&self, tokenizer: TOK) -> Result<(), crate::Error> {
+        let mut current_rules: Vec<&DisambiguationRule> = Vec::new();
+        let mut passes = 0;
+
+        for rule in self.rules() {
+            let pipeline = tokenize::Pipeline::new((
+                &tokenizer,
+                current_rules
+                    .iter()
+                    .map(|x| (*x).clone())
+                    .collect::<Disambiguator>(),
+            ))?;
+
+            if rule.test(&pipeline).is_ok() {
+                passes += 1;
+            }
+
+            current_rules.push(rule);
+        }
+
+        info!(
+            "{0} out of {1} Disambiguation Rule tests passed.",
+            passes,
+            self.rules.len()
+        );
+
+        if passes == self.rules().len() {
+            Ok(())
+        } else {
+            Err(crate::Error::TestFailed)
+        }
     }
 }
 
@@ -167,6 +212,28 @@ impl Suggest for Rules {
             })
             .collect())
     }
+
+    fn test<TOK: Tokenize>(&self, tokenizer: TOK) -> Result<(), crate::Error> {
+        let mut passes = 0;
+
+        for rule in self.rules() {
+            if rule.test(&tokenizer).is_ok() {
+                passes += 1;
+            };
+        }
+
+        info!(
+            "{0} out of {1} Grammar Rule tests passed.",
+            passes,
+            self.rules.len()
+        );
+
+        if passes == self.rules().len() {
+            Ok(())
+        } else {
+            Err(crate::Error::TestFailed)
+        }
+    }
 }
 
 impl Rules {
@@ -243,6 +310,27 @@ where
 {
     fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
         let rules: Vec<Rule> = iter.into_iter().map(|x| x.into()).collect();
+        Self {
+            rules,
+            properties: OnceCell::default(),
+        }
+    }
+}
+
+impl IntoIterator for Disambiguator {
+    type Item = DisambiguationRule;
+    type IntoIter = std::vec::IntoIter<DisambiguationRule>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.rules.into_iter()
+    }
+}
+
+impl<R> FromIterator<R> for Disambiguator
+where
+    R: Into<DisambiguationRule>,
+{
+    fn from_iter<I: IntoIterator<Item = R>>(iter: I) -> Self {
+        let rules: Vec<DisambiguationRule> = iter.into_iter().map(|x| x.into()).collect();
         Self {
             rules,
             properties: OnceCell::default(),
