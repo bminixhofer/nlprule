@@ -1,5 +1,6 @@
 //! A Chunker ported from [OpenNLP](https://opennlp.apache.org/).
 
+#[cfg(feature = "compile")]
 mod compile;
 
 use half::bf16;

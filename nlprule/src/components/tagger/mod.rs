@@ -12,6 +12,7 @@ use std::{
     iter::{once, FusedIterator},
 };
 
+#[cfg(feature = "compile")]
 mod compile;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]

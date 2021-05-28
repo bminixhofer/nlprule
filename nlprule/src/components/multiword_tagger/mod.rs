@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Component;
 
+#[cfg(feature = "compile")]
 mod compile;
 
 #[derive(Serialize, Deserialize)]

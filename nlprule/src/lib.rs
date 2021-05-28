@@ -71,9 +71,13 @@ use std::io;
 
 use thiserror::Error;
 
+#[cfg(feature = "compile")]
 pub mod compile;
 pub mod components;
 mod filter;
+#[cfg(feature = "binaries")]
+#[macro_use]
+pub mod lang;
 pub mod properties;
 pub mod rule;
 pub mod types;

@@ -60,9 +60,12 @@ fs-err = "2.5"
 [[bench]]
 name = "load"
 harness = false
+required-features = ["binaries"]
 
 [features]
 default = ["regex-onig"]
+
+binaries = []
 
 regex-onig = ["onig"]
 # to switch to the fancy-regex engine, disable default features and add this feature

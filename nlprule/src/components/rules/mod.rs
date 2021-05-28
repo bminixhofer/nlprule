@@ -20,6 +20,7 @@ use once_cell::sync::OnceCell;
 
 use super::Component;
 
+#[cfg(feature = "compile")]
 mod compile;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

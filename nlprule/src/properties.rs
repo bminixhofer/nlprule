@@ -119,7 +119,7 @@ pub mod transform {
     }
 
     #[derive(Serialize, Deserialize)]
-    pub struct Pipeline<T>(pub(super) T);
+    pub struct Pipeline<T>(pub(super) T, pub(super) PropertiesMut);
 }
 
 pub mod tokenize {
@@ -169,11 +169,11 @@ pub mod tokenize {
     }
 
     #[derive(Serialize, Deserialize)]
-    pub struct Pipeline<T>(pub(super) T);
+    pub struct Pipeline<T>(pub(super) T, pub(super) PropertiesMut);
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Pipeline<T>(T);
+pub struct Pipeline<T>(T, PropertiesMut);
 
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
@@ -223,11 +223,7 @@ impl Bitset {
         self
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0 == 0
-    }
-
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
+    pub fn into_iter<'a>(self) -> impl Iterator<Item = Property> + 'a {
         Property::properties().iter().filter_map(move |property| {
             if self.contains(property) {
                 Some(*property)
@@ -329,6 +325,12 @@ impl Properties {
 }
 
 impl PropertiesMut {
+    pub(crate) fn reads_without_write<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
+        self.read_mask
+            .intersection(self.write_mask.inverse())
+            .into_iter()
+    }
+
     pub fn union(mut self, properties: PropertiesMut) -> Self {
         self.read_mask = self.read_mask.union(properties.read_mask);
         self.write_mask = self.write_mask.union(properties.read_mask);
@@ -336,16 +338,13 @@ impl PropertiesMut {
         self
     }
 
-    pub fn chain(mut self, next: PropertiesMut) -> Result<Self, Error> {
+    pub fn chain(mut self, next: PropertiesMut) -> Self {
         let next_reads = next.read_mask.intersection(next.write_mask.inverse());
-        let invalid_reads = next_reads.intersection(self.write_mask.inverse());
+        let new_reads = next_reads.intersection(self.write_mask.inverse());
 
-        if !invalid_reads.is_empty() {
-            return Err(Error::InvalidPipeline(invalid_reads.iter().collect()));
-        }
-
+        self.read_mask = self.read_mask.union(new_reads);
         self.write_mask = self.write_mask.union(next.write_mask);
-        Ok(self)
+        self
     }
 
     pub fn build(&self, sentence: &mut Sentence) -> Result<PropertyGuardMut, Error> {
@@ -497,11 +496,25 @@ macro_rules! impl_pipeline {
         impl<$first: Tokenize, $($name: Transform,)* $last: Transform> CreatePipe<($first, $($name,)* $last)> for tokenize::Pipeline<($first, $($name,)* $last)> {
             #[allow(non_snake_case, unused_mut)]
             fn new(components: ($first,  $($name,)* $last)) -> Result<Self, Error> {
-                Ok(tokenize::Pipeline(components))
+                let (ref $first, $(ref $name,)* ref $last) = components;
+
+                let mut properties = $first.properties();
+                $(properties = properties.chain($name.properties());)*
+                properties.chain($last.properties());
+
+                if !properties.reads_without_write().next().is_none() {
+                    return Err(Error::InvalidPipeline(properties.reads_without_write().collect()));
+                }
+
+                Ok(tokenize::Pipeline(components, properties))
             }
         }
 
         impl<$first: Tokenize, $($name: Transform,)* $last: Transform> Tokenize for tokenize::Pipeline<($first, $($name,)* $last)> {
+            fn properties(&self) -> PropertiesMut {
+                self.1
+            }
+
             #[allow(non_snake_case)]
             fn tokenize<'t>(&'t self, text: &'t str) -> Box<dyn Iterator<Item = Sentence<'t>> + 't> {
                 let (ref $first, $(ref $name,)* ref $last) = self.0;
@@ -539,11 +552,21 @@ macro_rules! impl_pipeline {
         impl<$first: Transform, $($name: Transform,)* $last: Transform> CreatePipe<($first, $($name,)* $last)> for transform::Pipeline<($first, $($name,)* $last)> {
             #[allow(non_snake_case, unused_mut)]
             fn new(components: ($first,  $($name,)* $last)) -> Result<Self, Error> {
-                Ok(transform::Pipeline(components))
+                let (ref $first, $(ref $name,)* ref $last) = components;
+
+                let mut properties = $first.properties();
+                $(properties = properties.chain($name.properties());)*
+                properties.chain($last.properties());
+
+                Ok(transform::Pipeline(components, properties))
             }
         }
 
         impl<$first: Transform, $($name: Transform,)* $last: Transform> Transform for transform::Pipeline<($first, $($name,)* $last)> {
+            fn properties(&self) -> PropertiesMut {
+                self.1
+            }
+
             #[allow(non_snake_case)]
             fn transform<'t>(&'t self, mut sentence: Sentence<'t>) -> Result<Sentence<'t>, crate::properties::Error> {
                 let (ref $first, $(ref $name,)* ref $last) = self.0;
@@ -572,15 +595,23 @@ macro_rules! impl_pipeline {
             fn new(components: ($first,  $($name,)* $last)) -> Result<Self, Error> {
                 let (ref $first, $(ref $name,)* ref $last) = components;
 
-                let mut properties = PropertiesMut::default().chain($first.properties())?;
-                $(properties = properties.chain($name.properties())?;)*
-                properties.chain($last.properties().write(&[]))?;
+                let mut properties = $first.properties();
+                $(properties = properties.chain($name.properties());)*
+                properties.chain($last.properties().write(&[]));
 
-                Ok(Pipeline(components))
+                if !properties.reads_without_write().next().is_none() {
+                    return Err(Error::InvalidPipeline(properties.reads_without_write().collect()));
+                }
+
+                Ok(Pipeline(components, properties))
             }
         }
 
         impl<$first: Tokenize, $($name: Transform,)* $last: Suggest> Pipeline<($first, $($name,)* $last)> {
+            pub fn properties(&self) -> PropertiesMut {
+                self.1
+            }
+
             #[allow(non_snake_case, unused_mut)]
             pub fn suggest<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Vec<Suggestion>> + 't {
                 let (ref $first, $(ref $name,)* ref $last) = self.0;

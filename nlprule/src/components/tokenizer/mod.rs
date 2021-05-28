@@ -4,6 +4,7 @@
 //! Tokens are *disambiguated* (i. e. information from the initial assignment is changed) in a rule-based way by
 //! [DisambiguationRule][crate::rule::DisambiguationRule]s.
 
+#[cfg(feature = "compile")]
 mod compile;
 
 use fs_err::File;
