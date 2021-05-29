@@ -1,0 +1,7 @@
+{
+    "allow_errors": false,
+    "ignore_ids": [
+        "DISAMBIGUATION/SUB_BEAMTE/1",
+        "DISAMBIGUATION/SUB_BEAMTE/2"
+    ]
+}

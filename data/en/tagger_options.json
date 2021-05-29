@@ -1,0 +1,11 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "PCT",
+        "ORD",
+        "SYM",
+        "RB_SENT"
+    ],
+    "retain_last": true
+}
