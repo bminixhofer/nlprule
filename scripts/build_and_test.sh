@@ -33,6 +33,6 @@ fi
 if [ "${flags:1:1}" == "x" ] 
 then
     cd nlprule
-    RUST_LOG=INFO cargo run --features "bin binaries-$1" --bin test_$1
+    RUST_LOG=INFO cargo run --no-default-features --features "bin binaries-$1 regex-all-test" --bin test_$1
     cd ..
 fi

@@ -25,11 +25,6 @@ jobs:
       - name: Build and test language
         run: |
           bash scripts/build_and_test.sh ${{ matrix.lang }} xx
-      - name: Build source
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all-features
       - name: Build source (WebAssembly)
         uses: actions-rs/cargo@v1
         with:
