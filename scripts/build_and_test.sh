@@ -4,13 +4,15 @@ then
   exit
 fi
 
+set -e
+
 mkdir -p nlprule/src/storage
 
 cd data
 
 # download + extract the build directory from backblaze if we don't have it yet
 if [ ! -f $1.zip ]; then
-  wget https://f000.backblazeb2.com/file/nlprule/$$1.zip
+  wget https://f000.backblazeb2.com/file/nlprule/$1.zip
   unzip -o $1.zip
 fi
 
