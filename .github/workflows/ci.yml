@@ -22,8 +22,9 @@ jobs:
           toolchain: stable
           target: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v1
-      - run: |
-          bash scripts/setup.sh ${{ matrix.lang }}
+      - name: Build and test language
+        run: |
+          bash scripts/build_and_test.sh ${{ matrix.lang }} xx
       - name: Build source
         uses: actions-rs/cargo@v1
         with:
@@ -40,9 +41,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
-      - name: Build and test
-        run: |
-          bash scripts/build_and_test.sh ${{ matrix.lang }} xx
       - name: Run nlprule tests
         uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
