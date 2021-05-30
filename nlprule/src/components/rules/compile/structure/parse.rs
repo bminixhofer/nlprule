@@ -1,12 +1,12 @@
-use std::{ops::Range, sync::Arc};
+use std::{io::BufReader, ops::Range};
 
-use super::{structure, Error};
-use crate::{tokenizer::tag::Tagger, types::*};
+use crate::compile::{BuildInfo, Error};
+use crate::types::*;
 use crate::{utils, utils::regex::Regex};
+use fs_err::File;
 use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
-
-pub use structure::{read_disambiguation_rules, read_rules};
+use serde::Deserialize;
+use serde_xml_rs::EventReader;
 
 use crate::rule::disambiguation::*;
 use crate::rule::engine::composition::concrete::*;
@@ -15,64 +15,16 @@ use crate::rule::engine::*;
 use crate::rule::grammar::*;
 use crate::rule::{id::Index, DisambiguationRule, Rule, Unification};
 
+use super::Category;
+
 // this is set arbitrarily at the moment, could be an option
 #[inline]
 fn max_matches() -> usize {
     20
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct RegexCache {
-    cache: DefaultHashMap<u64, Option<DefaultHashSet<WordIdInt>>>,
-    // this is compared with the hash of the word store of the tagger
-    word_hash: u64,
-}
-
-impl RegexCache {
-    pub fn new(word_hash: u64) -> Self {
-        RegexCache {
-            cache: DefaultHashMap::default(),
-            word_hash,
-        }
-    }
-
-    pub fn word_hash(&self) -> &u64 {
-        &self.word_hash
-    }
-
-    pub(crate) fn get(&self, key: &u64) -> Option<&Option<DefaultHashSet<WordIdInt>>> {
-        self.cache.get(key)
-    }
-
-    pub(crate) fn insert(&mut self, key: u64, value: Option<DefaultHashSet<WordIdInt>>) {
-        self.cache.insert(key, value);
-    }
-}
-
-pub(crate) struct BuildInfo {
-    tagger: Arc<Tagger>,
-    regex_cache: RegexCache,
-}
-
-impl BuildInfo {
-    pub fn new(tagger: Arc<Tagger>, regex_cache: RegexCache) -> Self {
-        BuildInfo {
-            tagger,
-            regex_cache,
-        }
-    }
-
-    pub fn tagger(&self) -> &Arc<Tagger> {
-        &self.tagger
-    }
-
-    pub fn mut_regex_cache(&mut self) -> &mut RegexCache {
-        &mut self.regex_cache
-    }
-}
-
 fn parse_match_attribs(
-    attribs: impl structure::MatchAttributes,
+    attribs: impl super::MatchAttributes,
     text: Option<&str>,
     case_sensitive: bool,
     text_match_idx: Option<usize>,
@@ -149,11 +101,11 @@ fn parse_match_attribs(
         };
 
         if inflected {
-            inflect_matcher = Some(matcher);
+            inflect_matcher = Some(TextMatcher::new(matcher, info)?);
         } else {
             atoms.push(
                 (TextAtom {
-                    matcher: TextMatcher::new(matcher, info),
+                    matcher: TextMatcher::new(matcher, info)?,
                 })
                 .into(),
             );
@@ -172,13 +124,13 @@ fn parse_match_attribs(
                 true,
             )
         };
-        pos_matcher = Some(PosMatcher::new(raw_matcher, info));
+        pos_matcher = Some(PosMatcher::new(raw_matcher, info)?);
     }
 
     if pos_matcher.is_some() || inflect_matcher.is_some() {
         let matcher = WordDataMatcher {
             pos_matcher,
-            inflect_matcher: inflect_matcher.map(|x| TextMatcher::new(x, info)),
+            inflect_matcher,
         };
         atoms.push(
             (WordDataAtom {
@@ -234,7 +186,7 @@ fn parse_match_attribs(
 }
 
 fn get_exceptions(
-    token: &structure::Token,
+    token: &super::Token,
     case_sensitive: bool,
     only_shifted: bool,
     info: &mut BuildInfo,
@@ -243,15 +195,11 @@ fn get_exceptions(
         let exceptions: Vec<Atom> = parts
             .iter()
             .filter_map(|x| match x {
-                structure::TokenPart::Exception(x) => Some(x),
+                super::TokenPart::Exception(x) => Some(x),
                 _ => None,
             })
             .filter_map(|x| {
-                let exception_text = if let Some(exception_text) = &x.text {
-                    Some(exception_text.as_str())
-                } else {
-                    None
-                };
+                let exception_text = x.text.as_ref().map(|x| x.as_str());
                 let mut atom =
                     match parse_match_attribs(x, exception_text, case_sensitive, None, info) {
                         Ok(atom) => atom,
@@ -287,14 +235,14 @@ fn get_exceptions(
 }
 
 fn parse_token(
-    token: &structure::Token,
+    token: &super::Token,
     case_sensitive: bool,
     info: &mut BuildInfo,
 ) -> Result<Vec<Part>, Error> {
     let mut parts = Vec::new();
     let text = if let Some(parts) = &token.parts {
         parts.iter().find_map(|x| match x {
-            structure::TokenPart::Text(text) => Some(text.as_str()),
+            super::TokenPart::Text(text) => Some(text.as_str()),
             _ => None,
         })
     } else {
@@ -303,7 +251,7 @@ fn parse_token(
 
     let text_match_idx = if let Some(parts) = &token.parts {
         match parts.iter().find_map(|x| match x {
-            structure::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().map(|x| x + 1)),
+            super::TokenPart::Sub(sub) => Some(sub.no.parse::<usize>().map(|x| x + 1)),
             _ => None,
         }) {
             None => None,
@@ -374,7 +322,7 @@ fn parse_token(
     Ok(parts)
 }
 
-fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Result<Match, Error> {
+fn parse_match(m: super::Match, engine: &Engine, info: &mut BuildInfo) -> Result<Match, Error> {
     if m.postag.is_some()
         || m.postag_regex.is_some()
         || m.postag_replace.is_some()
@@ -396,11 +344,7 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
         m.no.parse::<usize>()
             .expect("no must be parsable as usize.");
 
-    let case_conversion = if let Some(conversion) = &m.case_conversion {
-        Some(conversion.as_str())
-    } else {
-        None
-    };
+    let case_conversion = m.case_conversion.as_deref();
 
     let pos_replacer = if let Some(postag) = m.postag {
         if postag.contains("+DT") || postag.contains("+INDT") {
@@ -418,7 +362,7 @@ fn parse_match(m: structure::Match, engine: &Engine, info: &mut BuildInfo) -> Re
             x => panic!("unknown postag_regex value {:?}", x),
         };
         Some(PosReplacer {
-            matcher: PosMatcher::new(matcher, info),
+            matcher: PosMatcher::new(matcher, info)?,
         })
     } else {
         None
@@ -495,17 +439,17 @@ fn parse_synthesizer_text(text: &str, engine: &Engine) -> Result<Vec<Synthesizer
 }
 
 fn parse_suggestion(
-    data: structure::Suggestion,
+    data: super::Suggestion,
     engine: &Engine,
     info: &mut BuildInfo,
 ) -> Result<Synthesizer, Error> {
     let mut parts = Vec::new();
     for part in data.parts {
         match part {
-            structure::SuggestionPart::Text(text) => {
+            super::SuggestionPart::Text(text) => {
                 parts.extend(parse_synthesizer_text(text.as_str(), engine)?);
             }
-            structure::SuggestionPart::Match(m) => {
+            super::SuggestionPart::Match(m) => {
                 parts.push(SynthesizerPart::Match(parse_match(m, engine, info)?.into()));
             }
         }
@@ -523,7 +467,7 @@ fn get_last_id(parts: &[Part]) -> isize {
 }
 
 fn parse_parallel_tokens(
-    tokens: &[structure::Token],
+    tokens: &[super::Token],
     case_sensitive: bool,
     info: &mut BuildInfo,
 ) -> Result<Vec<Atom>, Error> {
@@ -544,7 +488,7 @@ fn parse_parallel_tokens(
 }
 
 fn parse_tokens(
-    tokens: &[structure::TokenCombination],
+    tokens: &[super::TokenCombination],
     case_sensitive: bool,
     info: &mut BuildInfo,
 ) -> Result<Vec<Part>, Error> {
@@ -552,8 +496,8 @@ fn parse_tokens(
 
     for token_combination in tokens {
         out.extend(match token_combination {
-            structure::TokenCombination::Token(token) => parse_token(token, case_sensitive, info)?,
-            structure::TokenCombination::And(tokens) => {
+            super::TokenCombination::Token(token) => parse_token(token, case_sensitive, info)?,
+            super::TokenCombination::And(tokens) => {
                 let atom =
                     AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part {
@@ -564,7 +508,7 @@ fn parse_tokens(
                     unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 }]
             }
-            structure::TokenCombination::Or(tokens) => {
+            super::TokenCombination::Or(tokens) => {
                 let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
                 vec![Part {
                     atom,
@@ -574,7 +518,7 @@ fn parse_tokens(
                     unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 }]
             }
-            structure::TokenCombination::Feature(_) => Vec::new(),
+            super::TokenCombination::Feature(_) => Vec::new(),
         });
     }
 
@@ -582,7 +526,7 @@ fn parse_tokens(
 }
 
 fn parse_pattern(
-    pattern: structure::Pattern,
+    pattern: super::Pattern,
     info: &mut BuildInfo,
 ) -> Result<(Composition, usize, usize), Error> {
     let mut start = None;
@@ -596,17 +540,17 @@ fn parse_pattern(
 
     for part in &pattern.parts {
         match part {
-            structure::PatternPart::Token(token) => {
+            super::PatternPart::Token(token) => {
                 composition_parts.extend(parse_token(token, case_sensitive, info)?)
             }
-            structure::PatternPart::Marker(marker) => {
+            super::PatternPart::Marker(marker) => {
                 start = Some(get_last_id(&composition_parts));
 
                 composition_parts.extend(parse_tokens(&marker.tokens, case_sensitive, info)?);
 
                 end = Some(get_last_id(&composition_parts));
             }
-            structure::PatternPart::And(tokens) => {
+            super::PatternPart::And(tokens) => {
                 let atom =
                     AndAtom::and(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
@@ -618,7 +562,7 @@ fn parse_pattern(
                     unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 });
             }
-            structure::PatternPart::Or(tokens) => {
+            super::PatternPart::Or(tokens) => {
                 let atom = OrAtom::or(parse_parallel_tokens(&tokens.tokens, case_sensitive, info)?);
 
                 composition_parts.push(Part {
@@ -629,7 +573,7 @@ fn parse_pattern(
                     unify: tokens.tokens[0].unify.as_ref().map(|x| x == "yes"),
                 });
             }
-            structure::PatternPart::Feature(_) => {}
+            super::PatternPart::Feature(_) => {}
         }
     }
 
@@ -642,12 +586,12 @@ fn parse_pattern(
 }
 
 fn parse_features(
-    pattern: &structure::Pattern,
-    unifications: &Option<Vec<structure::Unification>>,
+    pattern: &super::Pattern,
+    unifications: &Option<Vec<super::Unification>>,
     info: &mut BuildInfo,
-) -> Vec<Vec<PosFilter>> {
+) -> Result<Vec<Vec<PosFilter>>, Error> {
     let mut filters = Vec::new();
-    let mut parse_feature = |id: &str| -> Vec<PosFilter> {
+    let mut parse_feature = |id: &str| -> Result<Vec<PosFilter>, Error> {
         let unification = unifications
             .as_ref()
             .unwrap()
@@ -670,11 +614,11 @@ fn parse_features(
 
     for part in &pattern.parts {
         match part {
-            structure::PatternPart::Feature(feature) => filters.push(parse_feature(&feature.id)),
-            structure::PatternPart::Marker(marker) => {
+            super::PatternPart::Feature(feature) => filters.push(parse_feature(&feature.id)?),
+            super::PatternPart::Marker(marker) => {
                 for token_combination in &marker.tokens {
-                    if let structure::TokenCombination::Feature(feature) = token_combination {
-                        filters.push(parse_feature(&feature.id));
+                    if let super::TokenCombination::Feature(feature) = token_combination {
+                        filters.push(parse_feature(&feature.id)?);
                     }
                 }
             }
@@ -682,14 +626,11 @@ fn parse_features(
         }
     }
 
-    filters
+    Ok(filters)
 }
 
 impl Rule {
-    pub(crate) fn from_rule_structure(
-        data: structure::Rule,
-        info: &mut BuildInfo,
-    ) -> Result<Rule, Error> {
+    pub fn from_rule_structure(data: super::Rule, info: &mut BuildInfo) -> Result<Rule, Error> {
         if data.filter.is_some() {
             return Err(Error::Unimplemented(
                 "rules with filter are not implemented.".into(),
@@ -756,7 +697,7 @@ impl Rule {
         };
 
         let unify_data = if let Some(pattern) = &data.pattern {
-            let unify_filters = parse_features(&pattern, &data.unifications, info);
+            let unify_filters = parse_features(&pattern, &data.unifications, info)?;
             let unify_mask: Vec<_> = maybe_composition
                 .unwrap()
                 .parts
@@ -773,16 +714,16 @@ impl Rule {
 
         for part in data.message.parts {
             match part {
-                structure::MessagePart::Suggestion(suggestion) => {
+                super::MessagePart::Suggestion(suggestion) => {
                     let suggester = parse_suggestion(suggestion.clone(), &engine, info)?;
                     // simpler to just parse a second time than cloning the result
                     message_parts.extend(parse_suggestion(suggestion, &engine, info)?.parts);
                     suggesters.push(suggester);
                 }
-                structure::MessagePart::Text(text) => {
+                super::MessagePart::Text(text) => {
                     message_parts.extend(parse_synthesizer_text(text.as_str(), &engine)?);
                 }
-                structure::MessagePart::Match(m) => {
+                super::MessagePart::Match(m) => {
                     message_parts.push(SynthesizerPart::Match(
                         parse_match(m, &engine, info)?.into(),
                     ));
@@ -817,10 +758,10 @@ impl Rule {
 
             for part in &example.parts {
                 match part {
-                    structure::ExamplePart::Text(text) => {
+                    super::ExamplePart::Text(text) => {
                         texts.push(text.as_str());
                     }
-                    structure::ExamplePart::Marker(marker) => {
+                    super::ExamplePart::Marker(marker) => {
                         let (bytes_before, chars_before) =
                             texts.iter().fold((0, 0), |acc, text| {
                                 (acc.0 + text.len(), acc.1 + text.chars().count())
@@ -911,6 +852,8 @@ fn parse_tag_form(
     is_sentence_end: bool,
     info: &mut BuildInfo,
 ) -> Result<Tags<'static>, Error> {
+    let tagger = info.tagger();
+
     lazy_static! {
         static ref REGEX: Regex = Regex::new(r"(.+?)\[(.+?)\]".into());
     }
@@ -922,7 +865,7 @@ fn parse_tag_form(
     let text = captures.get(1).expect("1st regex group exists").as_str();
     let tags = captures.get(2).expect("2nd regex group exists").as_str();
 
-    let mut tag_vec: Vec<_> = tags
+    let mut tags: Vec<_> = tags
         .split(',')
         .filter_map(|x| {
             if x == "</S>" {
@@ -935,44 +878,46 @@ fn parse_tag_form(
                 None
             } else {
                 Some(WordData::new(
-                    info.tagger.id_word(parts[0].to_owned().into()),
-                    info.tagger.id_tag(parts[1]).into_static(),
+                    tagger.id_word(parts[0].to_owned().into()),
+                    tagger.id_tag(parts[1]).into_static(),
                 ))
             }
         })
         .collect();
 
-    tag_vec.push(
+    tags.push(
         WordData::new(
-            info.tagger.id_word(text.to_owned().into()),
+            tagger.id_word(text.to_owned().into()),
             PosId::special(SpecialPos::None),
         )
         .freeze(),
     );
 
     if is_sentence_end {
-        tag_vec.push(WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze());
+        tags.push(WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze());
     }
 
-    let tags = Tags::new(tag_vec);
-
-    Ok(tags)
+    Ok(Tags::new(WordId::empty(), tags))
 }
 
 impl WordData<'static> {
-    fn from_structure(data: structure::WordData, info: &mut BuildInfo) -> Self {
-        WordData::new(
-            info.tagger
+    fn from_structure(data: super::WordData, info: &mut BuildInfo) -> Result<Self, Error> {
+        Ok(WordData::new(
+            info.tagger()
                 .id_word(data.lemma.unwrap_or_else(String::new).into()),
-            info.tagger
+            info.tagger()
                 .id_tag(data.pos.as_deref().unwrap_or("").trim())
                 .into_static(),
-        )
+        ))
     }
 }
 
-fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildInfo) -> PosFilter {
-    match postag_regexp.as_deref() {
+fn parse_pos_filter(
+    postag: &str,
+    postag_regexp: Option<&str>,
+    info: &mut BuildInfo,
+) -> Result<PosFilter, Error> {
+    Ok(match postag_regexp.as_deref() {
         Some("yes") => PosFilter::new(PosMatcher::new(
             Matcher::new_regex(
                 Regex::from_java_regex(&postag, true, true).unwrap(),
@@ -980,23 +925,23 @@ fn parse_pos_filter(postag: &str, postag_regexp: Option<&str>, info: &mut BuildI
                 true,
             ),
             info,
-        )),
+        )?),
         Some(_) | None => PosFilter::new(PosMatcher::new(
             Matcher::new_string(either::Left(postag.into()), false, false, true),
             info,
-        )),
-    }
+        )?),
+    })
 }
 
 impl DisambiguationRule {
-    pub(crate) fn from_rule_structure(
-        data: structure::DisambiguationRule,
+    pub fn from_rule_structure(
+        data: super::DisambiguationRule,
         info: &mut BuildInfo,
     ) -> Result<DisambiguationRule, Error> {
         // might need the pattern later so clone it here
         let (composition, start, end) = parse_pattern(data.pattern.clone(), info)?;
 
-        let unify_filters = parse_features(&data.pattern, &data.unifications, info);
+        let unify_filters = parse_features(&data.pattern, &data.unifications, info)?;
         let unify_mask: Vec<_> = composition.parts.iter().map(|part| part.unify).collect();
 
         let antipatterns = if let Some(antipatterns) = data.antipatterns {
@@ -1025,25 +970,25 @@ impl DisambiguationRule {
         let word_datas: Vec<_> = if let Some(wds) = data.disambig.word_datas {
             wds.into_iter()
                 .map(|part| match part {
-                    structure::DisambiguationPart::WordData(x) => {
-                        either::Left(WordData::from_structure(x, info))
+                    super::DisambiguationPart::WordData(x) => {
+                        WordData::from_structure(x, info).map(either::Left)
                     }
-                    structure::DisambiguationPart::Match(x) => either::Right(parse_pos_filter(
-                        &x.postag.unwrap(),
-                        x.postag_regexp.as_deref(),
-                        info,
-                    )),
+                    super::DisambiguationPart::Match(x) => {
+                        parse_pos_filter(&x.postag.unwrap(), x.postag_regexp.as_deref(), info)
+                            .map(either::Right)
+                    }
                 })
-                .collect()
+                .collect::<Result<_, Error>>()?
         } else {
             Vec::new()
         };
 
+        let tagger = info.tagger();
         let disambiguations = match data.disambig.action.as_deref() {
             Some("remove") => {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Remove(vec![either::Right(
-                        parse_pos_filter(postag, Some("yes"), info),
+                        parse_pos_filter(postag, Some("yes"), info)?,
                     )]))
                 } else {
                     Ok(Disambiguation::Remove(word_datas.into_iter().collect()))
@@ -1081,45 +1026,59 @@ impl DisambiguationRule {
 
                 for part in &data.pattern.parts {
                     match part {
-                        structure::PatternPart::Marker(marker) => {
+                        super::PatternPart::Marker(marker) => {
                             has_marker = true;
                             for token in &marker.tokens {
                                 let token = match token {
-                                    structure::TokenCombination::Token(token) => token,
-                                    structure::TokenCombination::And(tokens)
-                                    | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
-                                    structure::TokenCombination::Feature(_) => continue,
+                                    super::TokenCombination::Token(token) => token,
+                                    super::TokenCombination::And(tokens)
+                                    | super::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                    super::TokenCombination::Feature(_) => continue,
                                 };
 
-                                marker_disambig.push(token.postag.as_ref().map(|x| {
-                                    either::Right(parse_pos_filter(
-                                        x,
-                                        token.postag_regexp.as_deref(),
-                                        info,
-                                    ))
-                                }));
+                                marker_disambig.push(
+                                    token
+                                        .postag
+                                        .as_ref()
+                                        .map(|x| {
+                                            parse_pos_filter(
+                                                x,
+                                                token.postag_regexp.as_deref(),
+                                                info,
+                                            )
+                                            .map(either::Right)
+                                        })
+                                        .transpose()?,
+                                );
                             }
                         }
-                        structure::PatternPart::Token(token) => {
-                            disambig.push(token.postag.as_ref().map(|x| {
-                                either::Right(parse_pos_filter(
-                                    x,
-                                    token.postag_regexp.as_deref(),
-                                    info,
-                                ))
-                            }))
+                        super::PatternPart::Token(token) => disambig.push(
+                            token
+                                .postag
+                                .as_ref()
+                                .map(|x| {
+                                    parse_pos_filter(x, token.postag_regexp.as_deref(), info)
+                                        .map(either::Right)
+                                })
+                                .transpose()?,
+                        ),
+                        super::PatternPart::And(tokens) | super::PatternPart::Or(tokens) => {
+                            disambig.push(
+                                tokens.tokens[0]
+                                    .postag
+                                    .as_ref()
+                                    .map(|x| {
+                                        parse_pos_filter(
+                                            x,
+                                            tokens.tokens[0].postag_regexp.as_deref(),
+                                            info,
+                                        )
+                                        .map(either::Right)
+                                    })
+                                    .transpose()?,
+                            )
                         }
-                        structure::PatternPart::And(tokens)
-                        | structure::PatternPart::Or(tokens) => {
-                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
-                                either::Right(parse_pos_filter(
-                                    x,
-                                    tokens.tokens[0].postag_regexp.as_deref(),
-                                    info,
-                                ))
-                            }))
-                        }
-                        structure::PatternPart::Feature(_) => {}
+                        super::PatternPart::Feature(_) => {}
                     }
                 }
 
@@ -1131,7 +1090,7 @@ impl DisambiguationRule {
 
                 Ok(Disambiguation::Filter(
                     disambiguations.into_iter().collect(),
-                    info.tagger().lang_options().retain_last,
+                    tagger.lang_options().retain_last,
                 ))
             }
             Some("filter") => {
@@ -1141,13 +1100,13 @@ impl DisambiguationRule {
                             postag,
                             Some("yes"),
                             info,
-                        )))],
-                        info.tagger().lang_options().retain_last,
+                        )?))],
+                        tagger.lang_options().retain_last,
                     ))
                 } else {
                     Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
-                        info.tagger().lang_options().retain_last,
+                        tagger.lang_options().retain_last,
                     ))
                 }
             }
@@ -1161,36 +1120,61 @@ impl DisambiguationRule {
 
                 for part in &data.pattern.parts {
                     match part {
-                        structure::PatternPart::Marker(marker) => {
+                        super::PatternPart::Marker(marker) => {
                             has_marker = true;
                             for token in &marker.tokens {
                                 let token = match token {
-                                    structure::TokenCombination::Token(token) => token,
-                                    structure::TokenCombination::And(tokens)
-                                    | structure::TokenCombination::Or(tokens) => &tokens.tokens[0],
-                                    structure::TokenCombination::Feature(_) => continue,
+                                    super::TokenCombination::Token(token) => token,
+                                    super::TokenCombination::And(tokens)
+                                    | super::TokenCombination::Or(tokens) => &tokens.tokens[0],
+                                    super::TokenCombination::Feature(_) => continue,
                                 };
 
-                                marker_disambig.push(token.postag.as_ref().map(|x| {
-                                    parse_pos_filter(x, token.postag_regexp.as_deref(), info)
-                                }));
+                                marker_disambig.push(
+                                    token
+                                        .postag
+                                        .as_ref()
+                                        .map(|x| {
+                                            parse_pos_filter(
+                                                x,
+                                                token.postag_regexp.as_deref(),
+                                                info,
+                                            )
+                                        })
+                                        .transpose()?,
+                                );
                                 marker_mask.push(token.unify.is_some())
                             }
                         }
-                        structure::PatternPart::Token(token) => {
-                            disambig.push(token.postag.as_ref().map(|x| {
-                                parse_pos_filter(x, token.postag_regexp.as_deref(), info)
-                            }));
+                        super::PatternPart::Token(token) => {
+                            disambig.push(
+                                token
+                                    .postag
+                                    .as_ref()
+                                    .map(|x| {
+                                        parse_pos_filter(x, token.postag_regexp.as_deref(), info)
+                                    })
+                                    .transpose()?,
+                            );
                             mask.push(token.unify.is_some());
                         }
-                        structure::PatternPart::And(tokens)
-                        | structure::PatternPart::Or(tokens) => {
-                            disambig.push(tokens.tokens[0].postag.as_ref().map(|x| {
-                                parse_pos_filter(x, tokens.tokens[0].postag_regexp.as_deref(), info)
-                            }));
+                        super::PatternPart::And(tokens) | super::PatternPart::Or(tokens) => {
+                            disambig.push(
+                                tokens.tokens[0]
+                                    .postag
+                                    .as_ref()
+                                    .map(|x| {
+                                        parse_pos_filter(
+                                            x,
+                                            tokens.tokens[0].postag_regexp.as_deref(),
+                                            info,
+                                        )
+                                    })
+                                    .transpose()?,
+                            );
                             mask.push(tokens.tokens[0].unify.is_some());
                         }
-                        structure::PatternPart::Feature(_) => {}
+                        super::PatternPart::Feature(_) => {}
                     }
                 }
 
@@ -1206,15 +1190,15 @@ impl DisambiguationRule {
                 if let Some(postag) = data.disambig.postag.as_ref() {
                     Ok(Disambiguation::Filter(
                         vec![Some(either::Left(WordData::new(
-                            info.tagger.id_word("".into()),
-                            info.tagger.id_tag(postag).into_static(),
+                            tagger.id_word("".into()),
+                            tagger.id_tag(postag).into_static(),
                         )))],
-                        info.tagger().lang_options().retain_last,
+                        tagger.lang_options().retain_last,
                     ))
                 } else {
                     Ok(Disambiguation::Filter(
                         word_datas.into_iter().map(Some).collect(),
-                        info.tagger().lang_options().retain_last,
+                        tagger.lang_options().retain_last,
                     ))
                 }
             }
@@ -1253,11 +1237,11 @@ impl DisambiguationRule {
 
                 for part in &example.parts {
                     match part {
-                        structure::ExamplePart::Text(text) => {
+                        super::ExamplePart::Text(text) => {
                             texts.push(text.as_str());
                             char_length += text.chars().count();
                         }
-                        structure::ExamplePart::Marker(marker) => {
+                        super::ExamplePart::Marker(marker) => {
                             if char_span.is_some() {
                                 return Err(Error::Unexpected(
                                     "example must have one or zero markers".into(),
@@ -1329,4 +1313,161 @@ impl DisambiguationRule {
             id: Index::default(),
         })
     }
+}
+
+macro_rules! flatten_group {
+    ($rulegroup:expr, $category:expr) => {{
+        let group_antipatterns = if let Some(antipatterns) = $rulegroup.antipatterns {
+            antipatterns
+        } else {
+            Vec::new()
+        };
+
+        let group = super::Group {
+            id: $rulegroup.id,
+            default: $rulegroup.default,
+            name: $rulegroup.name,
+            n: 0,
+        };
+
+        $rulegroup
+            .rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut rule)| {
+                if let Some(antipatterns) = &mut rule.antipatterns {
+                    antipatterns.extend(group_antipatterns.clone());
+                } else {
+                    rule.antipatterns = Some(group_antipatterns.clone());
+                }
+
+                let mut group = group.clone();
+                group.n = i;
+                (rule, Some(group), $category.clone())
+            })
+            .collect::<Vec<_>>()
+    }};
+}
+
+type GrammarRuleReading = (super::Rule, Option<super::Group>, Option<super::Category>);
+type DisambiguationRuleReading = (
+    super::DisambiguationRule,
+    Option<super::Group>,
+    Option<super::Category>,
+);
+
+pub fn read_rules<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Vec<Result<GrammarRuleReading, serde_xml_rs::Error>> {
+    let file = File::open(path.as_ref()).unwrap();
+    let file = BufReader::new(file);
+
+    let sanitized = super::preprocess::sanitize(file, &["suggestion"]);
+    let rules = super::preprocess::extract_rules(sanitized.as_bytes());
+
+    let mut unifications = Vec::new();
+
+    let rules: Vec<_> = rules
+        .into_iter()
+        .map(|(xml, category)| {
+            let mut out = Vec::new();
+
+            let deseralized = super::RuleContainer::deserialize(
+                &mut serde_xml_rs::Deserializer::new(EventReader::new(xml.as_bytes())),
+            );
+
+            out.extend(match deseralized {
+                Ok(rule_container) => match rule_container {
+                    super::RuleContainer::Rule(rule) => {
+                        vec![Ok((rule, None, category))]
+                    }
+                    super::RuleContainer::RuleGroup(rule_group) => {
+                        flatten_group!(rule_group, category)
+                            .into_iter()
+                            .map(Ok)
+                            .collect()
+                    }
+                    super::RuleContainer::Unification(unification) => {
+                        unifications.push(unification);
+
+                        vec![]
+                    }
+                },
+                Err(err) => vec![Err(err)],
+            });
+            out
+        })
+        .flatten()
+        .collect();
+
+    rules
+        .into_iter()
+        .map(|result| match result {
+            Ok(mut x) => {
+                x.0.unifications = Some(unifications.clone());
+
+                Ok(x)
+            }
+            Err(x) => Err(x),
+        })
+        .collect()
+}
+
+pub fn read_disambiguation_rules<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Vec<Result<DisambiguationRuleReading, serde_xml_rs::Error>> {
+    let file = File::open(path.as_ref()).unwrap();
+    let file = BufReader::new(file);
+
+    let sanitized = super::preprocess::sanitize(file, &[]);
+    let rules = super::preprocess::extract_rules(sanitized.as_bytes());
+
+    let mut unifications = Vec::new();
+
+    let rules: Vec<_> = rules
+        .into_iter()
+        .map(|(xml, _)| {
+            let mut out = Vec::new();
+
+            let deseralized = super::DisambiguationRuleContainer::deserialize(
+                &mut serde_xml_rs::Deserializer::new(EventReader::new(xml.as_bytes())),
+            );
+
+            let category: Option<Category> = None;
+
+            out.extend(match deseralized {
+                Ok(rule_container) => match rule_container {
+                    super::DisambiguationRuleContainer::Rule(rule) => {
+                        vec![Ok((rule, None, category))]
+                    }
+                    super::DisambiguationRuleContainer::RuleGroup(rule_group) => {
+                        flatten_group!(rule_group, category)
+                            .into_iter()
+                            .map(Ok)
+                            .collect()
+                    }
+                    super::DisambiguationRuleContainer::Unification(unification) => {
+                        unifications.push(unification);
+
+                        vec![]
+                    }
+                },
+                Err(err) => vec![Err(err)],
+            });
+            out
+        })
+        .flatten()
+        .collect();
+
+    rules
+        .into_iter()
+        .map(|result| match result {
+            Ok(mut x) => {
+                x.0.unifications = Some(unifications.clone());
+
+                Ok(x)
+            }
+            Err(x) => Err(x),
+        })
+        .collect()
 }

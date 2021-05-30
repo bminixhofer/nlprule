@@ -1,6 +1,6 @@
 use std::iter;
 
-use crate::{tokenizer::tag::Tagger, types::*, utils::regex::Regex};
+use crate::{components::tagger::Tagger, properties::*, types::*, utils::regex::Regex};
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -161,10 +161,15 @@ pub struct Quantifier {
 
 #[enum_dispatch]
 pub trait Atomable: Send + Sync {
-    fn is_match(&self, context: Context, position: usize) -> bool;
+    fn is_match(&self, context: Context, position: usize)
+        -> Result<bool, crate::properties::Error>;
+
+    fn compute_properties(&self) -> Properties {
+        Properties::default()
+    }
 }
 
-#[enum_dispatch(Atomable)]
+#[enum_dispatch(Atomable, ReadProperties)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Atom {
     ChunkAtom(concrete::ChunkAtom),
@@ -180,7 +185,8 @@ pub enum Atom {
 }
 
 pub mod concrete {
-    use super::{Atomable, Context, Matcher, TextMatcher, WordDataMatcher};
+    use super::{Atomable, Context, Matcher, Properties, Property, TextMatcher, WordDataMatcher};
+    use lazy_static::lazy_static;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -189,11 +195,25 @@ pub mod concrete {
     }
 
     impl Atomable for TextAtom {
-        fn is_match(&self, context: Context, position: usize) -> bool {
+        fn is_match(
+            &self,
+            context: Context,
+            position: usize,
+        ) -> Result<bool, crate::properties::Error> {
             let (sentence, _) = context;
 
-            self.matcher
-                .is_match(&sentence.index(position).text(), Some(context), None)
+            Ok(self.matcher.is_match(
+                sentence.guard().tags(sentence.index(position))?.id(),
+                Some(context),
+                None,
+            ))
+        }
+
+        fn compute_properties(&self) -> Properties {
+            lazy_static! {
+                static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
+            }
+            *PROPERTIES
         }
     }
 
@@ -203,11 +223,25 @@ pub mod concrete {
     }
 
     impl Atomable for ChunkAtom {
-        fn is_match(&self, context: Context, position: usize) -> bool {
+        fn is_match(
+            &self,
+            context: Context,
+            position: usize,
+        ) -> Result<bool, crate::properties::Error> {
             let (sentence, _) = context;
 
-            self.matcher
-                .is_slice_match(&sentence.index(position).chunks(), Some(context), None)
+            Ok(self.matcher.is_slice_match(
+                sentence.guard().chunks(sentence.index(position))?,
+                Some(context),
+                None,
+            ))
+        }
+
+        fn compute_properties(&self) -> Properties {
+            lazy_static! {
+                static ref PROPERTIES: Properties = Properties::default().read(&[Property::Chunks]);
+            }
+            *PROPERTIES
         }
     }
 
@@ -217,10 +251,14 @@ pub mod concrete {
     }
 
     impl Atomable for SpaceBeforeAtom {
-        fn is_match(&self, context: Context, position: usize) -> bool {
+        fn is_match(
+            &self,
+            context: Context,
+            position: usize,
+        ) -> Result<bool, crate::properties::Error> {
             let (sentence, _) = context;
 
-            sentence.index(position).has_space_before() == self.value
+            Ok(sentence.index(position).has_space_before() == self.value)
         }
     }
 
@@ -231,12 +269,24 @@ pub mod concrete {
     }
 
     impl Atomable for WordDataAtom {
-        fn is_match(&self, context: Context, position: usize) -> bool {
+        fn is_match(
+            &self,
+            context: Context,
+            position: usize,
+        ) -> Result<bool, crate::properties::Error> {
             let (sentence, _) = context;
-            let tags = sentence.index(position).tags().iter();
+            let tags = sentence.guard().tags(sentence.index(position))?.iter();
 
-            self.matcher
-                .is_match(tags, Some(context), Some(self.case_sensitive))
+            Ok(self
+                .matcher
+                .is_match(tags, Some(context), Some(self.case_sensitive)))
+        }
+
+        fn compute_properties(&self) -> Properties {
+            lazy_static! {
+                static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
+            }
+            *PROPERTIES
         }
     }
 }
@@ -245,8 +295,12 @@ pub mod concrete {
 pub struct TrueAtom {}
 
 impl Atomable for TrueAtom {
-    fn is_match(&self, _context: Context, _position: usize) -> bool {
-        true
+    fn is_match(
+        &self,
+        _context: Context,
+        _position: usize,
+    ) -> Result<bool, crate::properties::Error> {
+        Ok(true)
     }
 }
 
@@ -254,8 +308,12 @@ impl Atomable for TrueAtom {
 pub struct FalseAtom {}
 
 impl Atomable for FalseAtom {
-    fn is_match(&self, _context: Context, _position: usize) -> bool {
-        false
+    fn is_match(
+        &self,
+        _context: Context,
+        _position: usize,
+    ) -> Result<bool, crate::properties::Error> {
+        Ok(false)
     }
 }
 
@@ -265,8 +323,22 @@ pub struct AndAtom {
 }
 
 impl Atomable for AndAtom {
-    fn is_match(&self, context: Context, position: usize) -> bool {
-        self.atoms.iter().all(|x| x.is_match(context, position))
+    fn is_match(
+        &self,
+        context: Context,
+        position: usize,
+    ) -> Result<bool, crate::properties::Error> {
+        for atom in &self.atoms {
+            if !atom.is_match(context, position)? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn compute_properties(&self) -> Properties {
+        self.atoms.iter().map(Atom::compute_properties).collect()
     }
 }
 
@@ -276,8 +348,22 @@ pub struct OrAtom {
 }
 
 impl Atomable for OrAtom {
-    fn is_match(&self, context: Context, position: usize) -> bool {
-        self.atoms.iter().any(|x| x.is_match(context, position))
+    fn is_match(
+        &self,
+        context: Context,
+        position: usize,
+    ) -> Result<bool, crate::properties::Error> {
+        for atom in &self.atoms {
+            if atom.is_match(context, position)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn compute_properties(&self) -> Properties {
+        self.atoms.iter().map(Atom::compute_properties).collect()
     }
 }
 
@@ -287,8 +373,16 @@ pub struct NotAtom {
 }
 
 impl Atomable for NotAtom {
-    fn is_match(&self, context: Context, position: usize) -> bool {
-        !self.atom.is_match(context, position)
+    fn is_match(
+        &self,
+        context: Context,
+        position: usize,
+    ) -> Result<bool, crate::properties::Error> {
+        Ok(!self.atom.is_match(context, position)?)
+    }
+
+    fn compute_properties(&self) -> Properties {
+        self.atom.compute_properties()
     }
 }
 
@@ -299,15 +393,25 @@ pub struct OffsetAtom {
 }
 
 impl Atomable for OffsetAtom {
-    fn is_match(&self, context: Context, position: usize) -> bool {
+    fn is_match(
+        &self,
+        context: Context,
+        position: usize,
+    ) -> Result<bool, crate::properties::Error> {
         let (sentence, _) = context;
         let new_position = position as isize + self.offset;
 
-        if new_position < 0 || (new_position as usize) >= sentence.len() {
-            false
-        } else {
-            self.atom.is_match(context, new_position as usize)
-        }
+        Ok(
+            if new_position < 0 || (new_position as usize) >= sentence.len() {
+                false
+            } else {
+                self.atom.is_match(context, new_position as usize)?
+            },
+        )
+    }
+
+    fn compute_properties(&self) -> Properties {
+        self.atom.compute_properties()
     }
 }
 
@@ -357,33 +461,20 @@ impl GraphId {
     }
 }
 
-lazy_static! {
-    static ref SENT_START: Token<'static> = Token::new(
-        WordId::empty(),
-        Tags::new(vec![WordData::new(
-            WordId::empty(),
-            PosId::special(SpecialPos::SentStart),
-        )],),
-        Span::default(),
-        false,
-        false,
-        Vec::new(),
-    );
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct MatchSentence<'t> {
     sentence: &'t Sentence<'t>,
+    guard: PropertyGuard,
 }
 
 impl<'t> MatchSentence<'t> {
-    pub fn new(sentence: &'t Sentence<'t>) -> Self {
-        MatchSentence { sentence }
+    pub fn new(sentence: &'t Sentence<'t>, guard: PropertyGuard) -> Self {
+        MatchSentence { sentence, guard }
     }
 
     pub fn index(&self, index: usize) -> &Token {
         match index {
-            0 => &*SENT_START,
+            0 => &crate::types::SENT_START,
             i => &self.sentence.tokens()[i - 1],
         }
     }
@@ -407,6 +498,10 @@ impl<'t> MatchSentence<'t> {
 
     pub fn tagger(&self) -> &'t Tagger {
         self.sentence.tagger()
+    }
+
+    pub fn guard(&self) -> &PropertyGuard {
+        &self.guard
     }
 
     pub fn span(&self) -> &Span {
@@ -518,7 +613,19 @@ pub struct Composition {
 }
 
 impl Composition {
-    fn next_can_match(&self, context: Context, position: usize, index: usize) -> bool {
+    pub fn compute_properties(&self) -> Properties {
+        self.parts
+            .iter()
+            .map(|part| part.atom.compute_properties())
+            .collect()
+    }
+
+    fn next_can_match(
+        &self,
+        context: Context,
+        position: usize,
+        index: usize,
+    ) -> Result<bool, crate::properties::Error> {
         let next_required_pos = match self.parts[index + 1..]
             .iter()
             .position(|x| x.quantifier.min > 0)
@@ -527,9 +634,13 @@ impl Composition {
             None => self.parts.len(),
         };
 
-        self.parts[index + 1..next_required_pos]
-            .iter()
-            .any(|x| x.atom.is_match(context, position))
+        for part in &self.parts[index + 1..next_required_pos] {
+            if part.atom.is_match(context, position)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     fn apply_recursive<'t>(
@@ -538,7 +649,7 @@ impl Composition {
         mut position: usize,
         mut cur_atom_idx: usize,
         mut graph: MatchGraph<'t>,
-    ) -> Option<MatchGraph<'t>> {
+    ) -> Result<Option<MatchGraph<'t>>, crate::properties::Error> {
         let mut cur_count = 0;
         let is_match = loop {
             if cur_atom_idx >= self.parts.len() {
@@ -561,21 +672,23 @@ impl Composition {
             }
 
             if cur_count >= part.quantifier.min && cur_atom_idx + 1 < self.parts.len() {
-                if !part.greedy && self.next_can_match((sentence, &graph), position, cur_atom_idx) {
+                if !part.greedy
+                    && self.next_can_match((sentence, &graph), position, cur_atom_idx)?
+                {
                     cur_atom_idx += 1;
                     cur_count = 0;
                     continue;
                 }
                 if part.greedy {
                     if let Some(graph) =
-                        self.apply_recursive(sentence, position, cur_atom_idx + 1, graph.clone())
+                        self.apply_recursive(sentence, position, cur_atom_idx + 1, graph.clone())?
                     {
-                        return Some(graph);
+                        return Ok(Some(graph));
                     }
                 }
             }
 
-            if part.atom.is_match((sentence, &graph), position) {
+            if part.atom.is_match((sentence, &graph), position)? {
                 let group = &mut graph.groups[cur_atom_idx + 1];
 
                 // set the group beginning if the char end was zero (i. e. the group was empty)
@@ -599,19 +712,21 @@ impl Composition {
             cur_atom_idx += 1;
         }
 
-        if is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx] {
-            graph.fill_empty(sentence);
-            Some(graph)
-        } else {
-            None
-        }
+        Ok(
+            if is_match || cur_atom_idx == self.parts.len() || self.can_stop_mask[cur_atom_idx] {
+                graph.fill_empty(sentence);
+                Some(graph)
+            } else {
+                None
+            },
+        )
     }
 
     pub fn apply<'t>(
         &'t self,
         sentence: &'t MatchSentence,
         start: usize,
-    ) -> Option<MatchGraph<'t>> {
+    ) -> Result<Option<MatchGraph<'t>>, crate::properties::Error> {
         // this path is extremely hot so more optimizations are done
 
         // the first matcher can never rely on the match graph, so we use an empty default graph for the first match
@@ -623,9 +738,9 @@ impl Composition {
         if self.parts[0].quantifier.min > 0
             && !self.parts[0]
                 .atom
-                .is_match((sentence, &DEFAULT_GRAPH), start)
+                .is_match((sentence, &DEFAULT_GRAPH), start)?
         {
-            return None;
+            return Ok(None);
         }
 
         let position = start;

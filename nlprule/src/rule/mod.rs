@@ -1,16 +1,17 @@
 //! Implementations related to single rules.
 
-use crate::types::*;
 use crate::{
     filter::{Filter, Filterable},
-    tokenizer::Tokenizer,
+    properties::*,
+    types::*,
     utils,
 };
 use itertools::Itertools;
-use log::{error, info, warn};
+use lazy_static::lazy_static;
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::fmt;
+use std::{collections::HashSet, iter};
 
 pub(crate) mod disambiguation;
 pub(crate) mod engine;
@@ -38,7 +39,11 @@ pub(crate) struct Unification {
 }
 
 impl Unification {
-    pub fn keep(&self, graph: &MatchGraph, sentence: &MatchSentence) -> bool {
+    pub fn keep(
+        &self,
+        graph: &MatchGraph,
+        sentence: &MatchSentence,
+    ) -> Result<bool, crate::properties::Error> {
         let filters: Vec<_> = self.filters.iter().multi_cartesian_product().collect();
 
         let mut filter_mask: Vec<_> = filters.iter().map(|_| true).collect();
@@ -48,18 +53,22 @@ impl Unification {
             if maybe_mask_val.is_some() {
                 for token in group.tokens(sentence) {
                     for (mask_val, filter) in filter_mask.iter_mut().zip(filters.iter()) {
-                        *mask_val = *mask_val && PosFilter::and(filter, token.tags());
+                        *mask_val =
+                            *mask_val && PosFilter::and(filter, sentence.guard().tags(token)?);
                     }
                 }
             }
         }
 
         let result = filter_mask.iter().any(|x| *x);
-        if negate {
-            !result
-        } else {
-            result
+        Ok(if negate { !result } else { result })
+    }
+
+    pub fn compute_properties(&self) -> Properties {
+        lazy_static! {
+            static ref PROPERTIES: Properties = Properties::default().read(&[Property::Tags]);
         }
+        *PROPERTIES
     }
 }
 
@@ -126,21 +135,33 @@ impl Changes {
 }
 
 impl DisambiguationRule {
+    pub fn compute_properties(&self) -> PropertiesMut {
+        iter::once(self.engine.compute_properties())
+            .chain(self.unification.iter().map(|x| x.compute_properties()))
+            .collect::<Properties>()
+            .write(&[Property::Tags])
+    }
+
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &Index {
         &self.id
     }
 
-    pub(crate) fn apply<'t>(&'t self, sentence: &MatchSentence<'t>) -> Changes {
+    pub(crate) fn apply<'t>(
+        &'t self,
+        sentence: &MatchSentence<'t>,
+    ) -> Result<Changes, crate::properties::Error> {
         if matches!(self.disambiguations, disambiguation::Disambiguation::Nop) {
-            return Changes::default();
+            return Ok(Changes::default());
         }
 
         let mut all_spans = Vec::new();
 
         for graph in self.engine.get_matches(sentence, self.start, self.end) {
+            let graph = graph?;
+
             if let Some(unification) = &self.unification {
-                if !unification.keep(&graph, sentence) {
+                if !unification.keep(&graph, sentence)? {
                     continue;
                 }
             }
@@ -165,11 +186,16 @@ impl DisambiguationRule {
             all_spans.push(spans);
         }
 
-        Changes(all_spans)
+        Ok(Changes(all_spans))
     }
 
-    pub(crate) fn change<'t>(&'t self, sentence: &mut Sentence<'t>, changes: Changes) {
-        log::info!("applying {}", self.id);
+    pub(crate) fn change<'t>(
+        &'t self,
+        sentence: &mut Sentence<'t>,
+        changes: Changes,
+        guard: PropertyGuardMut,
+    ) -> Result<(), crate::properties::Error> {
+        debug!("applying {}", self.id);
 
         for spans in changes.0 {
             let mut groups = Vec::new();
@@ -185,43 +211,51 @@ impl DisambiguationRule {
                 groups.push(group);
             }
 
-            self.disambiguations.apply(groups);
+            self.disambiguations.apply(groups, guard)?;
         }
+
+        Ok(())
     }
 
     /// Often there are examples associated with a rule.
     /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
+    pub(crate) fn test<TOK: Tokenize>(&self, tokenizer: TOK) -> Result<(), crate::Error> {
         let mut passes = Vec::new();
 
-        for (i, test) in self.examples.iter().enumerate() {
+        for test in self.examples.iter() {
             let text = match test {
                 disambiguation::DisambiguationExample::Unchanged(x) => x.as_str(),
                 disambiguation::DisambiguationExample::Changed(x) => x.text.as_str(),
             };
 
             // by convention examples are always considered as one sentence even if the sentencizer would split
-            let sentence_before = tokenizer.disambiguate_up_to_id(
-                tokenizer
-                    .tokenize(text)
-                    .expect("test text must not be empty"),
-                Some(&self.id),
-            );
+            let sentence_before = tokenizer
+                .tokenize_sentence(text)
+                .expect("test text must not be empty");
 
             // shift the sentence to the right before matching to make sure
             // nothing assumes the sentene starts from absolute index zero
             let shift_delta = Position { byte: 1, char: 1 };
-            let sentence_before_complete = sentence_before.clone().rshift(shift_delta);
+            let mut sentence_before_complete = sentence_before.clone().rshift(shift_delta);
+
+            let guard = self
+                .compute_properties()
+                .build(&mut sentence_before_complete)?;
+
             let changes = self
-                .apply(&MatchSentence::new(&sentence_before_complete))
+                .apply(&MatchSentence::new(
+                    &sentence_before_complete,
+                    guard.downgrade(),
+                ))
+                .unwrap()
                 .lshift(shift_delta);
             let mut sentence_after = sentence_before.clone();
 
             if !changes.is_empty() {
-                self.change(&mut sentence_after, changes);
+                self.change(&mut sentence_after, changes, guard).unwrap();
             }
 
-            info!("Tokens: {:#?}", sentence_before);
+            debug!("Tokens: {:#?}", sentence_before);
 
             let pass = match test {
                 disambiguation::DisambiguationExample::Unchanged(_) => {
@@ -238,38 +272,29 @@ impl DisambiguationRule {
                         .find(|x| *x.span().char() == change.char_span)
                         .unwrap();
 
-                    let unordered_tags = after.tags().iter().collect::<HashSet<&WordData>>();
+                    let unordered_tags =
+                        after.tags().unwrap().iter().collect::<HashSet<&WordData>>();
                     let unordered_tags_change = change.after.iter().collect::<HashSet<&WordData>>();
 
-                    let pass = unordered_tags == unordered_tags_change;
-                    if !pass {
-                        println!("{:#?} ---- {:#?}", unordered_tags, unordered_tags_change);
-                    }
-                    pass
+                    unordered_tags == unordered_tags_change
                 }
             };
 
             if !pass {
-                let error_str = format!(
+                error!(
                     "Rule {}: Test \"{:#?}\" failed. Before: {:#?}. After: {:#?}.",
-                    self.id, test, sentence_before, sentence_after,
-                );
-
-                if tokenizer
-                    .lang_options()
-                    .known_failures
-                    .contains(&format!("{}:{}", self.id, i))
-                {
-                    warn!("{}", error_str)
-                } else {
-                    error!("{}", error_str)
-                }
+                    self.id, test, sentence_before, sentence_after
+                )
             }
 
             passes.push(pass);
         }
 
-        passes.iter().all(|x| *x)
+        if passes.iter().all(|x| *x) {
+            Ok(())
+        } else {
+            Err(crate::Error::TestFailed)
+        }
     }
 }
 
@@ -280,82 +305,92 @@ pub struct Suggestions<'a, 't> {
     sentence: &'t MatchSentence<'t>,
 }
 
+impl<'a, 't> Suggestions<'a, 't> {
+    fn suggest_from_graph(
+        graph: Result<MatchGraph, crate::properties::Error>,
+        rule: &'a Rule,
+        sentence: &'t MatchSentence<'t>,
+    ) -> Result<Option<Suggestion>, crate::properties::Error> {
+        let graph = graph?;
+
+        if let Some(unification) = &rule.unification {
+            if !unification.keep(&graph, sentence)? {
+                return Ok(None);
+            }
+        }
+
+        let start_group = graph.by_id(rule.start);
+        let end_group = graph.by_id(rule.end);
+
+        let replacements: Vec<String> = rule
+            .suggesters
+            .iter()
+            .filter_map(|x| x.apply(sentence, &graph, rule.start, rule.end))
+            .collect();
+
+        let start = if replacements
+            .iter()
+            .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
+        {
+            let first_token = graph.groups()[graph.get_index(rule.start)..]
+                .iter()
+                .find_map(|x| x.tokens(sentence).next())
+                .unwrap();
+
+            let idx = sentence
+                .iter()
+                .position(|x| std::ptr::eq(x, first_token))
+                .unwrap_or(0);
+
+            if idx > 0 {
+                sentence.index(idx - 1).span().end()
+            } else {
+                start_group.span.start()
+            }
+        } else {
+            start_group.span.start()
+        };
+        let end = end_group.span.end();
+
+        // this should never happen, but just return None instead of raising an Error
+        // `end` COULD be equal to `start` if the suggestion is to insert text at this position
+        if end < start {
+            return Ok(None);
+        }
+
+        let text_before = sentence.slice(Span::from_positions(start, end));
+
+        // fix e. g. "Super , dass"
+        let replacements: Vec<String> = replacements
+            .into_iter()
+            .filter(|suggestion| *suggestion != text_before)
+            .map(|x| utils::fix_nospace_chars(&x))
+            .collect();
+
+        Ok(if !replacements.is_empty() {
+            Some(Suggestion::new(
+                rule.id.to_string(),
+                rule.message
+                    .apply(sentence, &graph, rule.start, rule.end)
+                    .expect("Rules must have a message."),
+                Span::from_positions(start, end),
+                replacements,
+            ))
+        } else {
+            None
+        })
+    }
+}
+
 impl<'a, 't> Iterator for Suggestions<'a, 't> {
-    type Item = Suggestion;
+    type Item = Result<Suggestion, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let rule = self.rule;
         let sentence = self.sentence;
-        let (start, end) = (self.rule.start, self.rule.end);
 
-        self.matches.find_map(|graph| {
-            if let Some(unification) = &rule.unification {
-                if !unification.keep(&graph, sentence) {
-                    return None;
-                }
-            }
-
-            let start_group = graph.by_id(start);
-            let end_group = graph.by_id(end);
-
-            let replacements: Vec<String> = rule
-                .suggesters
-                .iter()
-                .filter_map(|x| x.apply(sentence, &graph, start, end))
-                .collect();
-
-            let start = if replacements
-                .iter()
-                .all(|x| utils::no_space_chars().chars().any(|c| x.starts_with(c)))
-            {
-                let first_token = graph.groups()[graph.get_index(start)..]
-                    .iter()
-                    .find_map(|x| x.tokens(sentence).next())
-                    .unwrap();
-
-                let idx = sentence
-                    .iter()
-                    .position(|x| std::ptr::eq(x, first_token))
-                    .unwrap_or(0);
-
-                if idx > 0 {
-                    sentence.index(idx - 1).span().end()
-                } else {
-                    start_group.span.start()
-                }
-            } else {
-                start_group.span.start()
-            };
-            let end = end_group.span.end();
-
-            // this should never happen, but just return None instead of raising an Error
-            // `end` COULD be equal to `start` if the suggestion is to insert text at this position
-            if end < start {
-                return None;
-            }
-
-            let text_before = sentence.slice(Span::from_positions(start, end));
-
-            // fix e. g. "Super , dass"
-            let replacements: Vec<String> = replacements
-                .into_iter()
-                .filter(|suggestion| *suggestion != text_before)
-                .map(|x| utils::fix_nospace_chars(&x))
-                .collect();
-
-            if !replacements.is_empty() {
-                Some(Suggestion::new(
-                    rule.id.to_string(),
-                    rule.message
-                        .apply(sentence, &graph, rule.start, rule.end)
-                        .expect("Rules must have a message."),
-                    Span::from_positions(start, end),
-                    replacements,
-                ))
-            } else {
-                None
-            }
-        })
+        self.matches
+            .find_map(|graph| Suggestions::suggest_from_graph(graph, rule, sentence).transpose())
     }
 }
 
@@ -414,6 +449,12 @@ impl Rule {
         self.enabled
     }
 
+    pub fn compute_properties(&self) -> Properties {
+        iter::once(self.engine.compute_properties())
+            .chain(self.unification.iter().map(|x| x.compute_properties()))
+            .collect()
+    }
+
     /// Get a unique identifier of this rule.
     pub fn id(&self) -> &Index {
         &self.id
@@ -459,7 +500,7 @@ impl Rule {
 
     /// Grammar rules always have at least one example associated with them.
     /// This method checks whether the correct action is taken in the examples.
-    pub fn test(&self, tokenizer: &Tokenizer) -> bool {
+    pub(crate) fn test<TOK: Tokenize>(&self, tokenizer: TOK) -> Result<(), crate::Error> {
         let mut passes = Vec::new();
 
         // make sure relative position is handled correctly
@@ -470,17 +511,17 @@ impl Rule {
         for test in self.examples.iter() {
             // by convention examples are always considered as one sentence even if the sentencizer would split
             let sentence = tokenizer
-                .disambiguate(
-                    tokenizer
-                        .tokenize(&test.text())
-                        .expect("test text must not be empty."),
-                )
+                .tokenize_sentence(&test.text())
+                .expect("test text must not be empty.")
                 .rshift(shift_delta);
 
-            info!("Sentence: {:#?}", sentence);
+            debug!("Sentence: {:#?}", sentence);
             let suggestions: Vec<_> = self
-                .apply(&MatchSentence::new(&sentence))
-                .map(|s| s.lshift(shift_delta))
+                .apply(&MatchSentence::new(
+                    &sentence,
+                    self.compute_properties().build(&sentence)?,
+                ))
+                .map(|s| s.unwrap().lshift(shift_delta))
                 .collect();
 
             let pass = if suggestions.len() > 1 {
@@ -495,7 +536,7 @@ impl Rule {
             };
 
             if !pass {
-                warn!(
+                error!(
                     "Rule {}: test \"{}\" failed. Expected: {:#?}. Found: {:#?}.",
                     self.id,
                     test.text(),
@@ -507,6 +548,10 @@ impl Rule {
             passes.push(pass);
         }
 
-        passes.iter().all(|x| *x)
+        if passes.iter().all(|x| *x) {
+            Ok(())
+        } else {
+            Err(crate::Error::TestFailed)
+        }
     }
 }

@@ -1,6 +1,4 @@
 {
-    "allow_errors": true,
-    "ignore_ids": [],
     "extra_split_chars": [
         "-",
         "─",

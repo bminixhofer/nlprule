@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
-        lang: ["en", "de", "es"] # TODO: load this from build/languages.txt
+        lang: ["en", "de", "es"]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -22,18 +22,9 @@ jobs:
           toolchain: stable
           target: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v1
-      - run: |
-          mkdir data
-          mkdir storage
-
-          cd data
-          wget https://f000.backblazeb2.com/file/nlprule/${{ matrix.lang }}.zip
-          unzip ${{ matrix.lang }}.zip
-      - name: Build source
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all-features
+      - name: Build and test language
+        run: |
+          bash scripts/build_and_test.sh ${{ matrix.lang }} xx
       - name: Build source (WebAssembly)
         uses: actions-rs/cargo@v1
         with:
@@ -44,55 +35,18 @@ jobs:
         if: matrix.lang == 'en'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
-      - name: Build binaries
-        uses: actions-rs/cargo@v1
-        env:
-          RUST_LOG: INFO
-        with:
-          command: run
-          args: --all-features --bin compile -- --build-dir data/${{ matrix.lang }} --tokenizer-out storage/${{ matrix.lang }}_tokenizer.bin --rules-out storage/${{ matrix.lang }}_rules.bin
+          args: --features "binaries-en compile bin regex-all-test"
       - name: Run nlprule tests
         uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         with:
           command: test
-          args: --verbose --all-features --release
-      - name: Run disambiguation tests
-        uses: actions-rs/cargo@v1
-        env:
-            RUST_LOG: WARN
-        with:
-          command: run
-          args: --all-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - name: Run disambiguation tests (with regex-fancy backend)
-        uses: actions-rs/cargo@v1
-        if: matrix.lang == 'en'
-        env:
-            RUST_LOG: WARN
-        with:
-          command: run
-          args: --manifest-path nlprule/Cargo.toml --features "bin regex-onig" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - name: Run disambiguation tests (with regex-onig backend)
-        uses: actions-rs/cargo@v1
-        if: matrix.lang == 'en'
-        env:
-            RUST_LOG: WARN
-        with:
-          command: run
-          args: --manifest-path nlprule/Cargo.toml --features "bin regex-fancy" --no-default-features --bin test_disambiguation -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin
-      - name: Run grammar rule tests
-        uses: actions-rs/cargo@v1
-        env:
-            RUST_LOG: WARN
-        with:
-          command: run
-          args: --all-features --bin test -- --tokenizer storage/${{ matrix.lang }}_tokenizer.bin --rules storage/${{ matrix.lang }}_rules.bin
+          args: --verbose --features "binaries-en" --release
       - name: Upload binaries as artifact
         uses: actions/upload-artifact@v2
         with:
           name: binaries
-          path: storage/*
+          path: nlprule/storage/*
 
   matrix_prep:
     runs-on: ubuntu-latest
@@ -107,145 +61,145 @@ jobs:
           # inputFile: '.github/workflows/matrix_includes.json' # Default input file path
           filter: '[?runOnEvent==`${{ github.event_name }}` || runOnEvent==`always`]'
 
-  python:
-    needs: [matrix_prep, rust]
-    strategy:      
-      matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
-    env:
-      working-directory: python
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1 # maturin needs Rust (obviously)
-        with:
-          profile: minimal
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v1
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v1
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: actions/download-artifact@v2
-        with:
-          name: binaries
-          path: storage
-      - name: Install GSED (if needed) # needed by set_version.sh
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install gnu-sed
-      - name: Update version (if release)
-        if: github.event_name == 'release'
-        run: |
-          bash scripts/set_version.sh ${{ github.event.release.tag_name }}
-      - name: Build and Test
-        run: |
-          # pybin is the directory with python binaries
-          PYBIN=${{ matrix.pybin }}
+  # python:
+  #   needs: [matrix_prep, rust]
+  #   strategy:      
+  #     matrix: ${{fromJson(needs.matrix_prep.outputs.matrix)}}
+  #   runs-on: ${{ matrix.os }}
+  #   container: ${{ matrix.container }}
+  #   env:
+  #     working-directory: python
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1 # maturin needs Rust (obviously)
+  #       with:
+  #         profile: minimal
+  #         toolchain: stable
+  #     - uses: Swatinem/rust-cache@v1
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v1
+  #       with:
+  #         python-version: ${{ matrix.python-version }}
+  #     - uses: actions/download-artifact@v2
+  #       with:
+  #         name: binaries
+  #         path: storage
+  #     - name: Install GSED (if needed) # needed by set_version.sh
+  #       if: matrix.os == 'macos-latest'
+  #       run: |
+  #         brew install gnu-sed
+  #     - name: Update version (if release)
+  #       if: github.event_name == 'release'
+  #       run: |
+  #         bash scripts/set_version.sh ${{ github.event.release.tag_name }}
+  #     - name: Build and Test
+  #       run: |
+  #         # pybin is the directory with python binaries
+  #         PYBIN=${{ matrix.pybin }}
                     
-          if [ -z "${PYBIN}" ]; then
-              PIP_CMD="python -m pip"
-              PYTHON_CMD="python"
-              PYTEST_CMD="python -m pytest"
-              export MATURIN_CMD="maturin"
-          else 
-              PIP_CMD="${PYBIN}/pip"
-              PYTHON_CMD="${PYBIN}/python"
-              PYTEST_CMD="${PYBIN}/pytest"
-              export MATURIN_CMD="${PYBIN}/maturin"
-          fi
+  #         if [ -z "${PYBIN}" ]; then
+  #             PIP_CMD="python -m pip"
+  #             PYTHON_CMD="python"
+  #             PYTEST_CMD="python -m pytest"
+  #             export MATURIN_CMD="maturin"
+  #         else 
+  #             PIP_CMD="${PYBIN}/pip"
+  #             PYTHON_CMD="${PYBIN}/python"
+  #             PYTEST_CMD="${PYBIN}/pytest"
+  #             export MATURIN_CMD="${PYBIN}/maturin"
+  #         fi
 
-          # if pybin is set, the venv will not be used
-          # still create it here for convenience since we need it on windows
-          ${PYTHON_CMD} -m venv venv
-          . venv/bin/activate || . venv/Scripts/activate # 'Scripts' on windows, 'bin' on Linux / macOS
-          ${PIP_CMD} install --upgrade pip
-          ${PIP_CMD} install maturin==0.9.4 pytest==6.1.2
+  #         # if pybin is set, the venv will not be used
+  #         # still create it here for convenience since we need it on windows
+  #         ${PYTHON_CMD} -m venv venv
+  #         . venv/bin/activate || . venv/Scripts/activate # 'Scripts' on windows, 'bin' on Linux / macOS
+  #         ${PIP_CMD} install --upgrade pip
+  #         ${PIP_CMD} install maturin==0.9.4 pytest==6.1.2
           
-          # remove potentially cached wheels
-          rm target/wheels/* || true
-          bash scripts/maturin.sh build --interpreter ${PYTHON_CMD} --release --manylinux 2014
+  #         # remove potentially cached wheels
+  #         rm target/wheels/* || true
+  #         bash scripts/maturin.sh build --interpreter ${PYTHON_CMD} --release --manylinux 2014
 
-          # install the wheel in two different ways:
-          # 1. via pip: needed on manylinux
-          # 2. via maturin develop: needed on windows in venv
-          ${PIP_CMD} install $(ls target/wheels/* | head -n1)
-          bash scripts/maturin.sh develop --release
+  #         # install the wheel in two different ways:
+  #         # 1. via pip: needed on manylinux
+  #         # 2. via maturin develop: needed on windows in venv
+  #         ${PIP_CMD} install $(ls target/wheels/* | head -n1)
+  #         bash scripts/maturin.sh develop --release
 
-          ${PYTEST_CMD} python/test.py -s
-        shell: bash
-      - name: Upload wheel as artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: python-wheel
-          path: target/wheels/*
+  #         ${PYTEST_CMD} python/test.py -s
+  #       shell: bash
+  #     - name: Upload wheel as artifact
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: python-wheel
+  #         path: target/wheels/*
 
-  publish:
-    runs-on: ubuntu-latest
-    needs: [rust, python]
-    if: github.event_name == 'release'
+  # publish:
+  #   runs-on: ubuntu-latest
+  #   needs: [rust, python]
+  #   if: github.event_name == 'release'
 
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ github.head_ref }}
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.8
-      - uses: actions/download-artifact@v2
-        with:
-          name: python-wheel
-          path: python-wheel
-      - uses: actions/download-artifact@v2
-        with:
-          name: binaries
-          path: storage
-      - run: |
-          gzip storage/en_tokenizer.bin
-          gzip storage/en_rules.bin
-          gzip storage/de_tokenizer.bin
-          gzip storage/de_rules.bin
-          gzip storage/es_tokenizer.bin
-          gzip storage/es_rules.bin
-      - name: Update version
-        run: |
-          bash scripts/set_version.sh ${{ github.event.release.tag_name }}
-      - name: Publish on crates.io
-        run: | # --allow-dirty is only needed b/c of the README.md, we can be sure it is clean otherwise anyway because it is freshly checked out
-          cargo login $CARGO_KEY
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #       with:
+  #         ref: ${{ github.head_ref }}
+  #     - name: Set up Python 3.8
+  #       uses: actions/setup-python@v1
+  #       with:
+  #         python-version: 3.8
+  #     - uses: actions/download-artifact@v2
+  #       with:
+  #         name: python-wheel
+  #         path: python-wheel
+  #     - uses: actions/download-artifact@v2
+  #       with:
+  #         name: binaries
+  #         path: storage
+  #     - run: |
+  #         gzip storage/en_tokenizer.bin
+  #         gzip storage/en_rules.bin
+  #         gzip storage/de_tokenizer.bin
+  #         gzip storage/de_rules.bin
+  #         gzip storage/es_tokenizer.bin
+  #         gzip storage/es_rules.bin
+  #     - name: Update version
+  #       run: |
+  #         bash scripts/set_version.sh ${{ github.event.release.tag_name }}
+  #     - name: Publish on crates.io
+  #       run: | # --allow-dirty is only needed b/c of the README.md, we can be sure it is clean otherwise anyway because it is freshly checked out
+  #         cargo login $CARGO_KEY
 
-          cd nlprule
-          cp ../README.md README.md
-          cargo publish --allow-dirty
-          rm README.md
-          cd ..
+  #         cd nlprule
+  #         cp ../README.md README.md
+  #         cargo publish --allow-dirty
+  #         rm README.md
+  #         cd ..
 
-          # allow crates.io index to update s. t. nlprule-build can depend on nlprule
-          sleep 1m
+  #         # allow crates.io index to update s. t. nlprule-build can depend on nlprule
+  #         sleep 1m
 
-          cd build
-          cargo publish --allow-dirty
-          cd ..
-        env:
-          CARGO_KEY: ${{ secrets.CARGO_KEY }}
-      - name: Publish on PyPI
-        run: |
-          pip install twine==3.3
-          twine upload python-wheel/*
-        env:
-          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-          TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
-      - name: Upload release binaries
-        uses: alexellis/upload-assets@0.2.2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          asset_paths: '["./storage/*"]'
-      - run: |
-          rm -r python-wheel
-          rm -r storage
-      - uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: v${{ github.event.release.tag_name }}
-          branch: main
+  #         cd build
+  #         cargo publish --allow-dirty
+  #         cd ..
+  #       env:
+  #         CARGO_KEY: ${{ secrets.CARGO_KEY }}
+  #     - name: Publish on PyPI
+  #       run: |
+  #         pip install twine==3.3
+  #         twine upload python-wheel/*
+  #       env:
+  #         TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+  #         TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
+  #     - name: Upload release binaries
+  #       uses: alexellis/upload-assets@0.2.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ github.token }}
+  #       with:
+  #         asset_paths: '["./storage/*"]'
+  #     - run: |
+  #         rm -r python-wheel
+  #         rm -r storage
+  #     - uses: stefanzweifel/git-auto-commit-action@v4
+  #       with:
+  #         commit_message: v${{ github.event.release.tag_name }}
+  #         branch: main

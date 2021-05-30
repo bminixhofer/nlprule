@@ -1,6 +1,6 @@
 //! A dictionary-based tagger.
 
-use crate::{types::*, utils::parallelism::MaybeParallelRefIterator};
+use crate::{properties::*, types::*, utils::parallelism::MaybeParallelRefIterator};
 use bimap::BiMap;
 use fst::{IntoStreamer, Map, Streamer};
 use log::error;
@@ -11,6 +11,9 @@ use std::{
     fmt,
     iter::{once, FusedIterator},
 };
+
+#[cfg(feature = "compile")]
+mod compile;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
@@ -58,6 +61,12 @@ impl<'t> fmt::Debug for WordId<'t> {
     }
 }
 
+impl<'t> Default for WordId<'t> {
+    fn default() -> Self {
+        WordId::empty()
+    }
+}
+
 impl<'t> WordId<'t> {
     pub(crate) fn id(&self) -> &Option<WordIdInt> {
         &self.1
@@ -70,6 +79,13 @@ impl<'t> WordId<'t> {
     /// Gets the word as string.
     pub fn as_str(&self) -> &str {
         self.0.as_ref()
+    }
+
+    pub fn as_ref_str(&self) -> &'t str {
+        match &self.0 {
+            Cow::Borrowed(x) => *x,
+            Cow::Owned(_) => panic!("can not get `&'t str` reference from owned Cow!"),
+        }
     }
 
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
@@ -397,11 +413,9 @@ impl<T: Clone + Default> WordIdMap<T> {
             .iter()
             .enumerate()
             .filter_map(|(index, maybe_value)| {
-                if let Some(value) = maybe_value {
-                    Some((WordIdInt(index as u32), value))
-                } else {
-                    None
-                }
+                maybe_value
+                    .as_ref()
+                    .map(|value| (WordIdInt(index as u32), value))
             })
     }
 }
@@ -534,10 +548,10 @@ impl<'a> ExactSizeIterator for TagIter<'a> {
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(from = "TaggerFields", into = "TaggerFields")]
 pub struct Tagger {
-    pub(crate) tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
-    pub(crate) tag_store: BiMap<String, PosIdInt>,
-    pub(crate) word_store: BiMap<String, WordIdInt>,
-    pub(crate) lang_options: TaggerLangOptions,
+    tags: WordIdMap<Vec<(WordIdInt, PosIdInt)>>,
+    tag_store: BiMap<String, PosIdInt>,
+    word_store: BiMap<String, WordIdInt>,
+    lang_options: TaggerLangOptions,
 }
 
 impl Tagger {
@@ -724,5 +738,43 @@ impl Tagger {
     /// * `word`: The word to lookup data for.
     pub fn get_tags<'a>(&'a self, word: &'a str) -> TagIter<'a> {
         self.get_tags_with_options(word, None, None)
+    }
+
+    pub fn transform<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+        guard: PropertyGuardMut,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        for token in sentence.iter_mut() {
+            let mut tag_vec: Vec<_> = self
+                .get_tags_with_options(
+                    token.as_str(),
+                    if token.is_sentence_start() {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                    None,
+                )
+                .collect();
+
+            tag_vec.push(
+                WordData::new(
+                    self.id_word(token.as_str().into()),
+                    PosId::special(SpecialPos::None),
+                )
+                .freeze(),
+            );
+
+            if token.is_sentence_end() {
+                tag_vec.push(
+                    WordData::new(WordId::empty(), PosId::special(SpecialPos::SentEnd)).freeze(),
+                );
+            }
+
+            *guard.tags_mut(token)? = Tags::new(self.id_word(token.as_str().into()), tag_vec);
+        }
+
+        Ok(sentence)
     }
 }

@@ -182,6 +182,7 @@ impl PyToken {
     fn data(&self) -> Vec<(&str, &str)> {
         self.token
             .tags()
+            .unwrap()
             .iter()
             .map(|x| (x.lemma().as_str(), x.pos().as_str()))
             .collect()
@@ -192,6 +193,7 @@ impl PyToken {
         let mut lemmas: Vec<_> = self
             .token
             .tags()
+            .unwrap()
             .iter()
             .filter_map(|x| {
                 if x.lemma().as_str().is_empty() {
@@ -211,6 +213,7 @@ impl PyToken {
         let mut tags: Vec<_> = self
             .token
             .tags()
+            .unwrap()
             .iter()
             .filter_map(|x| {
                 if x.pos().as_str().is_empty() {
@@ -227,7 +230,12 @@ impl PyToken {
 
     #[getter]
     fn chunks(&self) -> Vec<&str> {
-        self.token.chunks().iter().map(|x| x.as_str()).collect()
+        self.token
+            .chunks()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str())
+            .collect()
     }
 }
 
@@ -355,6 +363,7 @@ impl PyTokenizer {
                 .pipe(&text)
                 .map(|sentence| {
                     sentence
+                        .unwrap()
                         .into_iter()
                         .map(|token| PyCell::new(py, PyToken::from(token.into_static())))
                         .collect::<PyResult<Vec<_>>>()
@@ -619,6 +628,7 @@ impl PyRules {
             self.rules
                 .read()
                 .suggest(&sentence, &tokenizer)
+                .unwrap()
                 .into_iter()
                 .map(|x| PyCell::new(py, PySuggestion::from(x)))
                 .collect::<PyResult<Vec<_>>>()
@@ -639,7 +649,7 @@ impl PyRules {
             let tokenizer = self.tokenizer.borrow(py);
             let tokenizer = tokenizer.tokenizer();
 
-            Ok(self.rules.read().correct(&text, tokenizer))
+            Ok(self.rules.read().correct(&text, tokenizer).unwrap())
         })
     }
 

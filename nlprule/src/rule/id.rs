@@ -17,11 +17,10 @@
 //! Select individal rules:
 //!
 //! ```no_run
-//! use nlprule::{Tokenizer, Rules, rule::id::Category};
+//! use nlprule::{lang::en, rule::id::Category};
 //! use std::convert::TryInto;
 //!
-//! let tokenizer = Tokenizer::new("path/to/en_tokenizer.bin")?;
-//! let mut rules = Rules::new("path/to/en_rules.bin")?;
+//! let mut rules = en::rules();
 //!
 //! // disable rules named "confusion_due_do" in category "confused_words"
 //! rules

@@ -1,12 +1,19 @@
 //! Checks if the input text contains multi-token phrases from a finite list (might contain e. g. city names) and assigns lemmas and part-of-speech tags accordingly.
 
+use crate::properties::*;
 use crate::types::*;
 use aho_corasick::AhoCorasick;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
+use super::Component;
+
+#[cfg(feature = "compile")]
+mod compile;
+
 #[derive(Serialize, Deserialize)]
-pub(crate) struct MultiwordTaggerFields {
-    pub(crate) multiwords: Vec<(String, PosId<'static>)>,
+struct MultiwordTaggerFields {
+    multiwords: Vec<(String, PosId<'static>)>,
 }
 
 impl From<MultiwordTaggerFields> for MultiwordTagger {
@@ -36,9 +43,20 @@ pub struct MultiwordTagger {
     multiwords: Vec<(String, PosId<'static>)>,
 }
 
-impl MultiwordTagger {
-    /// Populates the `.multiword_data` field of the passed tokens by checking if any known phrases are contained.
-    pub fn apply<'t>(&'t self, sentence: &mut Sentence<'t>) {
+impl Transform for MultiwordTagger {
+    fn properties(&self) -> PropertiesMut {
+        lazy_static! {
+            static ref PROPERTIES: PropertiesMut = Properties::default().write(&[Property::Tags]);
+        }
+        *PROPERTIES
+    }
+
+    fn transform<'t>(
+        &'t self,
+        mut sentence: Sentence<'t>,
+    ) -> Result<Sentence<'t>, crate::properties::Error> {
+        let props = self.property_guard(&mut sentence)?;
+
         let tagger = sentence.tagger();
 
         let mut start_indices = DefaultHashMap::new();
@@ -50,7 +68,7 @@ impl MultiwordTagger {
             .enumerate()
             .map(|(i, x)| {
                 start_indices.insert(byte_index, i);
-                byte_index += x.text().0.len();
+                byte_index += x.as_str().len();
                 end_indices.insert(byte_index, i);
                 byte_index += " ".len();
 
@@ -66,11 +84,19 @@ impl MultiwordTagger {
                 let (word, pos) = &self.multiwords[m.pattern()];
                 // end index is inclusive
                 for token in sentence.iter_mut().skip(*start).take((end + 1) - start) {
-                    token.tags_mut().push(
+                    props.tags_mut(token)?.push(
                         WordData::new(tagger.id_word(word.as_str().into()), pos.clone()).freeze(),
                     );
                 }
             }
         }
+
+        Ok(sentence)
+    }
+}
+
+impl Component for MultiwordTagger {
+    fn name() -> &'static str {
+        "multiword_tagger"
     }
 }

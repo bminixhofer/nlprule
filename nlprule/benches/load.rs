@@ -1,17 +1,13 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use nlprule::{Rules, Tokenizer};
+use criterion::{criterion_group, criterion_main, Criterion};
+use nlprule::lang::en;
 use std::time::Duration;
 
 fn parse_tokenizer(c: &mut Criterion) {
-    c.bench_function("load tokenizer", |b| {
-        b.iter(|| Tokenizer::new(black_box("../storage/en_tokenizer.bin")).unwrap())
-    });
+    c.bench_function("load tokenizer", |b| b.iter(en::analyzer));
 }
 
 fn parse_rules(c: &mut Criterion) {
-    c.bench_function("load rules", |b| {
-        b.iter(|| Rules::new(black_box("../storage/en_rules.bin")).unwrap())
-    });
+    c.bench_function("load rules", |b| b.iter(en::rules));
 }
 
 fn no_warmup_criterion() -> Criterion {

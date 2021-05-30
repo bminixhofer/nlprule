@@ -1,4 +1,7 @@
+use std::iter;
+
 use crate::{
+    properties::*,
     types::*,
     utils::regex::{CaptureMatches, Regex},
 };
@@ -14,14 +17,18 @@ pub struct TokenEngine {
 }
 
 impl TokenEngine {
-    fn get_match<'t>(&'t self, sentence: &'t MatchSentence, i: usize) -> Option<MatchGraph<'t>> {
-        if let Some(graph) = self.composition.apply(sentence, i) {
+    fn get_match<'t>(
+        &'t self,
+        sentence: &'t MatchSentence,
+        i: usize,
+    ) -> Result<Option<MatchGraph<'t>>, crate::properties::Error> {
+        if let Some(graph) = self.composition.apply(sentence, i)? {
             let mut blocked = false;
 
             // TODO: cache / move to outer loop
             for i in 0..sentence.len() {
                 for antipattern in &self.antipatterns {
-                    if let Some(anti_graph) = antipattern.apply(sentence, i) {
+                    if let Some(anti_graph) = antipattern.apply(sentence, i)? {
                         let anti_start = anti_graph.by_index(0).span.char().start;
                         let anti_end = anti_graph
                             .by_index(anti_graph.groups().len() - 1)
@@ -44,11 +51,11 @@ impl TokenEngine {
             }
 
             if !blocked {
-                return Some(graph);
+                return Ok(Some(graph));
             }
         }
 
-        None
+        Ok(None)
     }
 }
 
@@ -84,7 +91,7 @@ pub struct EngineMatches<'a, 't> {
 }
 
 impl<'a, 't> Iterator for EngineMatches<'a, 't> {
-    type Item = MatchGraph<'t>;
+    type Item = Result<MatchGraph<'t>, crate::properties::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let sentence = self.sentence;
@@ -93,22 +100,25 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
 
         match &mut self.inner {
             InnerMatches::Token(inner) => (inner.index..sentence.len()).find_map(|i| {
-                inner.engine.get_match(sentence, i).and_then(|graph| {
-                    let start_group = graph.by_id(start_id);
-                    let end_group = graph.by_id(end_id);
+                match inner.engine.get_match(sentence, i) {
+                    Ok(graph) => graph.and_then(|graph| {
+                        let start_group = graph.by_id(start_id);
+                        let end_group = graph.by_id(end_id);
 
-                    let start = start_group.span.char().start - sentence.span().char().start;
-                    let end = end_group.span.char().end - sentence.span().char().start;
+                        let start = start_group.span.char().start - sentence.span().char().start;
+                        let end = end_group.span.char().end - sentence.span().char().start;
 
-                    if inner.mask[start..end].iter().all(|x| !x) {
-                        inner.mask[start..end].iter_mut().for_each(|x| *x = true);
+                        if inner.mask[start..end].iter().all(|x| !x) {
+                            inner.mask[start..end].iter_mut().for_each(|x| *x = true);
 
-                        inner.index += 1;
-                        Some(graph)
-                    } else {
-                        None
-                    }
-                })
+                            inner.index += 1;
+                            Some(Ok(graph))
+                        } else {
+                            None
+                        }
+                    }),
+                    Err(err) => Some(Err(err)),
+                }
             }),
             InnerMatches::Text(inner) => inner.captures.next().map(|captures| {
                 let bi_to_ci = &inner.byte_idx_to_char_idx;
@@ -134,13 +144,25 @@ impl<'a, 't> Iterator for EngineMatches<'a, 't> {
                     }
                 }
 
-                MatchGraph::new(groups, inner.id_to_idx)
+                Ok(MatchGraph::new(groups, inner.id_to_idx))
             }),
         }
     }
 }
 
 impl Engine {
+    pub fn compute_properties(&self) -> Properties {
+        match &self {
+            Engine::Token(engine) => engine
+                .antipatterns
+                .iter()
+                .map(|x| x.compute_properties())
+                .chain(iter::once(engine.composition.compute_properties()))
+                .collect(),
+            Engine::Text(_, _) => Properties::default(),
+        }
+    }
+
     pub fn get_matches<'a, 't>(
         &'a self,
         sentence: &'t MatchSentence,

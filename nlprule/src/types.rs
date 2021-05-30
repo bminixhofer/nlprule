@@ -1,8 +1,7 @@
 //! Fundamental types used by this crate.
 
-use crate::tokenizer::tag::Tagger;
-pub use crate::tokenizer::tag::{PosId, WordId};
-pub(crate) use crate::tokenizer::tag::{PosIdInt, SpecialPos, WordIdInt};
+pub(crate) use crate::components::tagger::{PosId, SpecialPos, WordId, WordIdInt};
+use crate::{components::tagger::Tagger, properties::Property};
 use derivative::Derivative;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -67,6 +66,12 @@ impl<'t> Sentence<'t> {
     /// Gets the tokens in this sentence.
     pub fn tokens(&self) -> &[Token<'t>] {
         &self.tokens
+    }
+
+    /// Gets the first token in this sentence. There is always at least one token in the sentence
+    /// so this will never panic.
+    pub fn first(&self) -> &Token<'t> {
+        &self.tokens[0]
     }
 
     /// Gets the amount of tokens in this sentence.
@@ -177,15 +182,20 @@ impl<'a, 't> Iterator for TagIter<'a, 't> {
 
 /// Contains all the local information about a token i. e.
 /// the text itself and the [WordData]s associated with the word.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Tags<'t> {
+    id: WordId<'t>,
     tags: Vec<WordData<'t>>,
 }
 
 impl<'t> Tags<'t> {
     /// Creates new [Tags].
-    pub fn new(tags: Vec<WordData<'t>>) -> Self {
-        Tags { tags }
+    pub fn new(id: WordId<'t>, tags: Vec<WordData<'t>>) -> Self {
+        Tags { id, tags }
+    }
+
+    pub fn id(&self) -> &WordId<'t> {
+        &self.id
     }
 
     /// Multiple pairs of (lemma, part-of-speech) associated with this token.
@@ -221,59 +231,64 @@ impl<'t> Tags<'t> {
     /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
     pub fn into_static(self) -> Tags<'static> {
         Tags {
+            id: self.id.into_static(),
             tags: self.tags.into_iter().map(|x| x.into_static()).collect(),
         }
     }
 }
 
+lazy_static! {
+    pub(crate) static ref SENT_START: Token<'static> = Token {
+        text: "",
+        span: Span::default(),
+        is_sentence_start: false, // `is_sentence_start` marks the first *real* token in the sentence.
+        is_sentence_end: false,
+        has_space_before: false,
+        tags: Some(Tags::new(
+            WordId::empty(),
+            vec![WordData::new(
+                WordId::empty(),
+                PosId::special(SpecialPos::SentStart),
+            )],
+        )),
+        chunks: Some(Vec::new()),
+    };
+}
+
 /// A token where varying levels of information are set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'t> {
-    text: WordId<'t>,
-    tags: Tags<'t>,
+    text: &'t str,
     span: Span,
+    is_sentence_start: bool,
     is_sentence_end: bool,
     has_space_before: bool,
-    chunks: Vec<String>,
+    pub tags: Option<Tags<'t>>,
+    pub chunks: Option<Vec<String>>,
 }
 
 impl<'t> Token<'t> {
     pub(crate) fn new(
-        text: WordId<'t>,
-        tags: Tags<'t>,
+        text: &'t str,
         span: Span,
+        is_sentence_start: bool,
         is_sentence_end: bool,
         has_space_before: bool,
-        chunks: Vec<String>,
     ) -> Self {
         Token {
             text,
-            tags,
             span,
+            is_sentence_start,
             is_sentence_end,
             has_space_before,
-            chunks,
+            tags: None,
+            chunks: None,
         }
     }
 
-    /// Gets the word id for this token.
-    pub fn text(&self) -> &WordId<'t> {
-        &self.text
-    }
-
     /// Gets the token as string.
-    pub fn as_str(&self) -> &str {
-        self.text.as_str()
-    }
-
-    /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
-    pub fn tags(&self) -> &Tags<'t> {
-        &self.tags
-    }
-
-    #[allow(missing_docs)]
-    pub fn tags_mut(&mut self) -> &mut Tags<'t> {
-        &mut self.tags
+    pub fn as_str(&self) -> &'t str {
+        self.text
     }
 
     /// The span of this sentence.
@@ -281,7 +296,12 @@ impl<'t> Token<'t> {
         &self.span
     }
 
-    /// Whether this token is the last token in the sentence-
+    /// Whether this token is the first token in the sentence.
+    pub fn is_sentence_start(&self) -> bool {
+        self.is_sentence_start
+    }
+
+    /// Whether this token is the last token in the sentence.
     pub fn is_sentence_end(&self) -> bool {
         self.is_sentence_end
     }
@@ -291,32 +311,37 @@ impl<'t> Token<'t> {
         self.has_space_before
     }
 
-    /// Chunks associated with this token.
-    pub fn chunks(&self) -> &[String] {
-        &self.chunks
-    }
-
-    #[allow(missing_docs)]
-    pub fn chunks_mut(&mut self) -> &mut Vec<String> {
-        &mut self.chunks
-    }
-
     /// Shift the span of this token right by the specified amount.
     pub fn rshift(mut self, position: Position) -> Self {
         self.span = self.span.rshift(position);
         self
     }
+}
 
-    /// Converts this struct to a struct with `'static` lifetime by cloning borrowed data.
-    pub fn into_static(self) -> Token<'static> {
-        Token {
-            text: self.text.into_static(),
-            tags: self.tags.into_static(),
-            span: self.span,
-            is_sentence_end: self.is_sentence_end,
-            has_space_before: self.has_space_before,
-            chunks: self.chunks,
-        }
+impl<'t> Token<'t> {
+    /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
+    pub fn tags(&self) -> Result<&Tags<'t>, crate::Error> {
+        self.tags
+            .as_ref()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Tags).into())
+    }
+
+    pub fn tags_mut(&mut self) -> Result<&mut Tags<'t>, crate::Error> {
+        self.tags
+            .as_mut()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Tags).into())
+    }
+
+    pub fn chunks(&self) -> Result<&[String], crate::Error> {
+        self.chunks
+            .as_deref()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Chunks).into())
+    }
+
+    pub fn chunks_mut(&mut self) -> Result<&mut Vec<String>, crate::Error> {
+        self.chunks
+            .as_mut()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Chunks).into())
     }
 }
 

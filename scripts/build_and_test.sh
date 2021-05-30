@@ -4,26 +4,35 @@ then
   exit
 fi
 
-# this script assumes the build directories are in data/
-# only for convenience
-mkdir -p storage
+set -e
 
-# x-- => only compile
-# -xx => test_disambiguation and test
-# xxx or flags not set => everything
-flags=${2:-"xxx"}
+mkdir -p nlprule/src/storage
+
+cd data
+
+# download + extract the build directory from backblaze if we don't have it yet
+if [ ! -f $1.zip ]; then
+  wget https://f000.backblazeb2.com/file/nlprule/$1.zip
+  unzip -o $1.zip
+fi
+
+cd ..
+
+# x- => only compile
+# -x => only test
+# xx or flags not set => everything
+flags=${2:-"xx"}
 
 if [ "${flags:0:1}" == "x" ] 
 then
-    RUST_LOG=INFO cargo run --all-features --bin compile -- --build-dir data/$1 --tokenizer-out storage/$1_tokenizer.bin --rules-out storage/$1_rules.bin
+    cd nlprule
+    RUST_LOG=INFO cargo run --features "compile bin" --bin compile -- --build-dir ../data/$1 --out-dir storage/$1
+    cd ..
 fi
 
 if [ "${flags:1:1}" == "x" ] 
 then
-    RUST_LOG=WARN cargo run --all-features --bin test_disambiguation -- --tokenizer storage/$1_tokenizer.bin
-fi
-
-if [ "${flags:2:1}" == "x" ] 
-then
-    RUST_LOG=WARN cargo run --all-features --bin test -- --tokenizer storage/$1_tokenizer.bin --rules storage/$1_rules.bin
+    cd nlprule
+    RUST_LOG=INFO cargo run --no-default-features --features "bin binaries-$1 regex-all-test" --bin test_$1
+    cd ..
 fi
