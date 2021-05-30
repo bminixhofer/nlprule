@@ -413,11 +413,9 @@ impl<T: Clone + Default> WordIdMap<T> {
             .iter()
             .enumerate()
             .filter_map(|(index, maybe_value)| {
-                if let Some(value) = maybe_value {
-                    Some((WordIdInt(index as u32), value))
-                } else {
-                    None
-                }
+                maybe_value
+                    .as_ref()
+                    .map(|value| (WordIdInt(index as u32), value))
             })
     }
 }

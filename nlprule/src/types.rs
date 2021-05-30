@@ -1,7 +1,7 @@
 //! Fundamental types used by this crate.
 
-use crate::components::tagger::Tagger;
 pub(crate) use crate::components::tagger::{PosId, SpecialPos, WordId, WordIdInt};
+use crate::{components::tagger::Tagger, properties::Property};
 use derivative::Derivative;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -321,19 +321,27 @@ impl<'t> Token<'t> {
 impl<'t> Token<'t> {
     /// The tags of this token. Contain information about the part-of-speech tags and lemmas.
     pub fn tags(&self) -> Result<&Tags<'t>, crate::Error> {
-        self.tags.as_ref().ok_or(crate::Error::Unset("tags"))
+        self.tags
+            .as_ref()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Tags).into())
     }
 
     pub fn tags_mut(&mut self) -> Result<&mut Tags<'t>, crate::Error> {
-        self.tags.as_mut().ok_or(crate::Error::Unset("tags"))
+        self.tags
+            .as_mut()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Tags).into())
     }
 
     pub fn chunks(&self) -> Result<&[String], crate::Error> {
-        self.chunks.as_deref().ok_or(crate::Error::Unset("chunks"))
+        self.chunks
+            .as_deref()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Chunks).into())
     }
 
     pub fn chunks_mut(&mut self) -> Result<&mut Vec<String>, crate::Error> {
-        self.chunks.as_mut().ok_or(crate::Error::Unset("chunks"))
+        self.chunks
+            .as_mut()
+            .ok_or_else(|| crate::properties::Error::Unset(Property::Chunks).into())
     }
 }
 

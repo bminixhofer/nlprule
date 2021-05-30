@@ -1,5 +1,5 @@
 use fs_err as fs;
-
+use fs_err::File;
 use std::{io::BufReader, path::PathBuf, str::FromStr};
 
 use crate::compile::{BuildComponent, BuildInfo, Error};

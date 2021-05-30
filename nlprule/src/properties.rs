@@ -12,9 +12,9 @@ pub mod suggest {
 
     /// Correct a text by applying suggestions to it.
     /// In the case of multiple possible replacements, always chooses the first one.
-    pub fn apply_suggestions(text: &str, suggestions: &[Suggestion]) -> String {
-        let mut offset: isize = 0;
-        let mut chars: Vec<_> = text.chars().collect();
+    pub fn apply_suggestions(sentence: &Sentence, suggestions: &[Suggestion]) -> String {
+        let mut offset: isize = -(sentence.span().char().start as isize);
+        let mut chars: Vec<_> = sentence.text().chars().collect();
 
         for suggestion in suggestions {
             let replacement: Vec<_> = suggestion.replacements()[0].chars().collect();
@@ -42,7 +42,7 @@ pub mod suggest {
 
         fn correct(&self, sentence: &Sentence) -> Result<String, Error> {
             let suggestions = self.suggest(sentence)?;
-            Ok(apply_suggestions(sentence.text(), &suggestions))
+            Ok(apply_suggestions(&sentence, &suggestions))
         }
 
         #[allow(unused_variables)]
@@ -325,7 +325,7 @@ impl Properties {
 }
 
 impl PropertiesMut {
-    pub(crate) fn reads_without_write<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
+    pub(crate) fn reads_without_write(&self) -> impl Iterator<Item = Property> {
         self.read_mask
             .intersection(self.write_mask.inverse())
             .into_iter()
@@ -619,6 +619,18 @@ macro_rules! impl_pipeline {
                 let sentences = $first.tokenize(text).map(move |mut sentence| {
                     $(sentence = $name.transform(sentence).unwrap();)*
                     $last.suggest(&sentence).unwrap()
+                });
+
+                sentences
+            }
+
+            #[allow(non_snake_case, unused_mut)]
+            pub fn correct<'t>(&'t self, text: &'t str) -> impl Iterator<Item = String> + 't {
+                let (ref $first, $(ref $name,)* ref $last) = self.0;
+
+                let sentences = $first.tokenize(text).map(move |mut sentence| {
+                    $(sentence = $name.transform(sentence).unwrap();)*
+                    $last.correct(&sentence).unwrap()
                 });
 
                 sentences

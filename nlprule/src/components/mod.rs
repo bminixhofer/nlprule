@@ -17,7 +17,7 @@ pub trait Component: Serialize + DeserializeOwned {
 
     fn new<P: AsRef<Path>>(p: P) -> Result<Self, crate::Error> {
         let reader = BufReader::new(File::open(p.as_ref())?);
-        Ok(Self::from_reader(reader)?)
+        Self::from_reader(reader)
     }
 
     fn from_reader<R: Read>(reader: R) -> Result<Self, crate::Error> {

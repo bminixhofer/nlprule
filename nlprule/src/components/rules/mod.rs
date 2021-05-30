@@ -2,8 +2,6 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use std::iter::FromIterator;
 
-use fs_err::File;
-
 use crate::properties::*;
 use crate::rule::Rule;
 use crate::types::*;

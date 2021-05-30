@@ -1,3 +1,4 @@
+#[allow(unused)]
 macro_rules! binary {
     ($component: ty, $lang_code:literal, $binary_name:literal) => {{
         use crate::components::Component;
@@ -15,8 +16,12 @@ macro_rules! binary {
     }};
 }
 
+#[allow(unused)]
 const ERROR_MSG: &str = "binaries are pre-tested.";
 
+#[cfg(feature = "binaries-de")]
 pub mod de;
+#[cfg(feature = "binaries-en")]
 pub mod en;
+#[cfg(feature = "binaries-es")]
 pub mod es;

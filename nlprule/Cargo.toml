@@ -53,10 +53,6 @@ quickcheck = "1.0"
 quickcheck_macros = "1.0"
 criterion = "0.3"
 
-[build-dependencies]
-serde_json = "1"
-fs-err = "2.5"
-
 [[bench]]
 name = "load"
 harness = false
@@ -65,12 +61,14 @@ required-features = ["binaries"]
 [features]
 default = ["regex-onig"]
 
-binaries = []
+binaries-de = []
+binaries-en = []
+binaries-es = []
+binaries-all = ["binaries-de", "binaries-en", "binaries-es"]
 
 regex-onig = ["onig"]
 # to switch to the fancy-regex engine, disable default features and add this feature
 regex-fancy = ["fancy-regex"]
-
 # this enables both regex backends at the same time and makes sure they are equivalent
 # used only for compilation and tests
 regex-all-test = ["regex-onig", "regex-fancy"]
@@ -92,8 +90,16 @@ name = "compile"
 required-features = ["compile", "bin"]
 
 [[bin]]
-name = "test"
-required-features = ["bin"]
+name = "test_en"
+required-features = ["bin", "binaries-en"]
+
+[[bin]]
+name = "test_es"
+required-features = ["bin", "binaries-es"]
+
+[[bin]]
+name = "test_de"
+required-features = ["bin", "binaries-de"]
 
 [[bin]]
 name = "run"

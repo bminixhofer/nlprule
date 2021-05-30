@@ -1,42 +1,35 @@
 use std::convert::TryInto;
 
 use lazy_static::lazy_static;
-use nlprule::{properties::*, rule::id::Category, types::Position, Rules, Tokenizer};
+use nlprule::{lang::en, properties::*};
 use quickcheck_macros::quickcheck;
 
-const TOKENIZER_PATH: &str = "../storage/en_tokenizer.bin";
-const RULES_PATH: &str = "../storage/en_rules.bin";
+#[test]
+fn can_analyze_empty_text() {
+    let analyzer = en::analyzer();
 
-lazy_static! {
-    static ref TOKENIZER: Tokenizer = Tokenizer::new(TOKENIZER_PATH).unwrap();
-    static ref RULES: Rules = Rules::new(RULES_PATH).unwrap();
+    let sentences: Vec<_> = analyzer.tokenize("").collect();
+    assert!(sentences.is_empty());
 }
 
 #[test]
-fn can_tokenize_empty_text() {
-    let tokenizer =
-        Pipeline::new((&*TOKENIZER, TOKENIZER.chunker().as_ref().unwrap(), &*RULES)).unwrap();
+fn handles_whitespace_correctly() {
+    let analyzer = en::analyzer();
 
-    let sentences: Vec<_> = tokenizer.suggest("His homework is due tomorrow.").collect();
-    // assert!(sentences.is_empty());
+    // preceding whitespace has to be included, trailing whitespace behavior is unspecified
+    let text = "  hello.\ttest.\t\t";
+
+    let mut sentences = analyzer.tokenize(text);
+    assert_eq!(
+        &text[sentences.next().unwrap().span().byte().clone()],
+        "  hello.\t"
+    );
+    assert_eq!(
+        &text[sentences.next().unwrap().span().byte().clone()],
+        "test.\t"
+    );
+    assert!(sentences.next().is_none());
 }
-
-// #[test]
-// fn handles_whitespace_correctly() {
-//     // preceding whitespace has to be included, trailing whitespace behavior is unspecified
-//     let text = "  hello.\ttest.\t\t";
-
-//     let mut sentences = TOKENIZER.pipe(text);
-//     assert_eq!(
-//         &text[sentences.next().unwrap().unwrap().span().byte().clone()],
-//         "  hello.\t"
-//     );
-//     assert_eq!(
-//         &text[sentences.next().unwrap().unwrap().span().byte().clone()],
-//         "test.\t"
-//     );
-//     assert!(sentences.next().is_none());
-// }
 
 // #[quickcheck]
 // fn can_tokenize_anything(text: String) -> bool {

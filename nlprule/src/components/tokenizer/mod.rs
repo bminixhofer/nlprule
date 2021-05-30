@@ -7,7 +7,6 @@
 #[cfg(feature = "compile")]
 mod compile;
 
-use fs_err::File;
 use std::ops::Range;
 
 use crate::types::*;

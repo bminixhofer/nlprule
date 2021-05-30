@@ -1,7 +1,7 @@
 mod structure;
 
+use fs_err::File;
 use std::{io::BufReader, path::PathBuf};
-
 use log::warn;
 
 use crate::{

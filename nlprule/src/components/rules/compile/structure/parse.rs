@@ -199,11 +199,7 @@ fn get_exceptions(
                 _ => None,
             })
             .filter_map(|x| {
-                let exception_text = if let Some(exception_text) = &x.text {
-                    Some(exception_text.as_str())
-                } else {
-                    None
-                };
+                let exception_text = x.text.as_ref().map(|x| x.as_str());
                 let mut atom =
                     match parse_match_attribs(x, exception_text, case_sensitive, None, info) {
                         Ok(atom) => atom,
@@ -348,11 +344,7 @@ fn parse_match(m: super::Match, engine: &Engine, info: &mut BuildInfo) -> Result
         m.no.parse::<usize>()
             .expect("no must be parsable as usize.");
 
-    let case_conversion = if let Some(conversion) = &m.case_conversion {
-        Some(conversion.as_str())
-    } else {
-        None
-    };
+    let case_conversion = m.case_conversion.as_deref();
 
     let pos_replacer = if let Some(postag) = m.postag {
         if postag.contains("+DT") || postag.contains("+INDT") {
