@@ -12,7 +12,7 @@ pub mod rules;
 pub mod tagger;
 pub mod tokenizer;
 
-pub trait Component: Serialize + DeserializeOwned {
+pub trait Component: Serialize + DeserializeOwned + Clone {
     fn name() -> &'static str;
 
     fn new<P: AsRef<Path>>(p: P) -> Result<Self, crate::Error> {

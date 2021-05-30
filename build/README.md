@@ -1,34 +1,6 @@
 # nlprule-build
 
-This crate provides a builder to make it easier to use the correct binaries for [nlprule](https://github.com/bminixhofer/nlprule). It also provides:
-1. Utility functions to download the binaries from their distribution source.
-2. Scripts to create the nlprule build directories.
-
-## Development
-
-If you are using a development version of nlprule, the builder can build the binaries itself (instead of just fetching them):
-
-```rust
-let nlprule_builder = nlprule_build::BinaryBuilder::new(
-    &["en"],
-    std::env::var("OUT_DIR").expect("OUT_DIR is set when build.rs is running"),
-)
-// this specifies that the binaries should be built if they are not found
-.fallback_to_build_dir(true)
-.build()
-.validate();
-```
-
-In that case, you should set
-
-```toml
-[profile.dev]
-build-override = { opt-level = 2 }
-```
-
-in your `Cargo.toml`. Building can be slow otherwise.
-
-The following has information how to acquire the nlpruile build directories and how to build and test the nlprule binaries. As a user you will typically not need to do this.
+Utilities for creating build resources.
 
 ### Building and testing the nlprule binaries
 

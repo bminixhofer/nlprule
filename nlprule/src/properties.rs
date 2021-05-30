@@ -118,7 +118,7 @@ pub mod transform {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub struct Pipeline<T>(pub(super) T, pub(super) PropertiesMut);
 }
 
@@ -168,12 +168,42 @@ pub mod tokenize {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub struct Pipeline<T>(pub(super) T, pub(super) PropertiesMut);
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Pipeline<T>(T, PropertiesMut);
+
+impl<T> transform::Pipeline<T> {
+    pub fn components(&self) -> &T {
+        &self.0
+    }
+
+    pub fn components_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> tokenize::Pipeline<T> {
+    pub fn components(&self) -> &T {
+        &self.0
+    }
+
+    pub fn components_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> Pipeline<T> {
+    pub fn components(&self) -> &T {
+        &self.0
+    }
+
+    pub fn components_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
 
 #[derive(Error, Debug)]
 #[allow(missing_docs)]

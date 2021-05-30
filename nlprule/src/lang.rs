@@ -1,6 +1,16 @@
+use std::path::{Path, PathBuf};
+
+const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+pub fn binary_path(lang_code: &str, name: &str) -> PathBuf {
+    Path::new(MANIFEST_DIR)
+        .join(lang_code)
+        .join(format!("{}.bin", name))
+}
+
 #[allow(unused)]
 macro_rules! binary {
-    ($component: ty, $lang_code:literal, $binary_name:literal) => {{
+    ($component: ty, $lang_code:literal, $name:literal) => {{
         use crate::components::Component;
 
         let mut bytes: &'static [u8] = include_bytes!(concat!(
@@ -8,7 +18,7 @@ macro_rules! binary {
             "/storage/",
             $lang_code,
             "/",
-            $binary_name,
+            $name,
             ".bin"
         ));
 

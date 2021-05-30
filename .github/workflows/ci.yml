@@ -35,13 +35,13 @@ jobs:
         if: matrix.lang == 'en'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+          args: --features "binaries-en compile bin regex-all-test"
       - name: Run nlprule tests
         uses: actions-rs/cargo@v1
         if: matrix.lang == 'en'
         with:
           command: test
-          args: --verbose --all-features --release
+          args: --verbose --features "binaries-en" --release
       - name: Upload binaries as artifact
         uses: actions/upload-artifact@v2
         with:
