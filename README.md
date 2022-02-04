@@ -20,7 +20,7 @@
     </a>
 </p>
 
-A fast, low-resource Natural Language Processing and Error Correction library written in Rust. nlprule implements a rule- and lookup-based approach to NLP using resources from [LanguageTool](github.com/languagetool-org/languagetool).
+A fast, low-resource Natural Language Processing and Error Correction library written in Rust. nlprule implements a rule- and lookup-based approach to NLP using resources from [LanguageTool](https://github.com/languagetool-org/languagetool).
 
 <details>
   <summary>Python Usage</summary>
