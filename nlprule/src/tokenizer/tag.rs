@@ -171,6 +171,10 @@ pub(crate) struct TaggerLangOptions {
     /// Whether to retain the last tag if disambiguation leads to an empty tag.
     /// Language-specific in LT so it has to be an option.
     pub retain_last: bool,
+    /// Whether to run the Arabic prefix/suffix stemming after the dictionary
+    /// lookup (LT's `ArabicTagger.additionalTags`).
+    #[serde(default)]
+    pub arabic_stemming: bool,
 }
 
 impl Default for TaggerLangOptions {
@@ -178,6 +182,7 @@ impl Default for TaggerLangOptions {
         TaggerLangOptions {
             use_compound_split_heuristic: false,
             always_add_lower_tags: false,
+            arabic_stemming: false,
             extra_tags: Vec::new(),
             retain_last: false,
         }
@@ -609,6 +614,33 @@ impl Tagger {
 
     /// Tags the given string representation of a part-of-speech tag.
     /// Part-of-speech tags are treated as a closed set so each valid part-of-speech tag will get a numerical id.
+    /// Like [Tagger::id_tag], but the returned [PosId] borrows the tag
+    /// string from the tag store so it can be stored in a [Word] created at
+    /// runtime. Unknown tags fall back to UNKNOWN like `id_tag`.
+    pub(crate) fn id_tag_stored(&self, tag: &str) -> PosId<'_> {
+        if let Some(id) = self.tag_store.get_by_left(tag) {
+            let stored = self
+                .tag_store
+                .get_by_right(id)
+                .expect("tag store ids are dense");
+            PosId::regular(stored, *id)
+        } else {
+            error!(
+                "'{}' not found in tag store, please add it to the `extra_tags`. Using UNKNOWN instead.",
+                tag
+            );
+            let id = self
+                .tag_store
+                .get_by_left("UNKNOWN")
+                .expect("UNKNOWN tag must exist in tag store");
+            let stored = self
+                .tag_store
+                .get_by_right(id)
+                .expect("tag store ids are dense");
+            PosId::regular(stored, *id)
+        }
+    }
+
     pub fn id_tag<'a>(&self, tag: &'a str) -> PosId<'a> {
         PosId::regular(
             tag,

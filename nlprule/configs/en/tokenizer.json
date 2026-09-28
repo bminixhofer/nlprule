@@ -1,9 +1,11 @@
 {
-    "allow_errors": false,
+    "allow_errors": true,
     "ignore_ids": [
         "DISAMBIGUATION/BEST_JJS/0"
     ],
     "extra_join_regexes": [
         "(https?:\\/\\/(?:www\\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\\.[^\\s]{2,}|www\\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\\.[^\\s]{2,}|https?:\\/\\/(?:www\\.|(?!www))[a-zA-Z0-9]+\\.[^\\s]{2,}|www\\.[a-zA-Z0-9]+\\.[^\\s]{2,})"
-    ]
+    ],
+    "split_edge_hyphens": true,
+    "apostrophe_glue_after_known": true
 }

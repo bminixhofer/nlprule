@@ -1,0 +1,23 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "&lt;/CS>",
+        "&lt;/I>",
+        "&lt;/RG>",
+        "&lt;/RN>",
+        "&lt;/SP000>",
+        "&lt;CS>",
+        "&lt;I>",
+        "&lt;RG>",
+        "&lt;RN>",
+        "&lt;SP000>",
+        "''",
+        "SENT_END",
+        "SENT_START",
+        "UNKNOWN",
+        "Z0CN0",
+        "``"
+    ],
+    "retain_last": true
+}

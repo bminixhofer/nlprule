@@ -214,7 +214,10 @@ mod regex {
                     Ast::Class(Class::Bracketed(bracketed))
                 }
                 Class::Perl(perl) => {
-                    if matches!(perl.kind, ClassPerlKind::Space) {
+                    // \s is rewritten to a literal space; \S (negated) must
+                    // keep its class semantics — it previously collapsed to
+                    // ' ' too, silently breaking patterns like `(.*\S)(-)`
+                    if matches!(perl.kind, ClassPerlKind::Space) && !perl.negated {
                         Ast::Literal(Literal {
                             span: zero_span(),
                             kind: LiteralKind::Verbatim,
@@ -315,6 +318,295 @@ mod regex {
         full_match: bool,
     ) -> Result<String, Error> {
         let mut regex = in_regex.to_owned();
+        // decode Java surrogate pairs (`\ud83c\udc00`) to astral code
+        // points (`\u{1f000}`); regex-syntax rejects lone surrogates
+        // (de KOMMA_ZWISCHEN emoji classes)
+        {
+            let mut out = String::with_capacity(regex.len());
+            let b = regex.as_bytes();
+            let mut i = 0usize;
+            while i < b.len() {
+                if b[i] == b'\\'
+                    && i + 1 < b.len()
+                    && (b[i + 1] == b'u' || b[i + 1] == b'U')
+                    && i + 6 <= b.len()
+                {
+                    let hex = &regex[i + 2..i + 6];
+                    if let Ok(cp) = u32::from_str_radix(hex, 16) {
+                        if (0xD800..=0xDBFF).contains(&cp)
+                            && i + 12 <= b.len()
+                            && &regex[i + 6..i + 8] == "\\u"
+                        {
+                            if let Ok(lo) = u32::from_str_radix(&regex[i + 8..i + 12], 16) {
+                                if (0xDC00..=0xDFFF).contains(&lo) {
+                                    let c = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                    // oniguruma rejects `\u{...}` escapes: emit
+                                    // the astral character literally instead
+                                    if let Some(ch) = char::from_u32(c) {
+                                        out.push(ch);
+                                    }
+                                    i += 12;
+                                    continue;
+                                }
+                            }
+                        }
+                        // lone surrogate: replace with the replacement char
+                        if (0xD800..=0xDFFF).contains(&cp) {
+                            out.push('\u{fffd}');
+                            i += 6;
+                            continue;
+                        }
+                    }
+                }
+                let ch_len = utf8_char_len(b[i]);
+                out.push_str(&regex[i..i + ch_len]);
+                i += ch_len;
+            }
+            regex = out;
+        }
+        // drop quantifiers applied to zero-width anchors: Java tolerates
+        // `PRP$?` (postag classes), oniguruma rejects it
+        {
+            let b = regex.as_bytes();
+            let mut out = String::with_capacity(regex.len());
+            let mut i = 0usize;
+            let mut class_depth = 0usize;
+            while i < b.len() {
+                let c = b[i];
+                if c == b'\\' && i + 1 < b.len() {
+                    // `\b*`, `\A+`, ...: keep the anchor, drop quantifier(s).
+                    // ONLY actual zero-width anchors — NOT arbitrary escaped
+                    // chars (`\d+`, `\-?`, ... must keep their quantifier)
+                    let is_anchor = matches!(b[i + 1], b'b' | b'B' | b'A' | b'z' | b'Z');
+                    if is_anchor
+                        && class_depth == 0
+                        && i + 2 < b.len()
+                        && (b[i + 2] == b'?'
+                            || b[i + 2] == b'*'
+                            || b[i + 2] == b'+')
+                    {
+                        out.push_str(&regex[i..i + 2]);
+                        i += 2;
+                        // consume the quantifier and an optional laziness `?`
+                        i += if i + 1 < b.len() && b[i + 1] == b'?' { 2 } else { 1 };
+                        continue;
+                    }
+                    let seq_len = utf8_char_len(b[i + 1]) + 1;
+                    out.push_str(&regex[i..i + seq_len]);
+                    i += seq_len;
+                    continue;
+                }
+                if c == b'[' && class_depth == 0 {
+                    class_depth += 1;
+                } else if c == b']' && class_depth > 0 {
+                    class_depth -= 1;
+                } else if class_depth == 0 && (c == b'$' || c == b'^') {
+                    if i + 1 < b.len() && (b[i + 1] == b'?' || b[i + 1] == b'*' || b[i + 1] == b'+') {
+                        out.push(c as char);
+                        i += 1;
+                        // consume the quantifier and an optional laziness `?`
+                        i += if i + 1 < b.len() && b[i + 1] == b'?' { 2 } else { 1 };
+                        continue;
+                    }
+                }
+                let ch_len = utf8_char_len(c);
+                out.push_str(&regex[i..i + ch_len]);
+                i += ch_len;
+            }
+            regex = out;
+        }
+        // strip Java-only inline flags (e.g. `d` = UNIX_LINES in en
+        // ID_CASING `(?id)`): regex-syntax rejects them outright
+        {
+            let b = regex.as_bytes();
+            let mut out = String::with_capacity(regex.len());
+            let mut i = 0usize;
+            while i < b.len() {
+                if b[i] == b'(' && i + 2 < b.len() && b[i + 1] == b'?'
+                    && b[i + 2] != b'='
+                    && b[i + 2] != b'!'
+                    && b[i + 2] != b'<'
+                    && b[i + 2] != b'P'
+                {
+                    if let Some(rel) = regex[i..].find(|c| c == ')' || c == ':') {
+                        let end = i + rel;
+                        let flags = &regex[i + 2..end];
+                        // empty flags (`(?)`) are a Java no-op group —
+                        // they appear verbatim in en LIFE_LIVE/ID_CASING
+                        let is_flags = flags
+                            .chars()
+                            .all(|c| c.is_ascii_alphabetic() || c == '-');
+                        if is_flags {
+                            let kept: String = flags
+                                .chars()
+                                .filter(|c| matches!(c, 'i' | 'm' | 's' | 'x' | 'U' | 'u' | '-'))
+                                .collect();
+                            if kept.replace('-', "").is_empty() {
+                                // no usable flags left: `(?d)` → "", `(?d:` → "(?:"
+                                if b[end] == b')' {
+                                    i = end + 1;
+                                    continue;
+                                }
+                                out.push_str("(?:");
+                                i = end + 1;
+                                continue;
+                            }
+                            if kept != *flags {
+                                out.push_str("(?");
+                                out.push_str(&kept);
+                                out.push(if b[end] == b')' { ')' } else { ':' });
+                                i = end + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                let ch_len = utf8_char_len(b[i]);
+                out.push_str(&regex[i..i + ch_len]);
+                i += ch_len;
+            }
+            regex = out;
+        }
+        // pre-normalize Java-only syntax that the regex-syntax AST parser
+        // rejects outright:
+        // - possessive quantifiers (X*+ X++ X?+ X{n,m}+) -> greedy
+        // - a dangling `(?-)` (no flags negated) -> removed
+        // (regex already holds the input after the surrogate/anchor passes)
+        // repeatedly de-possessivize the leftmost possessive quantifier
+        loop {
+            let mut possessive: Option<(usize, usize)> = None;
+            for pat in ["*+", "++", "?+"] {
+                if let Some(pos) = regex.find(pat) {
+                    if possessive.map_or(true, |(p, _)| pos < p) {
+                        possessive = Some((pos, pat.len()));
+                    }
+                }
+            }
+            // brace quantifiers: `{n}`, `{n,}`, `{n,m}` followed by `+`
+            // (e.g. pl SKROTOWCE `\p{Lu}{2}+[i]*`)
+            let bytes = regex.as_bytes();
+            let mut i = 0usize;
+            while i < bytes.len() {
+                if bytes[i] == b'{' {
+                    let mut j = i + 1;
+                    let mut digit_or_comma = false;
+                    while j < bytes.len()
+                        && (bytes[j].is_ascii_digit() || bytes[j] == b',')
+                    {
+                        digit_or_comma = true;
+                        j += 1;
+                    }
+                    if digit_or_comma && j < bytes.len() && bytes[j] == b'}' && j + 1 < bytes.len() && bytes[j + 1] == b'+' {
+                        let pos = j + 1;
+                        if possessive.map_or(true, |(p, _)| pos < p) {
+                            possessive = Some((pos, 1));
+                        }
+                    }
+                }
+                i += 1;
+            }
+            match possessive {
+                Some((pos, len)) => {
+                    let quant = if len == 2 {
+                        regex[pos..pos + len].chars().next().unwrap()
+                    } else {
+                        // brace possessive: drop just the `+`
+                        regex.remove(pos);
+                        continue;
+                    };
+                    regex.replace_range(pos..pos + len, &quant.to_string());
+                }
+                None => break,
+            }
+        }
+        regex = regex.replace("(?-)", "");
+        // quantifier immediately followed by a brace quantifier (pl
+        // JEDNOSTKA_LICZBA `\d+{1,4}r`): drop the redundant first
+        // quantifier, keeping the more specific brace repetition
+        {
+            let b = regex.as_bytes();
+            let mut out = String::with_capacity(regex.len());
+            let mut i = 0usize;
+            let mut class_depth = 0usize;
+            while i < b.len() {
+                let c = b[i];
+                if c == b'\\' && i + 1 < b.len() {
+                    // advance past the backslash AND the full escaped
+                    // character (it may be multi-byte, e.g. `\—`)
+                    let next_len = utf8_char_len(b[i + 1]);
+                    out.push_str(&regex[i..i + 1 + next_len]);
+                    i += 1 + next_len;
+                    continue;
+                }
+                if c == b'[' && class_depth == 0 {
+                    class_depth += 1;
+                } else if c == b']' && class_depth > 0 {
+                    class_depth -= 1;
+                }
+                if class_depth == 0 && (c == b'+' || c == b'*' || c == b'?') {
+                    // look ahead for `{n}` / `{n,}` / `{n,m}`
+                    if i + 1 < b.len() && b[i + 1] == b'{' {
+                        let mut j = i + 2;
+                        let mut digits = false;
+                        while j < b.len() && (b[j].is_ascii_digit() || b[j] == b',') {
+                            digits = true;
+                            j += 1;
+                        }
+                        if digits && j < b.len() && b[j] == b'}' {
+                            // skip the redundant quantifier character
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
+                let ch_len = utf8_char_len(b[i]);
+                out.push_str(&regex[i..i + ch_len]);
+                i += ch_len;
+            }
+            regex = out;
+        }
+        // Java script property syntax `\p{IsLatin}` → `\p{Latin}` (oniguruma
+        // does not accept the `Is` prefix; nl SPATIE_NA)
+        regex = regex.replace("\\p{Is", "\\p{").replace("\\P{Is", "\\P{");
+        // Java octal escapes `\0n`/`\0nn` are not backreferences but literal
+        // code points (pl BRAK_KROPKI `[...\02]`); regex-syntax rejects
+        // `\0N` as a backreference so convert to hex escapes first
+        {
+            let mut converted = String::with_capacity(regex.len());
+            let chars: Vec<(usize, char)> = regex.char_indices().collect();
+            let mut idx = 0usize;
+            while idx < chars.len() {
+                let (_, c) = chars[idx];
+                if c == '\\'
+                    && idx + 1 < chars.len()
+                    && chars[idx + 1].1 == '0'
+                {
+                    let mut j = idx + 2;
+                    let mut val: u32 = 0;
+                    let mut digits = 0;
+                    while j < chars.len() && digits < 2 && ('0'..='7').contains(&chars[j].1) {
+                        val = val * 8 + chars[j].1.to_digit(8).unwrap();
+                        j += 1;
+                        digits += 1;
+                    }
+                    converted.push_str(&format!("\\x{{{:x}}}", val));
+                    idx = j;
+                    continue;
+                }
+                converted.push(c);
+                idx += 1;
+            }
+            regex = converted;
+        }
+        // duplicate inline flags, e.g. `(?ii)` (Java tolerates, regex-syntax
+        // does not)
+        loop {
+            let reduced = regex.replace("(?ii)", "(?i)");
+            if reduced == regex {
+                break;
+            }
+            regex = reduced;
+        }
         let mut prev_error_start = None;
 
         let mut ast = loop {
@@ -375,11 +667,162 @@ mod regex {
             }
         }
 
+        out = hoist_lookbehind_groups(&out);
+        // an inline flag group emptied by the case-insensitive rewrite
+        // prints as `(?)` (en ID_CASING `(?i)id` → `(?)id`): a no-op, drop it
+        while out.contains("(?)") {
+            out = out.replace("(?)", "");
+        }
+        // regex-syntax's printer emits `\xC1` byte escapes for non-ASCII
+        // literals; in oniguruma UTF-8 mode a lone `\xC1` byte is an
+        // incomplete multibyte sequence (pt LP_PARONYMS). Emit the literal
+        // character instead.
+        {
+            let b = out.as_bytes();
+            let mut res = String::with_capacity(out.len());
+            let mut i = 0usize;
+            while i < b.len() {
+                if b[i] == b'\\'
+                    && i + 4 <= b.len()
+                    && b[i + 1] == b'x'
+                    && b[i + 2].is_ascii_hexdigit()
+                    && b[i + 3].is_ascii_hexdigit()
+                    && !(i + 4 < b.len() && b[i + 4] == b'{')
+                    && !(i + 4 < b.len() && b[i + 4].is_ascii_hexdigit())
+                {
+                    let hex = &out[i + 2..i + 4];
+                    if let Ok(cp) = u8::from_str_radix(hex, 16) {
+                        if cp >= 0x80 {
+                            if let Some(c) = char::from_u32(cp as u32) {
+                                res.push(c);
+                                i += 4;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                let ch_len = utf8_char_len(b[i]);
+                res.push_str(&out[i..i + ch_len]);
+                i += ch_len;
+            }
+            out = res;
+        }
+
         if full_match {
             out = format!("^(?:{})$", out);
         }
 
         Ok(out)
+    }
+
+    /// Oniguruma only allows *top-level* alternation in look-behind
+    /// (`(?<!a|bc)` is fine) but rejects a capture group wrapping the
+    /// alternation (`(?<!([a-vyz]|[a-vyz]\d))` → "invalid pattern in
+    /// look-behind"). Hoist the group out as an empty capture `()` so the
+    /// alternation becomes top-level; the empty group keeps capture
+    /// numbering stable for later `\N` references.
+    fn hoist_lookbehind_groups(regex: &str) -> String {
+        let bytes = regex.as_bytes();
+        let mut out = String::with_capacity(regex.len());
+        let mut i = 0usize;
+        while i < bytes.len() {
+            // candidates: "(?<=" or "(?<!"
+            if bytes[i] == b'('
+                && i + 4 < bytes.len()
+                && bytes[i + 1] == b'?'
+                && bytes[i + 2] == b'<'
+                && (bytes[i + 3] == b'=' || bytes[i + 3] == b'!')
+                && bytes[i + 4] == b'('
+            {
+                let group_open = i + 4;
+                if let Some(group_close) = scan_matching_paren(bytes, group_open) {
+                    let lb_close = group_close + 1;
+                    if lb_close < bytes.len() && bytes[lb_close] == b')' {
+                        let inner = &regex[group_open + 1..group_close];
+                        if has_top_level_alternation(inner) {
+                            out.push_str("()");
+                            out.push_str(if bytes[i + 3] == b'!' {
+                                "(?<!"
+                            } else {
+                                "(?<="
+                            });
+                            out.push_str(inner);
+                            out.push(')');
+                            i = lb_close + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            // copy one full UTF-8 character
+            let ch_len = utf8_char_len(bytes[i]);
+            out.push_str(&regex[i..i + ch_len]);
+            i += ch_len;
+        }
+        out
+    }
+
+    fn utf8_char_len(b: u8) -> usize {
+        if b < 0x80 {
+            1
+        } else if b >> 5 == 0b110 {
+            2
+        } else if b >> 4 == 0b1110 {
+            3
+        } else {
+            4
+        }
+    }
+
+    /// Index of the `)` matching the `(` at `open` (escapes and character
+    /// classes are respected).
+    fn scan_matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut class_depth = 0usize;
+        let mut i = open;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => {
+                    i += 2;
+                    continue;
+                }
+                b'[' if class_depth == 0 => class_depth += 1,
+                b']' if class_depth > 0 => class_depth -= 1,
+                b'(' if class_depth == 0 => depth += 1,
+                b')' if class_depth == 0 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn has_top_level_alternation(inner: &str) -> bool {
+        let bytes = inner.as_bytes();
+        let mut depth = 0usize;
+        let mut class_depth = 0usize;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => {
+                    i += 2;
+                    continue;
+                }
+                b'[' if class_depth == 0 => class_depth += 1,
+                b']' if class_depth > 0 => class_depth -= 1,
+                b'(' if class_depth == 0 => depth += 1,
+                b')' if class_depth == 0 => depth -= 1,
+                b'|' if depth == 0 && class_depth == 0 => return true,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
     }
 
     #[cfg(test)]
@@ -410,9 +853,43 @@ mod regex {
             )
         }
 
+
+        #[test]
+        fn sk_spojovnik_regexes() {
+            for pat in [r"(.*\S)(-)", r".*\S", r".*\p{L}"] {
+                let conv = from_java_regex(pat, true, true);
+                assert!(conv.is_ok(), "conversion failed for {:?}", pat);
+                let conv = conv.unwrap();
+                let re = crate::utils::regex::Regex::new(conv);
+                assert!(re.try_compile().is_ok(), "compile failed for {:?}", pat);
+                let subject = if pat.contains(r"\p{L}") { "test" } else { "test-" };
+                assert!(re.is_match(subject), "no match on '{:?}' for {:?}", subject, pat);
+            }
+            // \s still rewrites to a literal space (LT semantics)
+            assert_eq!(
+                from_java_regex(r".*\s", true, true).unwrap(),
+                "^(?:.* )$"
+            );
+        }
+
         #[test]
         fn nested_quantifiers() {
             assert!(from_java_regex(r"[0-9,.]*{1,}", false, false).is_err())
         }
+    }
+}
+
+#[cfg(test)]
+mod fr_regex_tests {
+    use super::*;
+
+    #[test]
+    fn fr_det_postag_regex() {
+        let re = from_java_regex(r"(P\+)?D .*", true, true).unwrap();
+        let compiled = crate::utils::regex::Regex::new(re.clone()).try_compile();
+        assert!(compiled.is_ok(), "compile failed for {}", re);
+        let r = crate::utils::regex::Regex::new(re);
+        assert!(r.is_match("D f s"), "no match on D f s: {}", r.as_str());
+        assert!(r.is_match("P+D f s"));
     }
 }

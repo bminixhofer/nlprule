@@ -707,6 +707,10 @@ impl Suggestion {
     }
 
     /// Returns the suggested replacement options for the text.
+    pub(crate) fn set_replacements(&mut self, replacements: Vec<String>) {
+        self.replacements = replacements;
+    }
+
     pub fn replacements(&self) -> &[String] {
         &self.replacements
     }

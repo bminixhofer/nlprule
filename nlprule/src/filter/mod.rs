@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Filter {
     NoDisambiguationEnglishPartialPosTagFilter,
+    /// `IsEnglishWordFilter`: keep the match if all referenced forms are
+    /// (approximated) English words.
+    IsEnglishWordFilter(IsEnglishWordFilter),
 }
 
 #[enum_dispatch(Filter)]
@@ -21,6 +24,32 @@ pub struct NoDisambiguationEnglishPartialPosTagFilter {
     pub(crate) postag_regexp: Regex,
     #[allow(dead_code)]
     pub(crate) negate_postag: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IsEnglishWordFilter {
+    /// Graph ids of the pattern positions given in `formPositions`.
+    pub(crate) ids: Vec<GraphId>,
+}
+
+/// LT tags the forms with the *English* tagger and keeps the match if all are
+/// known English words. We approximate "known to the English tagger" with a
+/// frequency list of the ~20k most common English words.
+impl Filterable for IsEnglishWordFilter {
+    fn keep(&self, sentence: &MatchSentence, graph: &MatchGraph) -> bool {
+        use once_cell::sync::Lazy;
+        static ENGLISH_WORDS: Lazy<std::collections::HashSet<&'static str>> = Lazy::new(|| {
+            include_str!("../../configs/en_common_words.txt")
+                .lines()
+                .collect()
+        });
+        self.ids.iter().all(|id| {
+            graph
+                .by_id(*id)
+                .tokens(sentence)
+                .all(|token| ENGLISH_WORDS.contains(token.word().as_str()))
+        })
+    }
 }
 
 impl Filterable for NoDisambiguationEnglishPartialPosTagFilter {

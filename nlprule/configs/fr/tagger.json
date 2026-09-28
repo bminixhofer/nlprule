@@ -1,0 +1,30 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "&lt;/DE>",
+        "J",
+        "N",
+        "NPFSSP0",
+        "NPMSSP0",
+        "PARA_END",
+        "R 3 s",
+        "R pers obj 3 p",
+        "R pers obj e s",
+        "R pers subj 3 m s",
+        "R pers suj 3 s",
+        "SENT_END",
+        "SENT_START",
+        "STENT_START",
+        "UNKNONWN",
+        "UNKNOWN",
+        "_CC",
+        "_GN_FP",
+        "_GN_FS",
+        "_GN_MP",
+        "_GN_MS",
+        "_IS_URL",
+        "_english_ignore_"
+    ],
+    "retain_last": true
+}

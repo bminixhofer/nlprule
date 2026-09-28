@@ -1,0 +1,21 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "&lt;/ADV>",
+        "&lt;/CONJ>",
+        "&lt;ADV>",
+        "ADJ",
+        "NN:Fem:Sin:Nom",
+        "NN:Inanim:Fem:Sin:2P",
+        "NN:Masc:Sin:Nom",
+        "NN:Neut:Sin:Nom",
+        "NumD_D",
+        "NumD_P",
+        "NumD_S",
+        "SENT_END",
+        "SENT_START",
+        "UNKNOWN"
+    ],
+    "retain_last": true
+}

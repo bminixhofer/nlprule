@@ -41,6 +41,9 @@ impl Tagger {
         let mut disallowed: Vec<String> = Vec::new();
 
         for path in remove_paths {
+            if !path.as_ref().exists() {
+                continue;
+            }
             let file = File::open(path.as_ref())?;
             let reader = std::io::BufReader::new(file);
 
@@ -55,20 +58,31 @@ impl Tagger {
         }
 
         for path in paths {
+            if !path.as_ref().exists() {
+                continue;
+            }
             let file = File::open(path.as_ref())?;
             let reader = std::io::BufReader::new(file);
 
             for line in reader.lines() {
                 let line = line?;
-                if line.starts_with('#') {
+                // comments may be indented
+                let line = line.trim_start();
+                if line.starts_with('#') || line.is_empty() {
                     continue;
                 }
 
-                if disallowed.contains(&line) {
+                if disallowed.iter().any(|x| x == line) {
                     continue;
                 }
 
                 let parts: Vec<_> = line.split('\t').collect();
+
+                if parts.len() < 3 {
+                    // tolerate malformed lines (e.g. word without tag)
+                    log::warn!("skipping malformed dictionary line: {:?}", line);
+                    continue;
+                }
 
                 let word = parts[0].to_string();
                 let inflection = parts[1].to_string();
@@ -110,8 +124,15 @@ impl Tagger {
         word_store.extend(common_words.iter().map(|x| x.as_str()));
 
         for (word, inflection, tag) in lines.iter() {
+            // some exported dictionaries contain inflection-only rows with
+            // an empty surface form (e.g. crh); LT's loader ignores them
+            if word.is_empty() {
+                continue;
+            }
             word_store.insert(word);
-            word_store.insert(inflection);
+            if !inflection.is_empty() {
+                word_store.insert(inflection);
+            }
             tag_store.insert(tag);
         }
 
@@ -126,12 +147,39 @@ impl Tagger {
         word_store.insert(0, "");
 
         // tag store ids should be consistent across runs
-        let mut tag_store: Vec<_> = tag_store.into_iter().collect();
+        let mut tag_store: Vec<String> = tag_store
+            .into_iter()
+            .map(|t| t.to_string())
+            .collect();
         tag_store.sort_unstable();
 
-        // add special part of speech tags, they must have ids starting from zero
+        // Arabic stemming: the merged postags produced at runtime by
+        // `ar_stem::additional_tags` need ids in the tag store - add the
+        // closure of the flag operations to the dictionary tags
+        if lang_options.arabic_stemming {
+            let base: Vec<String> = tag_store
+                .iter()
+                .map(|t| t.to_string())
+                .collect();
+            let expanded = crate::tokenizer::ar_stem::expand_tag_closure(base, 4);
+            log::info!(
+                "Arabic stemming: tag store expanded from {} to {} tags",
+                tag_store.len(),
+                expanded.len()
+            );
+            tag_store = expanded;
+            tag_store.sort_unstable();
+            tag_store.dedup();
+        }
+
+        // add special part of speech tags, they must have ids starting from zero.
+        // remove them first: if e.g. "UNKNOWN" is already a regular tag, naively
+        // inserting would create a duplicate entry and break the BiMap (ids would
+        // no longer be dense)
+        let specials: Vec<_> = SpecialPos::iter().collect::<Vec<_>>();
+        tag_store.retain(|tag| !specials.iter().any(|s| s == tag));
         for (i, special_pos) in SpecialPos::iter().enumerate() {
-            tag_store.insert(i, special_pos);
+            tag_store.insert(i, special_pos.to_string());
         }
 
         let word_store: BiMap<_, _> = word_store
@@ -179,25 +227,137 @@ impl MultiwordTagger {
         let reader = BufReader::new(File::open(dump.as_ref())?);
         let mut multiwords = Vec::new();
 
+        // some languages declare a custom separator e.g. `#separatorRegExp=[\t;]`
+        let mut separators: Vec<char> = vec!['\t'];
+
         for line in reader.lines() {
             let line = line?;
+
+            // the separator declaration must be checked before comment stripping
+            // (the line itself starts with '#')
+            if let Some(rest) = line.trim().strip_prefix("separatorRegExp=[") {
+                if let Some(end) = rest.strip_suffix(']') {
+                    // the declaration is a regex char class; translate `\t` to a tab
+                    separators = end
+                        .replace("\\t", "\t")
+                        .chars()
+                        .filter(|c| *c != '\\')
+                        .collect();
+                    if separators.is_empty() {
+                        separators = vec!['\t'];
+                    }
+                    continue;
+                }
+            }
 
             // strip comments
             let line = &line[..line.find('#').unwrap_or_else(|| line.len())].trim();
             if line.is_empty() {
                 continue;
             }
-            let tab_split: Vec<_> = line.split('\t').collect();
 
-            let word: String = tab_split[0]
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            let pos = info.tagger().id_tag(tab_split[1]).to_owned_id();
+            // split at the first separator occurrence
+            let split = separators
+                .iter()
+                .filter_map(|sep| line.find(*sep).map(|idx| (idx, *sep)))
+                .min_by_key(|(idx, _)| *idx);
+
+            let (word, pos) = match split {
+                Some((idx, sep)) => (&line[..idx], &line[idx + sep.len_utf8()..]),
+                None => {
+                    log::warn!("skipping malformed multiword line: {:?}", line);
+                    continue;
+                }
+            };
+
+            let word: String = word.split_whitespace().collect::<Vec<_>>().join(" ");
+            let pos = info.tagger().id_tag(pos.trim()).to_owned_id();
             multiwords.push((word, pos));
         }
 
         Ok((MultiwordTaggerFields { multiwords }).into())
+    }
+}
+
+/// If the regex is a pure alternation of literals (e.g. the generated
+/// simple-replace rules), returns the matching word ids directly.
+fn literal_alternation_set(
+    regex: &crate::utils::regex::Regex,
+    info: &BuildInfo,
+) -> Option<DefaultHashSet<WordIdInt>> {
+    let pattern = regex.as_str();
+
+    // strip the full-match wrapper added by from_java_regex
+    let inner = pattern
+        .strip_prefix("^(?:")
+        .and_then(|x| x.strip_suffix(")$"))?;
+
+    if inner.is_empty() {
+        return None;
+    }
+
+    // case-insensitive regexes were rewritten by `from_java_regex` into
+    // single-char classes (e.g. `[wW][oO][rR][dD]`); undo that representation
+    let lowercased: Option<Vec<String>> = inner
+        .split('|')
+        .map(|alt| {
+            let mut word = String::new();
+            let mut chars = alt.chars().peekable();
+
+            while let Some(c) = chars.next() {
+                match c {
+                    '[' => {
+                        // expect exactly two cased chars: lowercase + uppercase
+                        let a = chars.next()?;
+                        let b = chars.next()?;
+                        if chars.next() != Some(']') || a.to_lowercase().next() != b.to_lowercase().next() {
+                            return None;
+                        }
+                        word.push(a.to_lowercase().next()?);
+                    }
+                    ']' | '\\' | '.' | '^' | '$' | '?' | '*' | '+' | '(' | ')' | '{' | '}' => {
+                        return None;
+                    }
+                    _ => word.push(c),
+                }
+            }
+
+            if word.is_empty() {
+                None
+            } else {
+                Some(word)
+            }
+        })
+        .collect();
+
+    let words = lowercased?;
+
+    let mut set = DefaultHashSet::default();
+    for word in words {
+        // a case-insensitive literal matches the word in the casings that can
+        // occur in the word store: as-is, lowercase, capitalized and uppercase
+        for variant in [
+            word.clone(),
+            word.to_lowercase(),
+            capitalize(&word),
+            word.to_uppercase(),
+        ] {
+            // O(1) word store lookup
+            if let Some(id) = info.tagger().id_word(variant.into()).1 {
+                set.insert(id);
+            }
+        }
+    }
+
+    Some(set)
+}
+
+/// Upper-cases the first char of the string.
+fn capitalize(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }
 
@@ -215,6 +375,12 @@ impl TextMatcher {
 
             if let Some(set) = info.mut_regex_cache().get(&matcher_hash) {
                 set.clone()
+            } else if let Some(set) = literal_alternation_set(&regex, info) {
+                // fast path: a pure alternation of literals resolves through the
+                // word store directly instead of matching every word against the regex
+                let set = if set.len() > 100 { None } else { Some(set) };
+                info.mut_regex_cache().insert(matcher_hash, set.clone());
+                set
             } else {
                 let data: Vec<_> = info.tagger().word_store().iter().collect();
 
@@ -261,8 +427,12 @@ impl Rules {
         path: P,
         build_info: &mut BuildInfo,
         options: RulesLangOptions,
+        filter_data: crate::rule::filter_data::FilterData,
     ) -> Self {
-        let rules = super::parse_structure::read_rules(path);
+        let (rules, mut regex_rules) = super::parse_structure::read_rules(path);
+        if std::env::var("NLPRULE_NO_REGEX_RULES").is_ok() {
+            regex_rules = Vec::new();
+        }
         let mut errors: HashMap<String, usize> = HashMap::new();
 
         let rules: Vec<_> = rules
@@ -273,7 +443,12 @@ impl Rules {
                     let id = Category::new(category.id.as_str());
 
                     let id = if let Some(group) = &group {
-                        id.join(group.id.as_str()).join(group.n)
+                        // LT reports the sub-rule id when the rule inside a
+                        // group has its own id, otherwise the group id
+                        match rule_structure.id.as_ref() {
+                            Some(sub_id) => id.join(sub_id.as_str()).join(0),
+                            None => id.join(group.id.as_str()).join(group.n),
+                        }
                     } else {
                         id.join(
                             rule_structure
@@ -296,6 +471,20 @@ impl Rules {
                         Some(x) => panic!("unknown `default` value: {}", x),
                     };
 
+                    // LT 6.x: rules tagged "picky" (on the rule or its
+                    // group) are off at the default level, which is what
+                    // the HTTP server runs
+                    let picky_off = rule_structure
+                        .tags
+                        .as_deref()
+                        .map(|x| x.split_whitespace().any(|t| t == "picky"))
+                        .unwrap_or(false)
+                        || group
+                            .as_ref()
+                            .and_then(|g| g.tags.as_deref())
+                            .map(|x| x.split_whitespace().any(|t| t == "picky"))
+                            .unwrap_or(false);
+
                     let category_on = match category.default.as_deref() {
                         Some("off") | Some("temp_off") => false,
                         Some("on") | None => true,
@@ -310,6 +499,11 @@ impl Rules {
                         |x| x.clone(),
                     );
 
+                    let rid_for_errors = rule_structure
+                        .id
+                        .clone()
+                        .or_else(|| group.as_ref().map(|g| g.id.clone()))
+                        .unwrap_or_default();
                     match Rule::from_rule_structure(rule_structure, build_info) {
                         Ok(mut rule) => {
                             if (options.ids.is_empty()
@@ -320,14 +514,14 @@ impl Rules {
                                 rule.name = name;
                                 rule.category_name = category.name;
                                 rule.category_type = category.kind;
-                                rule.enabled = category_on && group_on && rule_on;
+                                rule.enabled = category_on && group_on && rule_on && !picky_off;
                                 Some(rule)
                             } else {
                                 None
                             }
                         }
                         Err(x) => {
-                            *errors.entry(format!("[Rule] {}", x)).or_insert(0) += 1;
+                            *errors.entry(format!("[Rule:{}] {}", rid_for_errors, x)).or_insert(0) += 1;
                             None
                         }
                     }
@@ -352,7 +546,13 @@ impl Rules {
             );
         }
 
-        Rules { rules }
+        Rules {
+            rules,
+            synth: build_info.synthesizer().cloned(),
+            filter_data,
+            builtin_lang: None,
+            regex_rules,
+        }
     }
 }
 
@@ -428,12 +628,20 @@ impl Tokenizer {
             }
         }
 
+        let cjk = match lang_options.cjk_segmentation.as_deref() {
+            Some("jieba") => Some(crate::tokenizer::cjk::CjkSegmenter::Jieba),
+            Some("lindera") => Some(crate::tokenizer::cjk::CjkSegmenter::Lindera),
+            None => None,
+            x => panic!("unknown cjk_segmentation value {:?}", x),
+        };
+
         Ok(Tokenizer {
             tagger: build_info.tagger().clone(),
             sentencizer,
             chunker,
             multiword_tagger,
             rules,
+            cjk,
             lang_options,
         })
     }
@@ -579,6 +787,7 @@ mod composition {
                 Atom::OrAtom(x) => Box::new(x.atoms.iter_mut()),
                 Atom::NotAtom(x) => x.atom.iter_mut(),
                 Atom::OffsetAtom(x) => x.atom.iter_mut(),
+                Atom::SentEndAtom(_) => Box::new(std::iter::once(self)),
             }
         }
 
@@ -619,6 +828,7 @@ mod composition {
                 negate,
                 case_sensitive: true, // handled by regex, should maybe be an option
                 empty_always_false,
+                sub_transform: None,
             }
         }
 
@@ -633,6 +843,7 @@ mod composition {
                 negate,
                 case_sensitive,
                 empty_always_false,
+                sub_transform: None,
             }
         }
 
@@ -813,8 +1024,28 @@ pub(in crate::compile) mod filters {
         engine: &Engine,
     ) -> Result<Filter, Error> {
         match name {
-            "NoDisambiguationEnglishPartialPosTagFilter" => {
+            "NoDisambiguationEnglishPartialPosTagFilter"
+            | "NoDisambiguationRussianPartialPosTagFilter"
+            | "NoDisambiguationIrishPartialPosTagFilter"
+            | "NoDisambiguationPortuguesePartialPosTagFilter" => {
                 Ok(NoDisambiguationEnglishPartialPosTagFilter::from_args(args, engine)?.into())
+            }
+            "IsEnglishWordFilter" => {
+                let mut ids = Vec::new();
+                for pos in args
+                    .get("formPositions")
+                    .ok_or_else(|| {
+                        Error::Unexpected("IsEnglishWordFilter must have `formPositions` argument".into())
+                    })?
+                    .split(',')
+                {
+                    ids.push(engine.to_graph_id(pos.trim().parse::<usize>().map_err(|_| {
+                        Error::Unexpected("invalid formPositions in IsEnglishWordFilter".into())
+                    })?)?);
+                }
+                Ok(crate::filter::Filter::IsEnglishWordFilter(
+                    crate::filter::IsEnglishWordFilter { ids },
+                ))
             }
             _ => Err(Error::Unexpected(format!("unsupported filter {}", name))),
         }

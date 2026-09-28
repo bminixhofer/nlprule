@@ -20,7 +20,9 @@ use std::{
     sync::Arc,
 };
 
+pub mod ar_stem;
 pub mod chunk;
+pub mod cjk;
 pub mod multiword;
 pub mod tag;
 
@@ -72,6 +74,34 @@ pub(crate) struct TokenizerLangOptions {
     /// Extra language-specific Regexes of which the matches will *not* be split into multiple tokens.
     #[serde(default)]
     pub extra_join_regexes: Vec<Regex>,
+    /// CJK dictionary-based word segmentation to use ("jieba" for Chinese).
+    #[serde(default)]
+    pub cjk_segmentation: Option<String>,
+    /// Split word-internal contractions the way the language's LT word
+    /// tokenizer does ("ca": al/als/del/dels/pel/pels/can -> preposition +
+    /// article, e.g. "del" -> "de" + "l").
+    #[serde(default)]
+    pub split_contractions: Option<String>,
+    /// LT's English tokenizer splits a leading or trailing hyphen off an
+    /// unknown whitespace chunk ("seco- ndary" -> [seco][-][ndary]), while
+    /// intra-word hyphens stay part of the token ("well-suiting").
+    #[serde(default)]
+    pub split_edge_hyphens: bool,
+    /// LT's English tokenizer on an unknown chunk containing an apostrophe:
+    /// if the part before the first apostrophe is a known word, the
+    /// apostrophe is glued to the remainder ("We'RE" -> [We]['RE]);
+    /// otherwise the chunk splits into [left][apos][right]
+    /// ("didnt't" -> [didnt]['][t]).
+    #[serde(default)]
+    pub apostrophe_glue_after_known: bool,
+    /// LT's Breton tokenizer: "c'h" is a letter (trigraph) and never split;
+    /// any other apostrophe is glued to the preceding letter and the word
+    /// splits after it ("n'eo" -> ["n'"][eo], "c'havotenn" -> one token).
+    /// NOT serialized (bincode has no field versioning; a serialized field
+    /// would break every older tokenizer binary) — binaries enable it from
+    /// the language code via `Tokenizer::set_breton_apostrophes`.
+    #[serde(skip)]
+    pub breton_apostrophes: bool,
 }
 
 impl Default for TokenizerLangOptions {
@@ -83,6 +113,11 @@ impl Default for TokenizerLangOptions {
             known_failures: Vec::new(),
             extra_split_chars: Vec::new(),
             extra_join_regexes: Vec::new(),
+            cjk_segmentation: None,
+            split_contractions: None,
+            split_edge_hyphens: false,
+            apostrophe_glue_after_known: false,
+            breton_apostrophes: false,
         }
     }
 }
@@ -157,6 +192,8 @@ pub struct Tokenizer {
     pub(crate) multiword_tagger: Option<MultiwordTagger>,
     pub(crate) tagger: Arc<Tagger>,
     pub(crate) lang_options: TokenizerLangOptions,
+    /// CJK segmenter used to split whitespace-less text into words.
+    pub(crate) cjk: Option<cjk::CjkSegmenter>,
 }
 
 impl Tokenizer {
@@ -173,6 +210,13 @@ impl Tokenizer {
     /// Creates a new tokenizer from a reader.
     pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// Enable LT BretonWordTokenizer apostrophe handling for this tokenizer.
+    /// The flag is not serialized with the binary; callers that know the
+    /// language (check_server, test) set it explicitly.
+    pub fn set_breton_apostrophes(&mut self, enabled: bool) {
+        self.lang_options.breton_apostrophes = enabled;
     }
 
     /// Serializes this rules set to a writer.
@@ -197,6 +241,11 @@ impl Tokenizer {
 
     pub(crate) fn lang_options(&self) -> &TokenizerLangOptions {
         &self.lang_options
+    }
+
+    /// The CJK segmenter configured for this language, if any.
+    pub fn cjk_segmenter(&self) -> Option<cjk::CjkSegmenter> {
+        self.cjk
     }
 
     pub(crate) fn disambiguate_up_to_id<'t>(
@@ -249,13 +298,100 @@ impl Tokenizer {
     ) -> impl ExactSizeIterator<Item = Range<usize>> + 't {
         let mut tokens = Vec::new();
 
-        let split_char = |c: char| c.is_whitespace() || crate::utils::splitting_chars().contains(c);
+        const APOS_CHARS: [char; 4] = ['\'', '\u{2019}', '\u{2018}', '\u{02BC}'];
+
+        let glue_mode = self.lang_options.apostrophe_glue_after_known;
+        let br_mode = self.lang_options.breton_apostrophes;
+        let split_char = |c: char| {
+            c.is_whitespace()
+                || (crate::utils::splitting_chars().contains(c)
+                    && !(glue_mode && (c == '\'' || c == '\u{2019}'))
+                    && !(br_mode && APOS_CHARS.contains(&c)))
+        };
         let split_text = |text: &'t str| {
             let mut tokens = Vec::new();
             for pretoken in split(text, split_char) {
                 // if the token is in the dictionary, we add it right away
                 if self.tagger.id_word(pretoken.into()).1.is_some() {
                     tokens.push(pretoken);
+                } else if self.lang_options.split_edge_hyphens
+                    && pretoken.chars().count() > 2
+                    && (pretoken.starts_with('-') || pretoken.ends_with('-'))
+                {
+                    // LT's English tokenizer: an unknown chunk with an edge
+                    // hyphen gets the hyphen as its own token
+                    // ("seco- ndary" -> [seco][-][ndary])
+                    if let Some(stripped) = pretoken.strip_suffix('-') {
+                        tokens.push(stripped);
+                        tokens.push(&pretoken[pretoken.len() - 1..]);
+                    } else if let Some(stripped) = pretoken.strip_prefix('-') {
+                        tokens.push(&pretoken[..1]);
+                        tokens.push(stripped);
+                    }
+                } else if self.lang_options.breton_apostrophes
+                    && pretoken.chars().any(|c| APOS_CHARS.contains(&c))
+                {
+                    // LT BretonWordTokenizer: "c'h" (any apostrophe variant
+                    // between c/C and h/H) is a letter of the word; any other
+                    // apostrophe is glued to the preceding letter and the word
+                    // splits right after it ("n'eo" -> [n'][eo],
+                    // "c'havotenn" -> one token)
+                    let chars: Vec<char> = pretoken.chars().collect();
+                    let mut start = 0usize;
+                    let mut byte_i = 0usize;
+                    for (idx, &c) in chars.iter().enumerate() {
+                        if APOS_CHARS.contains(&c) {
+                            let is_ch = idx > 0
+                                && idx + 1 < chars.len()
+                                && matches!(chars[idx - 1], 'c' | 'C')
+                                && matches!(chars[idx + 1], 'h' | 'H');
+                            let apos_end = byte_i + c.len_utf8();
+                            if !is_ch && apos_end > start {
+                                tokens.push(&pretoken[start..apos_end]);
+                                start = apos_end;
+                            }
+                        }
+                        byte_i += c.len_utf8();
+                    }
+                    if start < pretoken.len() {
+                        tokens.push(&pretoken[start..]);
+                    }
+                } else if self.lang_options.apostrophe_glue_after_known
+                    && pretoken.chars().any(|c| c == '\'' || c == '\u{2019}')
+                {
+                    let apostrophe_idx = pretoken
+                        .char_indices()
+                        .find(|(_, c)| *c == '\'' || *c == '\u{2019}')
+                        .map(|(i, _)| i)
+                        .unwrap_or(pretoken.len());
+                    let (left, rest) = pretoken.split_at(apostrophe_idx);
+                    let apos_len = rest.chars().next().map_or(1, char::len_utf8);
+                    let rest_upper = rest[apos_len..].chars().any(char::is_uppercase);
+                    if !left.is_empty()
+                        && (rest_upper || rest[apos_len..].chars().count() > 1)
+                        && self.tagger.id_word(left.into()).1.is_some()
+                    {
+                        // known left part + uppercase remainder (We'RE):
+                        // glue the apostrophe to the rest, like LT
+                        tokens.push(left);
+                        tokens.push(rest);
+                    } else {
+                        // unknown left part: split at every apostrophe,
+                        // keeping each apostrophe as its own token
+                        let mut start = 0usize;
+                        for (i, c) in pretoken.char_indices() {
+                            if c == '\'' || c == '\u{2019}' {
+                                if i > start {
+                                    tokens.push(&pretoken[start..i]);
+                                }
+                                tokens.push(&pretoken[i..i + c.len_utf8()]);
+                                start = i + c.len_utf8();
+                            }
+                        }
+                        if start < pretoken.len() {
+                            tokens.push(&pretoken[start..]);
+                        }
+                    }
                 } else {
                     // otherwise, potentially split it again with `extra_split_chars` e. g. "-"
                     tokens.extend(split(pretoken, |c| {
@@ -263,6 +399,60 @@ impl Tokenizer {
                     }));
                 }
             }
+
+            // LT CatalanWordTokenizer patterns[9]/[10]: contractions split
+            // into preposition + article as two tokens ("del" -> "de" + "l");
+            // the second part has no space before it because its span is
+            // inside the original word
+            if self.lang_options.split_contractions.as_deref() == Some("ca") {
+                let mut split2 = Vec::with_capacity(tokens.len());
+                for token in tokens {
+                    // case-insensitive so sentence-initial "Als" also splits
+                    // (LT rebuilds the parts preserving case, e.g. "A" + "ls")
+                    let lower = token.to_lowercase();
+                    let second_len = match lower.as_str() {
+                        "al" | "del" | "pel" | "can" => 1,
+                        "als" | "dels" | "pels" => 2,
+                        _ => {
+                            split2.push(token);
+                            continue;
+                        }
+                    };
+                    let split_at = token.len() - second_len;
+                    split2.push(&token[..split_at]);
+                    split2.push(&token[split_at..]);
+                }
+                tokens = split2;
+            }
+
+            // CJK text has no whitespace word boundaries: segment it with a
+            // dictionary-based segmenter (mirrors LT's HanLP / Sen tokenizers)
+            if let Some(segmenter) = self.cjk {
+                let mut segmented = Vec::new();
+                for token in tokens {
+                    if cjk::needs_segmentation(token) {
+                        let offset = token.as_ptr() as usize - text.as_ptr() as usize;
+                        segmented.extend(
+                            cjk::segment(token, segmenter)
+                                .into_iter()
+                                .map(|(start, end)| {
+                                    &text[offset + start..offset + end]
+                                }),
+                        );
+                    } else {
+                        segmented.push(token);
+                    }
+                }
+                tokens = segmented;
+            }
+
+            // LT's km tokenizer emits \u200b as its own token, but LT pattern
+            // matching runs over getTokensWithoutWhitespace which drops it —
+            // ZWSP is a word boundary, not a word. Drop ZWSP-only tokens so
+            // patterns match across the boundary while the preceding char
+            // stays non-whitespace ("no space before" semantics preserved).
+            tokens.retain(|t| !t.chars().all(|c| c == '\u{200b}'));
+
             tokens
         };
 
@@ -319,19 +509,61 @@ impl Tokenizer {
                 let token_text = sentence[range].trim();
 
                 let is_sentence_start = i == 0;
+                // LT JLanguageTool.analyzeText: `tokenArray[lastToken].setSentEnd()`
+                // — UNCONDITIONAL on the last non-whitespace token, punctuated
+                // or not (only trailing whitespace is skipped)
                 let is_sentence_end = i == n_token_strs - 1;
 
-                IncompleteToken::new(
-                    Word::new(
-                        self.tagger.id_word(token_text.into()),
-                        self.tagger
-                            .get_tags_with_options(
-                                token_text,
-                                if is_sentence_start { Some(true) } else { None },
-                                None,
+                let mut tags: Vec<_> = self
+                    .tagger
+                    .get_tags_with_options(
+                        token_text,
+                        if is_sentence_start { Some(true) } else { None },
+                        None,
+                    )
+                    .collect();
+
+                if self.cjk.is_some() && cjk::needs_segmentation(token_text) {
+                    tags.extend(cjk::word_data(token_text, self.cjk.unwrap(), &self.tagger));
+                }
+
+                // Arabic prefix/suffix stemming (LT ArabicTagger.additionalTags):
+                // derive readings of e.g. "السلامة" from the dictionary entry
+                // "سلامة" with merged procletic flags
+                if self.tagger.lang_options().arabic_stemming {
+                    let base: Vec<_> = tags
+                        .iter()
+                        .map(|t| {
+                            (
+                                t.lemma().as_str().to_string(),
+                                t.pos().as_str().to_string(),
                             )
-                            .collect(),
-                    ),
+                        })
+                        .collect();
+                    if !ar_stem::is_stopword_reading(&base) {
+                        let tagger = &self.tagger;
+                        let additional = ar_stem::additional_tags(token_text, |stem| {
+                            tagger
+                                .get_tags(stem)
+                                .map(|d| {
+                                    (
+                                        d.lemma().as_str().to_string(),
+                                        d.pos().as_str().to_string(),
+                                    )
+                                })
+                                .collect()
+                        });
+                        for (lemma, pos) in additional {
+                            tags.push(WordData::new(
+                                tagger.id_word(lemma.into()),
+                                tagger.id_tag_stored(&pos),
+                            ));
+                        }
+                    }
+                }
+
+                IncompleteToken::new(
+                    Word::new(self.tagger.id_word(token_text.into()), tags),
                     Span::new(
                         byte_start..byte_start + token_text.len(),
                         char_start..char_start + token_text.chars().count(),
@@ -342,9 +574,6 @@ impl Tokenizer {
                 )
             })
             .collect();
-
-        let last_idx = tokens.len() - 1;
-        *tokens[last_idx].is_sentence_end_mut() = true;
 
         let mut sentence = IncompleteSentence::new(tokens, sentence, &self.tagger);
 

@@ -1,0 +1,19 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "&lt;adv&gt;",
+        "SENT_END",
+        "SENT_START",
+        "adj:m:v_rod:&amp;pron:dem",
+        "adv:&amp;predic",
+        "adv:&amp;pron:dem",
+        "noninfl:&amp;insert:bad",
+        "noninfl:foreign:prop:geo:bad",
+        "noun:inanim:n:v_rod:&amp;pron:neg:&amp;predic",
+        "noun:unknown",
+        "number",
+        "time"
+    ],
+    "retain_last": true
+}
