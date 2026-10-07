@@ -21,6 +21,10 @@ pub enum SynthesizerKind {
     /// CatalanSynthesizer: verb synthesis over a valencia-variant dictionary,
     /// falling back to central-variant verb tags when the base lookup is empty.
     Catalan,
+    /// EnglishSynthesizer: synthesized forms starting with an apostrophe
+    /// ("'d", "'ve", "'s"...) and a small fixed exception list are removed
+    /// from the results (`EnglishSynthesizer.isException`).
+    English,
 }
 
 impl Default for SynthesizerKind {
@@ -105,6 +109,10 @@ impl Synthesizer {
 
         if let Some(remove_forms) = self.removed.get(&(lemma.to_string(), pos.to_string())) {
             results.retain(|x| !remove_forms.contains(x));
+        }
+
+        if self.kind == SynthesizerKind::English {
+            results.retain(|x| !is_english_exception(x));
         }
 
         results
@@ -205,6 +213,10 @@ impl Synthesizer {
             }
         }
 
+        if self.kind == SynthesizerKind::English {
+            results.retain(|x| !is_english_exception(x));
+        }
+
         results.sort();
         results.dedup();
         results
@@ -230,7 +242,10 @@ impl Synthesizer {
     /// Mirrors `BaseSynthesizer.getPosTagCorrection` (and overrides e.g. in German).
     pub fn pos_tag_correction(&self, pos_tag: String) -> String {
         match self.kind {
-            SynthesizerKind::German | SynthesizerKind::Default | SynthesizerKind::Catalan => pos_tag,
+            SynthesizerKind::German
+            | SynthesizerKind::Default
+            | SynthesizerKind::Catalan
+            | SynthesizerKind::English => pos_tag,
         }
     }
 
@@ -378,6 +393,17 @@ mod build {
 #[cfg(feature = "compile")]
 pub(crate) use build::from_dumps;
 
+/// `EnglishSynthesizer.isException`: synthesized forms starting with an
+/// apostrophe ("'d", "'ve", "'s"...) plus a fixed word list are dropped from
+/// English synthesis results.
+fn is_english_exception(w: &str) -> bool {
+    w.starts_with('\'')
+        || matches!(
+            w,
+            "ne'er" | "e'er" | "o'er" | "ol'" | "ma'am" | "n't" | "informations"
+        )
+}
+
 /// `CatalanSynthesizer.PostagComparator`: gives priority to 3rd person over
 /// 1st and to the indicative over other moods.
 fn postag_comparator(a: &str, b: &str) -> std::cmp::Ordering {
@@ -429,5 +455,25 @@ mod tests {
             synth.get_target_pos_tag(&["NN", "VBZ"], "XX"),
             "VBZ".to_string()
         );
+    }
+
+    #[test]
+    fn english_kind_filters_apostrophe_forms() {
+        // regression (E2): LT HE_VERB_AGR returned ["has", "had"] but nlprule
+        // also synthesized "'d" (have|VBD 'd in english_synth.dict);
+        // EnglishSynthesizer.isException removes apostrophe-initial forms
+        let mut synth = Synthesizer::new(SynthesizerKind::English);
+        synth.insert_manual("have".into(), "VBD".into(), "'d".into());
+        synth.insert_manual("have".into(), "VBD".into(), "had".into());
+        synth.insert_manual("have".into(), "VBD".into(), "ne'er".into());
+        synth.insert_manual("information".into(), "NNS".into(), "informations".into());
+
+        assert_eq!(synth.lookup("have", "VBD"), vec!["had".to_string()]);
+        assert!(synth.lookup("information", "NNS").is_empty());
+
+        // other languages keep contracted forms
+        let mut def = Synthesizer::new(SynthesizerKind::Default);
+        def.insert_manual("have".into(), "VBD".into(), "'d".into());
+        assert_eq!(def.lookup("have", "VBD"), vec!["'d".to_string()]);
     }
 }

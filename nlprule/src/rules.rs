@@ -204,6 +204,7 @@ impl Rules {
     /// can apply their language-specific behavior. The language is never
     /// serialized with the binary.
     pub fn with_lang<P: AsRef<Path>>(p: P, lang: &str) -> Result<Self, Error> {
+        let rules_bin_path = p.as_ref().to_path_buf();
         let mut rules = Self::new(p)?;
         rules.builtin_lang = Some(lang.to_string());
         // dictionaries without case conversion (pl: encoder=none) need
@@ -211,6 +212,42 @@ impl Rules {
         if lang == "pl" {
             if let Some(speller) = rules.filter_data.speller.as_mut() {
                 speller.case_sensitive = true;
+            }
+        }
+        // speller options sidecar (morfologik .info: equivalent-chars,
+        // replacement-pairs, convert-case) next to the rules bin
+        let meta_path = rules_bin_path.with_file_name(format!("{}_speller_meta.txt", lang));
+        if let Ok(text) = std::fs::read_to_string(&meta_path) {
+            if let Some(speller) = rules.filter_data.speller.as_mut() {
+                for line in text.lines() {
+                    let mut parts = line.split_whitespace();
+                    match parts.next() {
+                        Some("convert_case") => {
+                            speller.convert_case = parts.next() == Some("true");
+                        }
+                        Some("diacritics") => {
+                            speller.ignore_diacritics = parts.next() == Some("true");
+                        }
+                        Some("case_sensitive") => {
+                            speller.case_sensitive = parts.next() == Some("true");
+                        }
+                        Some("eq") => {
+                            if let (Some(a), Some(b)) = (parts.next(), parts.next()) {
+                                if let (Some(a), Some(b)) =
+                                    (a.chars().next(), b.chars().next())
+                                {
+                                    speller.eq_pairs.push((a, b));
+                                }
+                            }
+                        }
+                        Some("rp") => {
+                            if let (Some(a), Some(b)) = (parts.next(), parts.next()) {
+                                speller.rp_pairs.push((a.to_string(), b.to_string()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
         Ok(rules)
@@ -295,6 +332,26 @@ impl Rules {
         n
     }
 
+    /// Toggle every `tags="picky"` rule (LT `level=picky` semantics:
+    /// those rules are off at the default level and on in picky mode).
+    /// Rules that are `default="off"` stay off regardless.
+    pub fn set_picky_enabled(&mut self, on: bool) -> usize {
+        let mut n = 0;
+        for rule in self.rules.iter_mut() {
+            if rule.picky {
+                rule.enabled = on;
+                n += 1;
+            }
+        }
+        for rule in self.regex_rules.iter_mut() {
+            if rule.picky {
+                rule.enabled = on;
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// Compute the suggestions for the given sentence by checking all rules.
     /// Builtin rules that are Java classes in LT (no XML): duplicated words,
     /// doubled punctuation and sentence-start casing.
@@ -328,19 +385,20 @@ impl Rules {
         sentence: &Sentence,
         ctx: &crate::builtins::TextRuleContext,
     ) -> Vec<Suggestion> {
-        // the speller before the casing rule: at equal spans the later match
-        // wins in clean_overlapping, so the casing rule replaces the speller
-        // only when it is longer, and a pattern rule replaces both - as on
-        // the LT server
-        let mut out = crate::builtins::morfologik_spelling(
-            sentence,
-            self.builtin_lang.as_deref(),
-            self.filter_data.speller.as_ref(),
-        );
-        out.extend(crate::builtins::uppercase_sentence_start(
+        // the casing rule before the speller: at equal spans the later match
+        // wins in clean_overlapping, so the speller replaces the casing rule —
+        // LT keeps MORFOLOGIK and drops UPPERCASE_SENTENCE_START when both
+        // flag the same sentence-start word (probed: 'asi dijo' → LT fires
+        // only MORFOLOGIK_RULE_ES)
+        let mut out = crate::builtins::uppercase_sentence_start(
             sentence,
             self.builtin_lang.as_deref(),
             ctx,
+        );
+        out.extend(crate::builtins::morfologik_spelling(
+            sentence,
+            self.builtin_lang.as_deref(),
+            self.filter_data.speller.as_ref(),
         ));
         if self.builtin_lang.as_deref() == Some("km") {
             out.extend(crate::builtins::khmer_space_before(sentence));
@@ -407,48 +465,84 @@ impl Rules {
             self.builtin_lang.as_deref(),
         ));
         let tokens: Vec<_> = sentence.iter().collect();
-        // SimpleReplaceRule phrase table (nl): case-sensitive multiword
-        // lookup with sub-rule ids derived from the wrong phrase
-        if let Some(table) = self.filter_data.simple_replace.as_ref() {
-            for (i, token) in tokens.iter().enumerate() {
-                let candidates = match table.by_first_word.get(token.word().as_str()) {
-                    Some(c) => c,
-                    None => continue,
-                };
-                for (wrong, corrects) in candidates {
-                    let words: Vec<&str> = wrong.split_whitespace().collect();
-                    if words.len() > tokens.len() - i {
-                        continue;
-                    }
-                    let matches = words.iter().enumerate().all(|(k, w)| {
-                        tokens[i + k].word().as_str() == *w
-                            && (k == 0 || tokens[i + k].has_space_before())
-                    });
-                    if !matches {
-                        continue;
-                    }
-                    let span =
-                        Span::from_positions(tokens[i].span().start(), tokens[i + words.len() - 1].span().end());
-                    let sub_id = if table.sub_ids {
-                        format!(
-                            "{}_{}",
-                            table.prefix,
-                            wrong
-                                .to_uppercase()
-                                .chars()
-                                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-                                .collect::<String>()
-                        )
-                    } else {
-                        table.prefix.clone()
+        // SimpleReplaceRule phrase tables: case-sensitive multiword lookup;
+        // ids are the table prefix (optionally with a sub-rule suffix
+        // derived from the wrong phrase, like LT's per-entry ids). The last
+        // word of a phrase may carry trailing punctuation (nl replace.txt
+        // stores full sentences like "... beschermt.") — the span extends
+        // through matching punctuation tokens, mirroring LT's own
+        // tokenized-phrase match.
+        let punct_tail = |w: &str| -> (String, String) {
+            let trimmed = w.trim_end_matches(|c: char| !c.is_alphanumeric());
+            if trimmed.is_empty() {
+                // fully-punctual entries (ar '⁉') must match as-is
+                return (w.to_string(), String::new());
+            }
+            let tail = &w[trimmed.len()..];
+            (trimmed.to_string(), tail.to_string())
+        };
+        if let Some(tables) = self.filter_data.simple_replace.as_ref() {
+            for table in tables {
+                for (i, token) in tokens.iter().enumerate() {
+                    let candidates = match table.by_first_word.get(token.word().as_str()) {
+                        Some(c) => c,
+                        None => continue,
                     };
-                    out.push(Suggestion::new(
-                        sub_id,
-                        format!("Possible mistake: did you mean \"{}\"?", corrects[0]),
-                        span,
-                        corrects.clone(),
-                    ));
-                    break;
+                    for (wrong, corrects) in candidates {
+                        let words: Vec<&str> = wrong.split_whitespace().collect();
+                        if words.len() > tokens.len() - i {
+                            continue;
+                        }
+                        let (last_core, last_tail) = punct_tail(words[words.len() - 1]);
+                        let matches = words.iter().enumerate().all(|(k, w)| {
+                            let w = if k + 1 == words.len() { last_core.as_str() } else { *w };
+                            tokens[i + k].word().as_str() == w
+                                && (k == 0 || tokens[i + k].has_space_before())
+                        });
+                        if !matches {
+                            continue;
+                        }
+                        let mut end_tok = i + words.len() - 1;
+                        if !last_tail.is_empty() {
+                            // consume following punctuation tokens that match
+                            // the phrase's trailing punctuation
+                            for c in last_tail.chars() {
+                                let next = end_tok + 1;
+                                if next < tokens.len()
+                                    && tokens[next].word().as_str().starts_with(c)
+                                    && tokens[next].word().as_str().chars().all(|x| !x.is_alphanumeric())
+                                {
+                                    end_tok = next;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        let span = Span::from_positions(
+                            tokens[i].span().start(),
+                            tokens[end_tok].span().end(),
+                        );
+                        let sub_id = if table.sub_ids {
+                            format!(
+                                "{}_{}",
+                                table.prefix,
+                                wrong
+                                    .to_uppercase()
+                                    .chars()
+                                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                                    .collect::<String>()
+                            )
+                        } else {
+                            table.prefix.clone()
+                        };
+                        out.push(Suggestion::new(
+                            sub_id,
+                            format!("Possible mistake: did you mean \"{}\"?", corrects[0]),
+                            span,
+                            corrects.clone(),
+                        ));
+                        break;
+                    }
                 }
             }
         }

@@ -219,6 +219,22 @@ impl Tokenizer {
         self.lang_options.breton_apostrophes = enabled;
     }
 
+    /// Enable LT EnglishTokenizer apostrophe/edge-hyphen behavior: glue the
+    /// apostrophe to a known or uppercase remainder ("We'Re" -> [We]['Re])
+    /// and split unknown chunks at every apostrophe (each ' its own token).
+    /// Without this, "We'Re" stays one token and LT's APOS_RE rulegroup can
+    /// never fire (probed live: LT fires APOS_RE, port returns nothing).
+    pub fn set_english_apostrophes(&mut self, enabled: bool) {
+        self.lang_options.apostrophe_glue_after_known = enabled;
+        self.lang_options.split_edge_hyphens = enabled;
+    }
+
+    /// Enable the LT CatalanWordTokenizer contraction splits ("del" ->
+    /// [de][l]).
+    pub fn set_split_contractions(&mut self, lang: &str) {
+        self.lang_options.split_contractions = Some(lang.to_string());
+    }
+
     /// Serializes this rules set to a writer.
     pub fn to_writer<W: Write>(&self, writer: W) -> Result<(), Error> {
         Ok(bincode::serialize_into(writer, &self)?)
@@ -307,6 +323,12 @@ impl Tokenizer {
                 || (crate::utils::splitting_chars().contains(c)
                     && !(glue_mode && (c == '\'' || c == '\u{2019}'))
                     && !(br_mode && APOS_CHARS.contains(&c)))
+                // emoji and pictographic symbols are token boundaries in
+                // LT ("\u{1f44d}fine\u{1f44d}" tokenizes as three tokens;
+                // the speller then checks "fine" alone)
+                || matches!(c as u32,
+                    0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2B00..=0x2BFF
+                    | 0xFE0F | 0x2190..=0x21FF | 0x1F1E6..=0x1F1FF)
         };
         let split_text = |text: &'t str| {
             let mut tokens = Vec::new();
@@ -367,9 +389,22 @@ impl Tokenizer {
                     let (left, rest) = pretoken.split_at(apostrophe_idx);
                     let apos_len = rest.chars().next().map_or(1, char::len_utf8);
                     let rest_upper = rest[apos_len..].chars().any(char::is_uppercase);
+                    // the remainder including the apostrophe can itself be a
+                    // dict word ("It's" -> It|'s — "'s" is in the en tagger
+                    // dict, as referenced by 439 grammar <token>'s</token>s);
+                    // LT glues known remainders even when the left part is
+                    // unknown ("arry's" -> arry|'s, only MORFOLOGIK fires)
+                    let rest_typewriter = if rest.contains('\u{2019}') {
+                        rest.replace('\u{2019}', "'")
+                    } else {
+                        rest.to_string()
+                    };
+                    let rest_known = self.tagger.id_word(rest.into()).1.is_some()
+                        || self.tagger.id_word(rest_typewriter.as_str().into()).1.is_some();
+                    let left_known = self.tagger.id_word(left.into()).1.is_some();
                     if !left.is_empty()
-                        && (rest_upper || rest[apos_len..].chars().count() > 1)
-                        && self.tagger.id_word(left.into()).1.is_some()
+                        && (rest_known
+                            || ((rest_upper || rest[apos_len..].chars().count() > 1) && left_known))
                     {
                         // known left part + uppercase remainder (We'RE):
                         // glue the apostrophe to the rest, like LT

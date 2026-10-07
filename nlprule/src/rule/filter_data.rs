@@ -18,14 +18,38 @@ pub struct SpellerDict {
     /// For case-sensitive dictionaries (pl: `fsa.dict.encoder=none`, no
     /// conversion) the keys keep their original case instead.
     pub map_bytes: Vec<u8>,
-    /// Original-cased forms (deduplicated).
+    /// Original-cased forms (all case variants kept: "pero", "Pero").
     pub forms: Vec<String>,
+    /// morfologik frequency rank (0..=25) per form, parallel to `forms`.
+    pub freqs: Vec<u8>,
     /// LT dictionaries without case conversion (pl_PL) keep proper-noun
     /// casing: "Bledem" is a key but "bledem" must still be misspelled.
     /// Not serialized (bincode has no field versioning): the loader sets it
     /// from the language code via [Rules::with_lang].
     #[serde(skip)]
     pub case_sensitive: bool,
+    /// Speller options from the morfologik .info, loaded at runtime from
+    /// the <lang>_speller_meta.txt sidecar (no bin reformat):
+    /// equivalent-chars substitute at cost 0, replacement-pairs are a
+    /// single-edit block substitution.
+    #[serde(skip)]
+    pub eq_pairs: Vec<(char, char)>,
+    #[serde(skip)]
+    pub rp_pairs: Vec<(String, String)>,
+    /// fsa.dict.speller.convert-case: suggestions are re-cased to the
+    /// misspelled word's casing (HATSAP → HAFSA, Hatsap → Hafsa).
+    #[serde(skip)]
+    pub convert_case: bool,
+    /// fsa.dict.speller.ignore-diacritics: candidate comparison runs on
+    /// diacritics-stripped forms ('peroo' finds 'Perón', 'peroró').
+    #[serde(skip)]
+    pub ignore_diacritics: bool,
+    /// LT hunspell-dictionary languages (da/sv/eo/km/ar/gl): the exact
+    /// `.aff`/`.dic` LT ships, embedded at compile time. When the system
+    /// libhunspell is loadable, `is_known` and suggestions delegate to it
+    /// (LT's own speller behavior); otherwise the FST approximation runs.
+    #[serde(default)]
+    pub hunspell: Option<crate::hunspell::HunspellData>,
 }
 
 impl SpellerDict {
@@ -56,8 +80,8 @@ impl SpellerDict {
         }
     }
 
-    fn unpack(value: u64) -> (usize, u8) {
-        (((value >> 5) as usize), (value & 0x1F) as u8)
+    fn unpack(value: u64) -> (usize, usize) {
+        (((value >> 10) as usize), ((value >> 5) & 0x1F) as usize)
     }
 
     /// Finds words within `max_distance` Damerau-Levenshtein (OSA) edits of
@@ -99,18 +123,47 @@ impl SpellerDict {
         let mut out: Vec<(usize, u8, String)> = Vec::new();
         let map = self.map();
 
-        let dist = |a: &str, b: &str| -> usize {
-            if ignore_diacritics {
-                osa_distance(&remove_diacritics(a), &remove_diacritics(b))
+        let extended = !self.eq_pairs.is_empty() || !self.rp_pairs.is_empty();
+        let precomputed_pairs: Vec<(Vec<char>, Vec<char>)> = self
+            .rp_pairs
+            .iter()
+            .map(|(p, q)| (p.chars().collect(), q.chars().collect()))
+            .collect();
+        let eq_pairs = self.eq_pairs.clone();
+        // case-sensitive dictionaries (pt-PT-45, pl): candidate matching is
+        // case-insensitive over the original-cased keys ('uv' finds 'UV' at
+        // d1) while is_known stays exact-case — mirrors LT's behaviour
+        let case_sensitive = self.case_sensitive;
+        let dist = move |a: &str, b: &str| -> usize {
+            if case_sensitive {
+                let la = a.to_lowercase();
+                let lb = b.to_lowercase();
+                if extended {
+                    return osa_distance_ext(&la, &lb, &eq_pairs, &precomputed_pairs);
+                }
+                return osa_distance(&la, &lb);
+            }
+            let (a2, b2): (std::borrow::Cow<str>, std::borrow::Cow<str>) = if ignore_diacritics {
+                (
+                    std::borrow::Cow::Owned(remove_diacritics(a)),
+                    std::borrow::Cow::Owned(remove_diacritics(b)),
+                )
             } else {
-                osa_distance(a, b)
+                (std::borrow::Cow::Borrowed(a), std::borrow::Cow::Borrowed(b))
+            };
+            if extended {
+                osa_distance_ext(&a2, &b2, &eq_pairs, &precomputed_pairs)
+            } else {
+                osa_distance(&a2, &b2)
             }
         };
 
         // the fst automaton is byte-based and matches the char-level
         // neighborhood for ASCII queries; long words at distance 3 can
-        // exceed the automaton's state cap -> fall back to the full scan
-        let automaton = if lower.is_ascii() && !ignore_diacritics {
+        // exceed the automaton's state cap -> fall back to the full scan.
+        // With equivalent-chars/replacement-pairs the plain byte automaton
+        // would miss candidates whose extended distance is lower — full scan.
+        let automaton = if lower.is_ascii() && !ignore_diacritics && !extended && !case_sensitive {
             Levenshtein::new(&lower, max_distance as u32).ok()
         } else {
             None
@@ -122,10 +175,22 @@ impl SpellerDict {
             while let Some((key, value)) = stream.next() {
                 let key = String::from_utf8_lossy(key).into_owned();
                 let d = dist(&lower, &key);
-                if d > 0 && d <= max_distance {
-                    let (idx, freq) = Self::unpack(value);
-                    if let Some(form) = self.forms.get(idx) {
-                        out.push((d, freq, form.clone()));
+                // d == 0 with folding means the form differs only in
+                // diacritics from the word ('miercoles' vs 'miércoles') —
+                // LT still suggests it (the word itself is excluded by the
+                // exact-string check, not by the folded distance)
+                let different_word = key != lower;
+                if d <= max_distance && (d > 0 || different_word) {
+                    let (first, count) = Self::unpack(value);
+                    for k in 0..count {
+                        if let Some(form) = self.forms.get(first + k) {
+                            // exclude only the exact original word
+                            if form == word {
+                                continue;
+                            }
+                            let freq = self.freqs.get(first + k).copied().unwrap_or(0);
+                            out.push((d, freq, form.clone()));
+                        }
                     }
                 }
             }
@@ -140,20 +205,95 @@ impl SpellerDict {
                     continue;
                 }
                 let d = dist(&lower, &key);
-                if d > 0 && d <= max_distance {
-                    let (idx, freq) = Self::unpack(value);
-                    if let Some(form) = self.forms.get(idx) {
-                        out.push((d, freq, form.clone()));
+                // d == 0 with folding means the form differs only in
+                // diacritics from the word ('miercoles' vs 'miércoles') —
+                // LT still suggests it (the word itself is excluded by the
+                // exact-string check, not by the folded distance)
+                let different_word = key != lower;
+                if d <= max_distance && (d > 0 || different_word) {
+                    let (first, count) = Self::unpack(value);
+                    for k in 0..count {
+                        if let Some(form) = self.forms.get(first + k) {
+                            // exclude only the exact original word
+                            if form == word {
+                                continue;
+                            }
+                            let freq = self.freqs.get(first + k).copied().unwrap_or(0);
+                            out.push((d, freq, form.clone()));
+                        }
                     }
                 }
             }
         }
 
-        // stable sort: distance asc, frequency desc
-        out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+        // stable sort: distance asc, frequency desc, then the original-cased
+        // form byte order (LT's stable sort keeps the dictionary iteration
+        // order for (d, freq) ties — probed 'hatsap': Hafsa < Hassan < Hasán
+        // < WHATSAPP < WhatsApp < hatea)
+        out.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| b.1.cmp(&a.1))
+                .then_with(|| a.2.as_bytes().cmp(b.2.as_bytes()))
+        });
         out.dedup_by(|a, b| a.2 == b.2);
         out.into_iter().map(|(_, _, form)| form).collect()
     }
+}
+
+/// OSA distance with morfologik speller options: equivalent chars (from
+/// .info `equivalent-chars`, e.g. es b↔v) substitute at cost 0, and
+/// replacement pairs (.info `replacement-pairs`, e.g. es ke↔que) are a
+/// single-edit block substitution in either direction.
+pub fn osa_distance_ext(
+    a: &str,
+    b: &str,
+    eq_pairs: &[(char, char)],
+    precomputed_pairs: &[(Vec<char>, Vec<char>)],
+) -> usize {
+    if eq_pairs.is_empty() && precomputed_pairs.is_empty() {
+        return osa_distance(a, b);
+    }
+    let pairs = precomputed_pairs;
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for (i, row) in dp.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=m {
+        dp[0][j] = j;
+    }
+    let equiv = |x: char, y: char| -> bool {
+        if x == y {
+            return true;
+        }
+        eq_pairs.iter().any(|&(p, q)| (p == x && q == y) || (p == y && q == x))
+    };
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = if equiv(a[i - 1], b[j - 1]) { 0 } else { 1 };
+            let mut d = (dp[i][j - 1] + 1)
+                .min(dp[i - 1][j] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d = d.min(dp[i - 2][j - 2] + 1);
+            }
+            // replacement pairs as a block substitution (cost 1)
+            for (pc, qc) in pairs.iter() {
+                let (pi, qj) = (pc.len(), qc.len());
+                if i >= pi && j >= qj && a[i - pi..i] == pc[..] && b[j - qj..j] == qc[..] {
+                    d = d.min(dp[i - pi][j - qj] + 1);
+                }
+                // both directions
+                if i >= qj && j >= pi && a[i - qj..i] == qc[..] && b[j - pi..j] == pc[..] {
+                    d = d.min(dp[i - qj][j - pi] + 1);
+                }
+            }
+            dp[i][j] = d;
+        }
+    }
+    dp[n][m]
 }
 
 /// Restricted Damerau-Levenshtein (optimal string alignment) distance.
@@ -288,12 +428,13 @@ pub struct FilterData {
     /// plain speller (LT does this for en/de/pt/nl).
     #[serde(default)]
     pub multitoken_speller_check: bool,
-    /// LT `AbstractSimpleReplaceRule2` table (`filters/replace.txt`):
-    /// phrase-level `wrong=correct` pairs, matched case-sensitively with
-    /// sub-rule ids derived from the wrong phrase (e.g.
-    /// `NL_SIMPLE_REPLACE_DUR`).
+    /// LT `AbstractSimpleReplaceRule` tables (`filters/replace*.txt`, one
+    /// per replace file the language runs — e.g. ga: GA_REPLACE,
+    /// GA_FGB_EQ_REPLACE, GA_PRESTANDARD_REPLACE; nl: NL_SIMPLE_REPLACE
+    /// with sub-rule ids; en-US variant table EN_US_SIMPLE_REPLACE).
+    /// Phrase-level `wrong=correct` pairs, matched case-sensitively.
     #[serde(default)]
-    pub simple_replace: Option<SimpleReplaceTable>,
+    pub simple_replace: Option<Vec<SimpleReplaceTable>>,
 }
 
 /// Wrong phrases indexed by their first word, with the id prefix the

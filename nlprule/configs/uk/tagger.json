@@ -13,6 +13,7 @@
         "noun:inanim:n:v_rod:&amp;pron:neg:&amp;predic",
         "noun:unknown",
         "number",
+        "part:&amp;predic",
         "time"
     ],
     "retain_last": true

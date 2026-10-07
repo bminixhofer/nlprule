@@ -615,22 +615,24 @@ impl Synthesizer {
             _ => false,
         };
 
-        // if the suggestion does not start with a case conversion match, make it title case if:
-        // * at sentence start
-        // * the replaced text is title case
+        // if the suggestion does not start with a case conversion match, make
+        // it title case if the replaced text is title case (LT case
+        // preservation: the suggestion adapts to the matched text's casing
+        // ONLY — sentence-start position alone does NOT uppercase; verified
+        // against LT 6.6 es OLA_HOLA: "ola que ta" -> "hola," vs
+        // "Ola que ta" -> "Hola,")
         let make_uppercase = !starts_with_conversion
             && graph.groups()[graph.get_index(start)..]
                 .iter()
                 .find_map(|x| x.tokens(sentence).next())
                 .map(|first_token| {
-                    (self.use_titlecase_adjust
+                    self.use_titlecase_adjust
                         && first_token
                             .word()
                             .as_str()
                             .chars()
                             .next() // a word is expected to always have at least one char, but be defensive here
-                            .map_or(false, char::is_uppercase))
-                        || first_token.span().start() == sentence.span().start()
+                            .map_or(false, char::is_uppercase)
                 })
                 .unwrap_or(false);
 

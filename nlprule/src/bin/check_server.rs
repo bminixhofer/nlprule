@@ -26,6 +26,16 @@ fn main() {
     if args.get(3).map_or(false, |l| l == "br") {
         tokenizer.set_breton_apostrophes(true);
     }
+    // LT language-specific tokenizers: English apostrophe/hyphen glue and
+    // Catalan contraction splits are runtime flags (not serialized in the
+    // tokenizer bin)
+    match args.get(3).map(|l| l.as_str()) {
+        Some("en") | Some("en-US") | Some("en-GB") => {
+            tokenizer.set_english_apostrophes(true)
+        }
+        Some("ca") => tokenizer.set_split_contractions("ca"),
+        _ => {}
+    }
     let mut rules = match args.get(3) {
         Some(lang) => Rules::with_lang(&args[2], lang).unwrap(),
         None => Rules::new(&args[2]).unwrap(),
@@ -41,6 +51,14 @@ fn main() {
         }
     }
 
+    // optional NLPRULE_PICKY=1: activate `tags="picky"` rules (LT
+    // level=picky). The HTTP front-end spawns one picky and one standard
+    // worker per language and routes by the request's `level` parameter.
+    if std::env::var("NLPRULE_PICKY").map_or(false, |v| v == "1") {
+        let n = rules.set_picky_enabled(true);
+        eprintln!("picky mode: enabled {n} rules");
+    }
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
@@ -51,7 +69,10 @@ fn main() {
 
     for (i, line) in stdin.lock().lines().enumerate() {
         let text = line.unwrap();
-        let mut hits: Vec<(String, usize, usize, String)> = Vec::new();
+        // (full_id, byte_start, byte_end, [replacement, ...]) — all
+        // replacement alternatives so the HTTP front-end can emit one LT
+        // replacement object per alternative
+        let mut hits: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
         for suggestion in rules.suggest(&text, &tokenizer) {
             // nlprule id format: CATEGORY/RULE_OR_GROUP/N -> LT id: RULE_OR_GROUP
             let id = if full_id {
@@ -68,7 +89,7 @@ fn main() {
                 id,
                 suggestion.span().byte().start,
                 suggestion.span().byte().end,
-                suggestion.replacements().first().cloned().unwrap_or_default(),
+                suggestion.replacements().to_vec(),
             ));
         }
         serde_json::ser::to_writer(

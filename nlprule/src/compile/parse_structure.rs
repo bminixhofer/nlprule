@@ -474,36 +474,32 @@ fn parse_token(
 /// Converts a Java regex replacement string (`$1`, `${name}`) to the syntax
 /// understood by the onig / fancy-regex backends (`\1`).
 fn java_replacement(replacement: &str) -> String {
+    // Java replaceAll and both our regex backends (the onig wrapper and
+    // fancy-regex) expand capture groups via the `$N` convention, so `$1`
+    // passes through unchanged. `${N}` is normalized to `$N` because the
+    // onig wrapper only expands the bare `$N` form; everything else stays
+    // literal. (Previously this converted `$N` to `\N`, which no replace
+    // path interpolates — suggestion strings kept a literal `\1`.)
     let mut out = String::with_capacity(replacement.len());
     let mut chars = replacement.chars().peekable();
 
     while let Some(c) = chars.next() {
-        if c == '$' {
-            if chars.peek() == Some(&'{') {
-                chars.next();
-                for c in chars.by_ref() {
-                    if c == '}' {
-                        break;
-                    }
-                    out.push(c);
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next();
+            let mut name = String::new();
+            for c in chars.by_ref() {
+                if c == '}' {
+                    break;
                 }
-                out = format!("\\{}", out);
+                name.push(c);
+            }
+            if !name.is_empty() && name.chars().all(|d| d.is_ascii_digit()) {
+                out.push('$');
+                out.push_str(&name);
             } else {
-                let mut digits = String::new();
-                while let Some(&d) = chars.peek() {
-                    if d.is_ascii_digit() {
-                        digits.push(d);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                if digits.is_empty() {
-                    out.push('$');
-                } else {
-                    out.push('\\');
-                    out.push_str(&digits);
-                }
+                out.push_str("${");
+                out.push_str(&name);
+                out.push('}');
             }
         } else {
             out.push(c);
@@ -1101,6 +1097,8 @@ impl Rule {
             unification,
             examples,
             suggesters,
+            // set by the caller (impls.rs) from the LT tags= metadata
+            picky: false,
             message: Synthesizer {
                 parts: message_parts,
                 use_titlecase_adjust: true,

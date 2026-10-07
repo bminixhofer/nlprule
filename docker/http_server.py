@@ -123,10 +123,11 @@ def normalize_lang(lang, text, preferred=()):
 
 
 class LangWorker:
-    """One persistent check_server child per language, guarded by a lock."""
+    """One persistent check_server child per (language, level), guarded by a lock."""
 
-    def __init__(self, lang):
+    def __init__(self, lang, picky=False):
         self.lang = lang
+        self.picky = picky
         self.lock = threading.Lock()
         self.proc = None
         self.next_i = 0
@@ -135,6 +136,8 @@ class LangWorker:
         tok = os.path.join(STORAGE, f"{self.lang}_tokenizer.bin")
         rules = os.path.join(STORAGE, f"{self.lang}_rules.bin")
         env = dict(os.environ, NLPRULE_FULL_ID="1")
+        if self.picky:
+            env["NLPRULE_PICKY"] = "1"
         self.proc = subprocess.Popen(
             ["check_server", tok, rules, self.lang],
             stdin=subprocess.PIPE,
@@ -188,18 +191,29 @@ class LangWorker:
         return self.proc is not None and self.proc.poll() is None
 
 
-WORKERS = {lang: LangWorker(lang) for lang in LANGS}
+WORKERS = {(lang, picky): LangWorker(lang, picky) for lang in LANGS for picky in (False, True)}
+
+
+def offset_tables(text):
+    """Per-code-point offset tables: byte_offsets[i] = utf-8 byte offset of
+    char i, u16_offsets[i] = utf-16 code-unit offset of char i (both with a
+    full-length sentinel entry). Used to turn the checker's byte offsets
+    into the UTF-16 code-unit offsets the LT API (Java/JS) uses."""
+    bo, uo = [], []
+    b = u = 0
+    for ch in text:
+        bo.append(b)
+        uo.append(u)
+        b += len(ch.encode("utf-8"))
+        u += 2 if ord(ch) > 0xFFFF else 1
+    bo.append(b)
+    uo.append(u)
+    return bo, uo
 
 
 def byte_to_char_offsets(text):
-    """char index -> byte offset table for text (used with bisect to turn
-    the checker's byte offsets into the character offsets the LT API uses)."""
-    offsets = []
-    b = 0
-    for ch in text:
-        offsets.append(b)
-        b += len(ch.encode("utf-8"))
-    return offsets
+    """kept for callers that want character (code-point) offsets."""
+    return offset_tables(text)[0]
 
 
 def split_rule_id(full_id):
@@ -251,50 +265,71 @@ def _fake_lt_fields(rule_id, category_id, replacement):
     return message, short, description
 
 
-def context_of(text, start, end):
-    """LT-style context: the match inside a small window, snapped to the
-    surrounding sentence when one is findable."""
+CONTEXT_SIZE = 40  # LT ContextTools default window (± units around the match)
+
+
+def sentence_span(text, start, end):
+    """Sentence-snapped [left, right) span around a match (code-point idx),
+    used for the display-only `sentence` field."""
     left = start
     for m in re.finditer(r"[.!?]+[\s]|[.!?]+$", text[:start]):
         left = max(left, m.end())
     right = end
-    m = re.search(r"[\s][.!?]+|$", text[end:])
+    m = re.search(r"[\s][.!?]+$", text[end:])
     if m:
         right = end + m.start()
-    # cap very long sentences with a fixed window
-    if right - left > 400:
-        lpad = min(150, start - left)
-        rpad = min(150, right - end)
-        left, right = start - lpad, end + rpad
+    return left, right
+
+
+def context_of(text_u16, start, end, u16_len):
+    """LT 6.6 ContextTools.getContext semantics, in UTF-16 code units:
+    a ±CONTEXT_SIZE window around the match with '\n' replaced by ' ' and
+    a '...' prefix/postfix exactly when the window extends past an edge
+    (clipped at <0 / >len — equality keeps the ellipsis, like Java)."""
+    start_content = start - CONTEXT_SIZE
+    prefix = "..."
+    if start_content < 0:
+        prefix = ""
+        start_content = 0
+    end_content = end + CONTEXT_SIZE
+    postfix = "..."
+    if end_content > u16_len:
+        postfix = ""
+        end_content = u16_len
+    window = text_u16[start_content * 2 : end_content * 2].decode("utf-16-le")
     return {
-        "text": text[left:right],
-        "offset": start - left,
+        "text": prefix + window.replace("\n", " ") + postfix,
+        "offset": len(prefix) + (start - start_content),
         "length": end - start,
     }
 
 
 def to_lt_matches(text, raw_hits):
-    offs = byte_to_char_offsets(text)
+    byte_offs, u16_offs = offset_tables(text)
+    text_u16 = text.encode("utf-16-le")
+    u16_len = len(text_u16) // 2
     matches = []
-    for full_id, bstart, bend, repl in raw_hits:
+    for full_id, bstart, bend, repls in raw_hits:
         rule_id, cat_id = split_rule_id(full_id)
-        start = bisect.bisect_left(offs, bstart)
-        end = bisect.bisect_left(offs, bend)
+        start = bisect.bisect_left(byte_offs, bstart)
+        end = bisect.bisect_left(byte_offs, bend)
         if end <= start:
             continue
-        message, short, description = _fake_lt_fields(rule_id, cat_id, repl)
-        replacements = (
-            [{"value": repl, "shortValue": repl}] if repl else []
-        )
+        start_u16 = u16_offs[start]
+        end_u16 = u16_offs[end]
+        repls = list(repls)
+        message, short, description = _fake_lt_fields(rule_id, cat_id, repls[0] if repls else "")
+        replacements = [{"value": r, "shortValue": r} for r in repls]
+        sleft, sright = sentence_span(text, start, end)
         matches.append(
             {
                 "message": message,
                 "shortMessage": short,
                 "replacements": replacements,
-                "offset": start,
-                "length": end - start,
-                "context": context_of(text, start, end),
-                "sentence": context_of(text, start, end)["text"],
+                "offset": start_u16,
+                "length": end_u16 - start_u16,
+                "context": context_of(text_u16, start_u16, end_u16, u16_len),
+                "sentence": text[sleft:sright],
                 "type": {"typeName": "Other"},
                 "rule": {
                     "id": rule_id,
@@ -388,7 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             self._send(
                 200,
-                {"status": "ok", "loaded": [l for l, w in WORKERS.items() if w.loaded()]},
+                {"status": "ok", "loaded": [l for (l, _p), w in WORKERS.items() if w.loaded()]},
             )
         else:
             self._send(404, {"error": "not found"})
@@ -462,7 +497,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         try:
-            raw = WORKERS[lang].check(text)
+            # LT `level=picky` activates tags="picky" rules; route to the
+            # matching worker (spawned with NLPRULE_PICKY=1)
+            picky = str(params.get("level", [""])[0]).lower() == "picky"
+            raw = WORKERS[(lang, picky)].check(text)
         except TimeoutError as e:
             self._send(504, {"error": str(e)})
             return

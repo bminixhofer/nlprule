@@ -54,6 +54,12 @@ impl TokenEngine {
 
                         if anti_start <= rule_end && rule_start <= anti_end {
                             blocked = true;
+                            if std::env::var("NLPRULE_DEBUG_ANTI").is_ok() {
+                                eprintln!(
+                                    "ANTIBLOCK anti=[{},{}] rule=[{},{}]",
+                                    anti_start, anti_end, rule_start, rule_end
+                                );
+                            }
                             break;
                         }
                     }

@@ -533,6 +533,10 @@ pub struct Rule {
     /// Runtime post-filter applied to fired matches (LT `<filter>` element).
     pub(crate) post_filter: Option<post_filter::PostFilter>,
     pub(crate) enabled: bool,
+    /// LT `tags="picky"`: off at the default level, on when the consumer
+    /// asks for picky mode (LT `level=picky`).
+    #[serde(default)]
+    pub(crate) picky: bool,
 }
 
 impl fmt::Display for Rule {

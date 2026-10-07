@@ -312,12 +312,221 @@ mod regex {
 
     /// Does a good effort of converting Java Regexes to regular expressions
     /// usable by `oniguruma` / `fancy-regex`.
+    /// Expand Java character-class intersections (`[\p{Punct}…&&[^!.]]`)
+    /// into an explicit class oniguruma accepts — onig has no `&&` operator.
+    /// Operands may contain literals, `a-z` ranges, `\uXXXX`/simple escapes
+    /// and `\p{Punct}` (ASCII, as in Java's POSIX classes); anything else
+    /// leaves the class untouched (callers report the parse error as before).
+    pub(crate) fn expand_class_intersections(input: &str) -> String {
+        const ASCII_PUNCT: &str = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+        let chars: Vec<char> = input.chars().collect();
+        let eval_class = |body: &str| -> Option<std::collections::BTreeSet<char>> {
+            // body excludes the enclosing brackets; `^` negation is handled by
+            // the caller (we only ever need the positive member set)
+            let mut set = std::collections::BTreeSet::new();
+            let cs: Vec<char> = body.chars().collect();
+            let mut i = 0usize;
+            while i < cs.len() {
+                let c = cs[i];
+                if c == '\\' && i + 1 < cs.len() {
+                    let e = cs[i + 1];
+                    match e {
+                        'u' | 'U' => {
+                            if i + 6 <= cs.len() {
+                                let hex: String = cs[i + 2..i + 6].iter().collect();
+                                if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        set.insert(ch);
+                                        i += 6;
+                                        continue;
+                                    }
+                                }
+                            }
+                            return None;
+                        }
+                        'n' => { set.insert('\n'); i += 2; }
+                        't' => { set.insert('\t'); i += 2; }
+                        'r' => { set.insert('\r'); i += 2; }
+                        'f' => { set.insert('\u{c}'); i += 2; }
+                        'a' => { set.insert('\u{7}'); i += 2; }
+                        'e' => { set.insert('\u{1b}'); i += 2; }
+                        'd' => { set.extend('0'..='9'); i += 2; }
+                        'w' => {
+                            set.extend('a'..='z'); set.extend('A'..='Z'); set.extend('0'..='9'); set.insert('_'); i += 2;
+                        }
+                        'p' => {
+                            // \p{Punct} etc. — only the ASCII POSIX class
+                            // (we are at the backslash; the class name starts
+                            // at the next char)
+                            let rest: String = cs[i + 1..].iter().collect();
+                            if rest.starts_with("p{Punct}") {
+                                set.extend(ASCII_PUNCT.chars());
+                                i += 1 + "p{Punct}".chars().count();
+                            } else {
+                                return None;
+                            }
+                        }
+                        _ => { set.insert(e); i += 2; }
+                    }
+                    continue;
+                }
+                // range: a-z with a next char and '-' between
+                if i + 2 < cs.len() && cs[i + 1] == '-' && cs[i + 2] != ']' {
+                    if cs[i] > cs[i + 2] {
+                        return None; // invalid range
+                    }
+                    let mut ch = cs[i];
+                    while ch <= cs[i + 2] {
+                        set.insert(ch);
+                        ch = char::from_u32(ch as u32 + 1)?;
+                    }
+                    i += 3;
+                    continue;
+                }
+                set.insert(c);
+                i += 1;
+            }
+            Some(set)
+        };
+        let escape_for_class = |c: char| -> String {
+            if matches!(c, '\\' | ']' | '[' | '^' | '-') {
+                format!("\\{}", c)
+            } else {
+                c.to_string()
+            }
+        };
+        let mut out = String::with_capacity(input.len());
+        let mut i = 0usize;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(c);
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '[' {
+                // scan the whole (possibly nested) class
+                let mut depth = 0usize;
+                let mut j = i;
+                let mut body_start = i + 1;
+                while j < chars.len() {
+                    match chars[j] {
+                        '\\' => j += 1,
+                        '[' => {
+                            depth += 1;
+                            if depth == 2 {
+                                body_start = body_start; // keep outer body start
+                            }
+                        }
+                        ']' => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                if j >= chars.len() {
+                    // unbalanced: copy the rest verbatim
+                    out.extend(&chars[i..]);
+                    break;
+                }
+                let body: String = chars[body_start..j].iter().collect();
+                if body.contains("&&") {
+                    // split into operands on unescaped &&
+                    let mut operands: Vec<String> = Vec::new();
+                    let mut cur = String::new();
+                    let mut k = 0usize;
+                    let bc: Vec<char> = body.chars().collect();
+                    while k < bc.len() {
+                        if bc[k] == '&' && k + 1 < bc.len() && bc[k + 1] == '&' {
+                            operands.push(cur.clone());
+                            cur.clear();
+                            k += 2;
+                            continue;
+                        }
+                        if bc[k] == '\\' && k + 1 < bc.len() {
+                            cur.push(bc[k]);
+                            cur.push(bc[k + 1]);
+                            k += 2;
+                            continue;
+                        }
+                        cur.push(bc[k]);
+                        k += 1;
+                    }
+                    operands.push(cur);
+                    let mut acc: Option<std::collections::BTreeSet<char>> = None;
+                    let mut ok = true;
+                    for op in &operands {
+                        let op = op.trim();
+                        let (neg, inner) = if let Some(stripped) = op.strip_prefix('^') {
+                            (true, stripped)
+                        } else {
+                            (false, op)
+                        };
+                        // nested [..] / [^..] wrapper
+                        let inner_body = inner
+                            .strip_prefix('[')
+                            .and_then(|s| s.strip_suffix(']'))
+                            .map(|s| s.strip_prefix('^').map(|t| (true, t.to_string())).unwrap_or_else(|| (false, s.to_string())))
+                            .unwrap_or_else(|| (neg, inner.to_string()));
+                        let (n2, b2) = inner_body;
+                        match eval_class(&b2) {
+                            Some(s) => {
+                                if n2 {
+                                    acc = Some(match acc {
+                                        Some(a) => a.into_iter().filter(|c| !s.contains(c)).collect(),
+                                        None => { ok = false; break; } // leading negation: unsupported
+                                    });
+                                } else {
+                                    acc = Some(match acc {
+                                        Some(a) => a.intersection(&s).cloned().collect(),
+                                        None => s,
+                                    });
+                                }
+                            }
+                            None => { ok = false; break; }
+                        }
+                    }
+                    if ok {
+                        if let Some(set) = acc {
+                            if !set.is_empty() {
+                                out.push('[');
+                                for ch in set {
+                                    out.push_str(&escape_for_class(ch));
+                                }
+                                out.push(']');
+                                i = j + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                // not an intersection (or unsupported): copy verbatim
+                out.push('[');
+                out.push_str(&body);
+                out.push(']');
+                i = j + 1;
+                continue;
+            }
+            out.push(c);
+            i += 1;
+        }
+        out
+    }
+
     pub fn from_java_regex(
         in_regex: &str,
         case_sensitive: bool,
         full_match: bool,
     ) -> Result<String, Error> {
         let mut regex = in_regex.to_owned();
+        // expand Java character-class intersections first — later passes
+        // (surrogate decode etc.) operate on the expanded form
+        regex = expand_class_intersections(&regex);
         // decode Java surrogate pairs (`\ud83c\udc00`) to astral code
         // points (`\u{1f000}`); regex-syntax rejects lone surrogates
         // (de KOMMA_ZWISCHEN emoji classes)

@@ -448,8 +448,10 @@ pub(crate) fn builtin_ids(
     for id in text_family_ids(lang) {
         out.push(id.to_string());
     }
-    if let Some(table) = filter_data.simple_replace.as_ref() {
-        out.push(table.prefix.clone());
+    if let Some(tables) = filter_data.simple_replace.as_ref() {
+        for t in tables {
+            out.push(t.prefix.clone());
+        }
     }
     out
 }
@@ -504,9 +506,6 @@ pub(crate) fn text_family_ids(lang: Option<&str>) -> Vec<&'static str> {
     }
     if lang == "br" {
         out.push("BR_TOPO");
-    }
-    if lang == "es" {
-        out.push("ES_QUESTION_MARK");
     }
     if lang == "fr" {
         out.push("FRENCH_WHITESPACE");
@@ -590,6 +589,20 @@ fn spelling_config(lang: &str) -> Option<SpellingRuleConfig> {
             id: "HUNSPELL_RULE",
             latin_script: true,
             ignore: &[],
+            prohibit: &[],
+        },
+        // da/sv: DanishSwedishHunspellRule (generic HUNSPELL_RULE id),
+        // dictionaries expanded from da_DK.dic/sv_SE.dic (scripts/unmunch.py)
+        "da" => SpellingRuleConfig {
+            id: "HUNSPELL_RULE",
+            latin_script: true,
+            ignore: spelling_lists!("da", "ignore.txt", "spelling.txt"),
+            prohibit: &[],
+        },
+        "sv" => SpellingRuleConfig {
+            id: "HUNSPELL_RULE",
+            latin_script: true,
+            ignore: spelling_lists!("sv", "ignore.txt", "spelling.txt"),
             prohibit: &[],
         },
         "crh" => SpellingRuleConfig {
@@ -849,12 +862,32 @@ pub(crate) fn morfologik_spelling(
         None => return Vec::new(),
     };
 
+    // LT hunspell-dictionary languages (da/sv/eo/km/ar/gl): delegate the
+    // dictionary lookup and suggestion generation to the system libhunspell
+    // loaded with LT's own .aff/.dic (embedded in the bin). Probed live:
+    // reproduces LT 6.6's is_known and suggestion lists. Falls back to the
+    // FST approximation when the library is unavailable.
+    let hu_data = speller
+        .hunspell
+        .as_ref()
+        .filter(|d| d.is_present())
+        .filter(|_| crate::hunspell::available());
+    let known = |w: &str| -> bool {
+        if let Some(d) = hu_data {
+            if let Some(r) = crate::hunspell::spell(lang, d, w) {
+                return r;
+            }
+        }
+        speller.is_known(w)
+    };
+
     let tokens: Vec<_> = sentence.iter().collect();
     let mut out = Vec::new();
 
-    // es/ca/fr/pt call setIgnoreTaggedWords(): words the tagger knows are
-    // never spelling errors
-    let ignore_tagged = matches!(lang, "es" | "ca" | "fr" | "pt");
+    // es/ca/fr call setIgnoreTaggedWords(): words the tagger knows are
+    // never spelling errors. pt does NOT (probed: LT flags the tagger-known
+    // 'conosco' — a pt-BR form absent from the pt-PT-45 dictionary)
+    let ignore_tagged = matches!(lang, "es" | "ca" | "fr");
 
     for (idx, token) in tokens.iter().enumerate() {
         let word = token.word().as_str();
@@ -888,16 +921,25 @@ pub(crate) fn morfologik_spelling(
             for (bs, be, cs, ce) in runs {
                 let run = &word[bs..be];
                 let prohibited = config.prohibit.contains(&run);
-                let known = speller.is_known(run);
+                let run_known = known(run);
                 // HunspellRule.isMisspelled: (!spell && !ignoreWord) || isProhibited
-                if !prohibited && (known || config.ignore.contains(&run)) {
+                if !prohibited && (run_known || config.ignore.contains(&run)) {
                     continue;
                 }
+                let replacements: Vec<String> = match hu_data.and_then(|d| {
+                    crate::hunspell::suggest(lang, d, run)
+                }) {
+                    Some(list) => list
+                        .into_iter()
+                        .filter(|c: &String| !config.prohibit.contains(&c.as_str()))
+                        .collect(),
+                    None => Vec::new(),
+                };
                 out.push(Suggestion::new(
                     config.id.to_string(),
                     "Possible spelling mistake found.".to_string(),
                     Span::new(base.byte + bs..base.byte + be, base.char + cs..base.char + ce),
-                    Vec::new(),
+                    replacements,
                 ));
             }
             continue;
@@ -942,7 +984,13 @@ pub(crate) fn morfologik_spelling(
         if ignore_tagged
             && token.word().tags().iter().any(|t| {
                 let pos = t.pos().as_str();
-                !pos.is_empty() && pos != "UNKNOWN"
+                // real part-of-speech only: the tokenizer encodes sentence
+                // boundaries as meta tags (SENT_END) and punctuation as
+                // _PUNCT — LT keeps those off the tagger readings, and
+                // setIgnoreTaggedWords must not treat them as "tagged"
+                // (probed: 'mundo. qqqxyz' must fire MORFOLOGIK on the
+                // last token, LT does)
+                !pos.is_empty() && pos != "UNKNOWN" && !pos.starts_with('_') && pos != "SENT_END"
             })
         {
             continue;
@@ -955,7 +1003,7 @@ pub(crate) fn morfologik_spelling(
         };
         let word = word.as_str();
         let prohibited = config.prohibit.contains(&word);
-        if speller.is_known(word) && !prohibited {
+        if known(word) && !prohibited {
             continue;
         }
         // GermanSpellerRule accepts unknown words that decompose into
@@ -967,36 +1015,140 @@ pub(crate) fn morfologik_spelling(
         {
             continue;
         }
-        // Esperanto hunspell is fully generative (any stem + ending is a
-        // valid word), so LT's eo speller de-facto only fires on vowel-less
-        // junk (probed: 'qzwxkj'/'Zzzzzz' fire; 'mangis'/'Haus' don't).
-        if lang == "eo" {
-            if word
-                .to_lowercase()
-                .contains(|c| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u'))
-            {
-                continue;
-            }
-        }
+        // eo: real hunspell expansion since the 6.6 re-baseline
+        // (data2/eo/filters/speller.txt = eo.dic unmunch, 832k forms); the
+        // old vowel-less-junk heuristic under-fired 224 corpus sentences
         let span = Span::from_positions(token.span().start(), token.span().end());
 
-        // suggestion candidates by increasing edit distance, mirroring
-        // speller1/2/3 tiers of MorfologikSpellerRule.calcSpellerSuggestions
-        let char_len = word.chars().count();
-        let max_distance = if char_len >= 5 {
-            3
-        } else if char_len >= 3 {
-            2
-        } else {
-            1
-        };
+        // hunspell languages: LT's suggestion list is hunspell's own
+        // (phonetic/ngram/compound candidates in hunspell's order); no
+        // tier escalation, no run-on splits, no convert-case
+        if let Some(list) = hu_data.and_then(|d| crate::hunspell::suggest(lang, d, word)) {
+            let replacements: Vec<String> = list
+                .into_iter()
+                .filter(|c: &String| !config.prohibit.contains(&c.as_str()))
+                .collect();
+            let is_sentence_start = idx == 0 && idx < tokens.len() - 1;
+            let replacements = if is_sentence_start {
+                replacements
+                    .into_iter()
+                    .map(|r| {
+                        if r == r.to_lowercase() {
+                            uppercase_first_char(&r)
+                        } else {
+                            r
+                        }
+                    })
+                    .collect()
+            } else {
+                replacements
+            };
+            out.push(Suggestion::new(
+                config.id.to_string(),
+                "Possible spelling mistake found.".to_string(),
+                span,
+                replacements,
+            ));
+            continue;
+        }
+
+        // suggestion candidates in escalating tiers (LT speller1/2/3):
+        // the FIRST non-empty distance tier wins — probed: 'casx'/'peroo'
+        // (d1 candidates exist → no d2s in LT's list), 'hatsap' (no d1 →
+        // all-d2 list), 'recieve'/'seperate' (en: transposition d1 tier
+        // only). Residual: some inputs mix tiers ('HATSAA' shows hasta d1
+        // + hafsa d2) — morfologik's FSA-walk candidate semantics, see
+        // delta_log.md
+        //
+        // el: morfologik's SUFFIX-encoded automaton mixes char-distance
+        // tiers ('λαθος' → d1 'λάθος' + d2 'λάλος' + case variants in ONE
+        // list) — delegate to the persistent ElSuggest Java sidecar
+        // (LT's own morfologik speller, distance 2, cap 18 = probed LT
+        // behavior); fall back to the FST tiers when it is unavailable.
         let mut replacements: Vec<String> = Vec::new();
-        for candidate in speller.find_similar(word, max_distance) {
+        let mut similar: Vec<String> = Vec::new();
+        if lang == "el" {
+            if let Some(cands) =
+                crate::morfologik_sidecar::MorfologikSidecar::suggest("el", word)
+            {
+                similar = cands;
+            }
+        }
+        if similar.is_empty() {
+            for tier in 1..=3 {
+                let found = if speller.ignore_diacritics {
+                    speller.find_similar_ignoring_diacritics(word, tier)
+                } else {
+                    speller.find_similar(word, tier)
+                };
+                if !found.is_empty() {
+                    similar = found;
+                    break;
+                }
+            }
+        }
+        for candidate in similar {
             if config.prohibit.contains(&candidate.as_str()) {
                 continue;
             }
             if !replacements.contains(&candidate) {
                 replacements.push(candidate);
+            }
+        }
+        // LT replaceRunOnWordCandidates: a run-on word splits into two
+        // dictionary words ('acomputer' -> ['computer', 'a computer']).
+        // Probed live vs LT 6.6: en appends splits, es does NOT
+        // ('quieroiracasa'/'casagrande'/'elperro' get dictionary candidates
+        // only — the port's extra 'mier coles' split was the smoke diff).
+        // Gated to en until another language is probed to do this.
+        let char_len = word.chars().count();
+        if lang == "en" && char_len >= 3 {
+            let lower_word = word.to_lowercase();
+            let chars: Vec<(usize, char)> = lower_word.char_indices().collect();
+            for (ci, &(bi, _)) in chars.iter().enumerate() {
+                if ci == 0 || bi == 0 {
+                    continue;
+                }
+                let (left, right) = (&lower_word[..bi], &lower_word[bi..]);
+                if !left.is_empty()
+                    && !right.is_empty()
+                    && speller.is_known(left)
+                    && speller.is_known(right)
+                {
+                    let split = format!("{} {}", left, right);
+                    if !replacements.contains(&split) {
+                        replacements.push(split);
+                    }
+                }
+            }
+        }
+        // morfologik convert-case: re-case suggestions to the misspelled
+        // word's casing (HATSAP -> HAFSA..., Hatsap -> Hasta...)
+        if speller.convert_case {
+            let has_upper = word.chars().any(|c| c.is_uppercase());
+            let all_upper =
+                has_upper && word.chars().count() > 1 && word.chars().all(|c| !c.is_lowercase());
+            let capitalized = has_upper && !all_upper;
+            if all_upper {
+                for r in replacements.iter_mut() {
+                    // "do not use capitalized word if it's mixed case":
+                    // keep mixed-case dictionary forms as-is (WHATSAPP is
+                    // uppercased, WhatsApp stays mixed; Hafsa is only
+                    // capitalized so it becomes HAFSA) — morfologik
+                    // StringTools.isMixedCase
+                    let mixed = r.chars().skip(1).any(|c| c.is_uppercase())
+                        && r.chars().any(|c| c.is_lowercase());
+                    if !mixed {
+                        *r = r.to_uppercase();
+                    }
+                }
+            } else if capitalized {
+                for r in replacements.iter_mut() {
+                    let c = uppercase_first_char(r);
+                    if c != *r {
+                        *r = c;
+                    }
+                }
             }
         }
         // Capitalize the word at the sentence start (if it is not the last
@@ -1011,6 +1163,19 @@ pub(crate) fn morfologik_spelling(
                     }
                 }
             }
+            // re-casing can collide ('Λάζος' from 'Λάζος' and 'λάζος') —
+            // LT dedupes after capitalizing (el sentence-start probe:
+            // 18 mid-sentence candidates -> 17 distinct capitalized)
+            replacements.dedup_by(|a, b| a == b);
+            let mut seen: Vec<String> = Vec::new();
+            replacements.retain(|r| {
+                if seen.contains(r) {
+                    false
+                } else {
+                    seen.push(r.clone());
+                    true
+                }
+            });
         }
 
         out.push(Suggestion::new(
@@ -1724,6 +1889,11 @@ struct UnpairedCfg {
     /// LT's UnpairedBracketsRule ignores whitespace-separated brackets
     /// (then CommaWhitespaceRule fires instead). de/km flag spaced ones.
     glued_only: bool,
+    /// replicate LT's GenericUnpairedQuotesRule (TextLevelRule) instead of
+    /// the simple odd/even `"" pairing — needed where the language rule
+    /// pairs single quotes too and skips POS/NNP/contraction-tagged
+    /// apostrophes (en: EN_UNPAIRED_QUOTES)
+    lt_generic_quotes: bool,
 }
 
 struct TextCfg {
@@ -1746,6 +1916,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
         bracket_id: "UNPAIRED_BRACKETS",
         quote_id: "UNPAIRED_BRACKETS",
         glued_only: true,
+                lt_generic_quotes: false,
     };
     let cws = "COMMA_PARENTHESIS_WHITESPACE";
     Some(match lang {
@@ -1766,6 +1937,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "ES_UNPAIRED_BRACKETS",
                 quote_id: "ES_UNPAIRED_BRACKETS",
                 glued_only: true,
+                lt_generic_quotes: false,
             }),
             dbl: "DOUBLE_PUNCTUATION",
             ws: true,
@@ -1781,6 +1953,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "EL_UNPAIRED_BRACKETS",
                 quote_id: "EL_UNPAIRED_BRACKETS",
                 glued_only: true,
+                lt_generic_quotes: false,
             }),
             dbl: "DOUBLE_PUNCTUATION",
             ws: true,
@@ -1796,6 +1969,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "PL_UNPAIRED_BRACKETS",
                 quote_id: "PL_UNPAIRED_BRACKETS",
                 glued_only: true,
+                lt_generic_quotes: false,
             }),
             dbl: "DOUBLE_PUNCTUATION",
             ws: true,
@@ -1811,6 +1985,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "RU_UNPAIRED_BRACKETS",
                 quote_id: "RU_UNPAIRED_BRACKETS",
                 glued_only: true,
+                lt_generic_quotes: false,
             }),
             dbl: "DOUBLE_PUNCTUATION",
             ws: true,
@@ -1819,7 +1994,9 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
             comma_open_bracket: cws,
         },
         // en has two rules: EN_UNPAIRED_BRACKETS (brackets) and
-        // EN_UNPAIRED_QUOTES (straight quotes)
+        // EN_UNPAIRED_QUOTES (straight + typographic quotes, single-quote
+        // pairing, POS/NNP/_apostrophe_contraction_ possessive skip —
+        // replicates GenericUnpairedQuotesRule with the English overrides)
         "en" => TextCfg {
             unp: Some(UnpairedCfg {
                 brackets: true,
@@ -1828,6 +2005,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "EN_UNPAIRED_BRACKETS",
                 quote_id: "EN_UNPAIRED_QUOTES",
                 glued_only: true,
+                lt_generic_quotes: true,
             }),
             dbl: "DOUBLE_PUNCTUATION",
             ws: false,
@@ -1845,6 +2023,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "UNPAIRED_BRACKETS",
                 quote_id: "DE_UNPAIRED_QUOTES",
                 glued_only: false,
+                lt_generic_quotes: false,
             }),
             dbl: "DE_DOUBLE_PUNCTUATION",
             ws: false,
@@ -1862,6 +2041,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "KM_UNPAIRED_BRACKETS",
                 quote_id: "KM_UNPAIRED_BRACKETS",
                 glued_only: false,
+                lt_generic_quotes: false,
             }),
             dbl: "",
             ws: false,
@@ -1878,6 +2058,7 @@ fn text_cfg(lang: &str) -> Option<TextCfg> {
                 bracket_id: "UNPAIRED_BRACKETS",
                 quote_id: "UNPAIRED_BRACKETS",
                 glued_only: true,
+                lt_generic_quotes: false,
             }),
             dbl: "ARABIC_DOUBLE_PUNCTUATION",
             ws: true,
@@ -2032,6 +2213,130 @@ pub(crate) fn multiple_whitespace(sentence: &Sentence, lang: Option<&str>) -> Ve
 /// (SPACE_BEFORE_PUNCTUATION for gl, SPACE_BEFORE_PUNCTUATION2 for pt,
 /// ARABIC_SC_WHITESPACE for brackets in ar) and some languages check only
 /// a subset of the positions.
+/// LT `CommaWhitespaceRule` (core Java) for languages that use the base
+/// rule verbatim (en). Token-gap translation: LT iterates tokens including
+/// whitespace; we walk non-whitespace tokens and use the gaps. Spans include
+/// the punctuation (LT flags from prev-token start to current-token end).
+/// Handles: space after "(", space around quotes (with single-space before,
+/// two suggestions), missing space after ",", space before ")" "," "."
+/// with the digit/domain/file-extension/duplicate-comma exceptions.
+fn comma_whitespace_java(sentence: &Sentence, id: &'static str) -> Vec<Suggestion> {
+    let tokens: Vec<_> = sentence.iter().collect();
+    let text = sentence.text();
+    let gap = |i: usize| -> &str {
+        // whitespace gap AFTER token i (empty when glued or out of range)
+        if i + 1 >= tokens.len() {
+            return "";
+        }
+        let bs = tokens[i].span().end().byte;
+        let be = tokens[i + 1].span().start().byte;
+        if be > bs && be <= text.len() {
+            &text[bs..be]
+        } else {
+            ""
+        }
+    };
+    let is_ws_gap = |g: &str| !g.is_empty() && g.chars().all(char::is_whitespace);
+    let is_quote = |w: &str| {
+        matches!(w, "'" | "\"" | "\u{2019}" | "\u{201d}" | "\u{201c}" | "\u{ab}" | "\u{bb}")
+    };
+    let contains_digit = |w: &str| w.chars().any(|c| c.is_ascii_digit());
+    let is_domain = |w: &str| {
+        w == "com" || w == "org" || w == "net" || w == "int" || w == "edu" || w == "gov" || w == "mil" || (w.len() == 2 && w.chars().all(|c| c.is_ascii_lowercase()))
+    };
+    let is_file_ext = |w: &str| {
+        // ([a-z]{3,4}|[A-Z]{3,4}|ai|mp[34]|MP[34])(-.+)?
+        let base = w.split('-').next().unwrap_or("");
+        let lower_ok = (3..=4).contains(&base.len()) && base.chars().all(|c| c.is_ascii_lowercase());
+        let upper_ok = (3..=4).contains(&base.len()) && base.chars().all(|c| c.is_ascii_uppercase());
+        let special = matches!(base, "ai" | "mp3" | "mp4" | "MP3" | "MP4");
+        (lower_ok || upper_ok || special) && (base.len() == w.len() || w.contains('-'))
+    };
+    let mut out = Vec::new();
+    let push = |out: &mut Vec<Suggestion>, from_b: usize, to_b: usize, from_c: usize, to_c: usize, repl: Vec<String>| {
+        out.push(Suggestion::new(
+            id.to_string(),
+            "Whitespace.".to_string(),
+            Span::new(from_b..to_b, from_c..to_c),
+            repl,
+        ));
+    };
+    for i in 0..tokens.len() {
+        let w = tokens[i].word().as_str();
+        let sb = tokens[i].span().start();
+        let se = tokens[i].span().end();
+        let prev_w = if i > 0 { tokens[i - 1].word().as_str() } else { "" };
+        let prev_sb = if i > 0 { tokens[i - 1].span().start() } else { sb };
+        let prev_se = if i > 0 { tokens[i - 1].span().end() } else { sb };
+        let g_after = gap(i);
+        let g_before = if i > 0 { gap(i - 1) } else { "" };
+        let next_w = if i + 1 < tokens.len() { tokens[i + 1].word().as_str() } else { "" };
+        // 1) whitespace after "("
+        if is_ws_gap(g_after) && w == "(" && !(w == "[" && g_after == " " && next_w == "]") {
+            push(&mut out, sb.byte, tokens[i + 1].span().start().byte, sb.char, tokens[i + 1].span().start().char, vec!["(".to_string()]);
+            continue;
+        }
+        // 2) whitespace after a quote with exactly one space before it
+        if is_ws_gap(g_after) && is_quote(w) && is_ws_gap(g_before) && g_before == " " {
+            push(
+                &mut out,
+                prev_se.byte,
+                tokens[i + 1].span().start().byte,
+                prev_se.char,
+                tokens[i + 1].span().start().char,
+                vec![format!("{} ", w), format!(" {}", w)],
+            );
+            continue;
+        }
+        // 3) missing space after "," (glued next, not quote/hyphen/comma,
+        // no digits around, not duplicate comma)
+        if !is_ws_gap(g_after)
+            && w == ","
+            && i + 1 < tokens.len()
+            && !is_quote(next_w)
+            && !(next_w == "-" || next_w == ",")
+            && (i == 0 || (!contains_digit(prev_w) && prev_w != ","))
+            && !contains_digit(next_w)
+        {
+            push(
+                &mut out,
+                sb.byte,
+                tokens[i + 1].span().end().byte,
+                sb.char,
+                tokens[i + 1].span().end().char,
+                vec![format!(", {}", next_w)],
+            );
+            continue;
+        }
+        // 4) whitespace before ")" / "," / "."
+        if is_ws_gap(g_before) {
+            if w == ")" && !(w == "]" && g_before == " " && prev_w == "[") {
+                push(&mut out, prev_se.byte, se.byte, prev_se.char, se.char, vec![")".to_string()]);
+            } else if w == "," {
+                // duplicate comma handled by DOUBLE_PUNCTUATION instead
+                if next_w != "," {
+                    let repl = if !next_w.is_empty() && !is_ws_gap(g_after) {
+                        vec![", ".to_string()]
+                    } else {
+                        vec![",".to_string()]
+                    };
+                    push(&mut out, prev_se.byte, se.byte, prev_se.char, se.char, repl);
+                }
+            } else if w == "." && !is_domain(next_w) && !is_file_ext(next_w) {
+                // "figures such as .5" and ellipsis, or "./command"
+                let next2 = if i + 2 < tokens.len() { tokens[i + 2].word().as_str() } else { "" };
+                let digit_or_dot = !next_w.is_empty()
+                    && (next_w.starts_with('.') || next_w.chars().next().map_or(false, |c| c.is_ascii_digit()));
+                let slash_cmd = next_w == "/" && !next2.is_empty() && next2.chars().all(|c| c.is_ascii_alphabetic());
+                if !digit_or_dot && !slash_cmd {
+                    push(&mut out, prev_se.byte, se.byte, prev_se.char, se.char, vec![".".to_string()]);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub(crate) fn comma_parenthesis_whitespace(
     sentence: &Sentence,
     lang: Option<&str>,
@@ -2040,6 +2345,10 @@ pub(crate) fn comma_parenthesis_whitespace(
         Some(c) => c,
         None => return Vec::new(),
     };
+    if lang == Some("en") {
+        // en uses the base LT CommaWhitespaceRule verbatim
+        return comma_whitespace_java(sentence, cfg.comma);
+    }
     let tokens: Vec<_> = sentence.iter().collect();
     let text = sentence.text();
     let mut out = Vec::new();
@@ -2093,6 +2402,505 @@ pub(crate) fn comma_parenthesis_whitespace(
 /// glue rule: in most languages the bracket must be attached to a word —
 /// whitespace-separated brackets are flagged by the comma-whitespace family
 /// instead. de and km flag spaced brackets themselves.
+/// LT GenericUnpairedQuotesRule (TextLevelRule) + EnglishUnpairedQuotesRule
+/// overrides, per-sentence form. Pairs quotes per symbol (“"", '"", '"", '‘‘)
+/// and skips apostrophes whose token carries POS / NNP /
+/// _apostrophe_contraction_ (possessives, contractions, proper nouns get
+/// those tags from the disambiguation pass). Verbatim port of the Java
+/// control flow incl. the inch-quote heuristic and lastApostropheSymbol.
+/// LT `GenericUnpairedBracketsRule` + `SpanishUnpairedBracketsRule`
+/// overrides (ES_UNPAIRED_BRACKETS): symbols [ ( { “ « " ' ‘ / ] ) } ” » " ' ’,
+/// stack pairing with ambiguous-symbol whitespace/special-case rules,
+/// Spanish exceptions (apostrophe postags, Saxon s, degrees º/°, initial »,
+/// `)` after a word without opener), bibliographic `)` exceptions, the
+/// symmetric-middle case, `a) item` list suppression, opener flagging only
+/// when the sentence ends ./?! and move-symbol suggestions. Per-sentence
+/// (LT pairs across the whole paragraph — documented divergence for
+/// multi-sentence texts).
+fn generic_unpaired_brackets_es(sentence: &Sentence, cfg: &UnpairedCfg) -> Vec<Suggestion> {
+    const STARTS: [&str; 8] = ["[", "(", "{", "\u{201c}", "\u{ab}", "\"", "'", "\u{2018}"];
+    const ENDS: [&str; 8] = ["]", ")", "}", "\u{201d}", "\u{bb}", "\"", "'", "\u{2019}",
+    ];
+    let tokens: Vec<_> = sentence.iter().collect();
+    let text = sentence.text();
+    let numerals = |w: &str| -> bool {
+        // (?i)\d{1,2}?[a-z']*|M*(D?C{0,3}|C[DM])(L?X{0,3}|X[LC])(V?I{0,3}|I[VX])$
+        // evaluated as a full match; ported via the regex crate
+        use std::sync::OnceLock;
+        use crate::utils::regex::Regex as PortRegex;
+        static RE: OnceLock<PortRegex> = OnceLock::new();
+        let re = RE.get_or_init(|| PortRegex::new(
+            r"(?i)^(?:\d{1,2}?[a-z']*|M*(?:D?C{0,3}|C[DM])(?:L?X{0,3}|X[LC])(?:V?I{0,3}|I[VX]))$".to_string()));
+        re.is_match(w)
+    };
+    let number = |w: &str| -> bool {
+        // \d[\d., ]+\d|\d{1,2} full match
+        let d = w.chars().all(|c| c.is_ascii_digit());
+        if d && w.chars().count() <= 2 && !w.is_empty() {
+            return true;
+        }
+        let cs: Vec<char> = w.chars().collect();
+        cs.len() >= 3
+            && cs.first().map_or(false, |c| c.is_ascii_digit())
+            && cs.last().map_or(false, |c| c.is_ascii_digit())
+            && cs[1..cs.len() - 1].iter().all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | ' '))
+    };
+    let ascii_punct = |w: &str| -> bool {
+        !w.is_empty() && w.chars().all(|c| c.is_ascii_punctuation())
+    };
+    // [\p{Punct}…–—] full token
+    let punctuation = |w: &str| -> bool {
+        !w.is_empty()
+            && w.chars().all(|c| c.is_ascii_punctuation() || matches!(c, '\u{2026}' | '\u{2013}' | '\u{2014}'))
+    };
+    // [ldmnstLDMNST]'|[–—\p{Punct}&&[^.]] full token
+    let punct_no_dot = |w: &str| -> bool {
+        if w.is_empty() {
+            return false;
+        }
+        if matches!(w, "\u{2013}" | "\u{2014}") {
+            return true;
+        }
+        let b = w.as_bytes();
+        if b.len() == 2 && b[1] == b'\'' && b"ldmnstLDMNST".contains(&b[0]) {
+            return true;
+        }
+        w.chars().all(|c| c.is_ascii_punctuation() && c != '.')
+    };
+    // stack entries: (token index, is_opening, symbol)
+    let mut stack: Vec<(usize, bool, &'static str)> = Vec::new();
+    for m in 0..tokens.len() {
+        let w = tokens[m].word().as_str();
+        for j in 0..STARTS.len() {
+            if w != STARTS[j] && w != ENDS[j] {
+                continue;
+            }
+            let ambiguous = STARTS[j] == ENDS[j];
+            let preceded_by_ws = if ambiguous {
+                m == 0
+                    || tokens[m].has_space_before()
+                    || (m > 0 && (punct_no_dot(tokens[m - 1].word().as_str()) || STARTS.contains(&tokens[m - 1].word().as_str())))
+            } else {
+                true
+            };
+            let special_case = if ambiguous && m + 1 < tokens.len() {
+                let next = tokens[m + 1].word().as_str();
+                tokens[m + 1].has_space_before()
+                    || punctuation(next)
+                    || ENDS.contains(&next)
+                    || (m > 0 && tokens[m - 1].word().as_str().ends_with('-'))
+                    || next.starts_with('-')
+                    || next == "s"
+            } else {
+                // non-ambiguous end symbols are always closing candidates
+                // (LT getSpecialCase only restricts ambiguous symbols)
+                !ambiguous || m + 1 >= tokens.len()
+            };
+            // Spanish isNoException overrides
+            let no_exception = {
+                let mut ok = true;
+                // base class smileys / URL paren
+                if m > 0 {
+                    let prev = tokens[m - 1].word().as_str();
+                    if prev.starts_with("http://") || prev.starts_with("https://") {
+                        if prev.contains('(') {
+                            ok = false;
+                        }
+                    }
+                    if m >= 2 {
+                        let pp = tokens[m - 2].word().as_str();
+                        let p = prev;
+                        if pp == ":" && p == "-" && (w == ")" || w == "(") {
+                            ok = false;
+                        }
+                        if pp == ";" && p == "-" && (w == ")" || w == "(") {
+                            ok = false;
+                        }
+                    }
+                    if (prev == ":" || prev == ";") && !tokens[m].has_space_before() && (w == ")" || w == "(") {
+                        ok = false;
+                    }
+                }
+                // apostrophe with noun/adjective postag
+                if (w == "'" || w == "\u{2019}")
+                    && tokens[m]
+                        .word()
+                        .tags()
+                        .iter()
+                        .any(|t| {
+                            let p = t.pos().as_str();
+                            p.starts_with('N') || p.starts_with('A') || p == "_allow_apostrophe"
+                        })
+                {
+                    ok = false;
+                }
+                // Saxon genitive 's
+                if m + 1 < tokens.len() && (w == "'" || w == "\u{2019}") && tokens[m + 1].word().as_str().eq_ignore_ascii_case("s") {
+                    ok = false;
+                }
+                // degrees/minutes/seconds "12' 34\""
+                if (w == "\"" || w == "'")
+                    && m > 0
+                    && !tokens[m].has_space_before()
+                    && number(tokens[m - 1].word().as_str())
+                    && ((m > 2 && (tokens[m - 2].word().as_str().contains('\u{ba}') || tokens[m - 2].word().as_str().contains('\u{b0}')))
+                        || (m > 4 && (tokens[m - 4].word().as_str().contains('\u{ba}') || tokens[m - 4].word().as_str().contains('\u{b0}'))))
+                {
+                    ok = false;
+                }
+                // » as first token
+                if m == 0 && w == "\u{bb}" {
+                    ok = false;
+                }
+                // ) after a plain word without an opener
+                if m > 0 && w == ")" {
+                    let mut has_opener = false;
+                    let mut k = 1usize;
+                    while m > k {
+                        let t = tokens[m - k].word().as_str();
+                        if t == ")" {
+                            break;
+                        }
+                        if t == "(" {
+                            has_opener = true;
+                            break;
+                        }
+                        k += 1;
+                    }
+                    if !has_opener {
+                        let prev = tokens[m - 1].word().as_str();
+                        if prev.chars().all(|c| c.is_ascii_alphabetic())
+                            && !prev.is_empty()
+                            || prev.chars().all(|c| c.is_ascii_digit()) && !prev.is_empty()
+                        {
+                            ok = false;
+                        }
+                    }
+                }
+                ok
+            };
+            // opening
+            if no_exception && preceded_by_ws && w == STARTS[j] {
+                stack.push((m, true, STARTS[j]));
+                break;
+            }
+            // closing (special case or last token of the sentence)
+            let is_sentence_end = m + 1 >= tokens.len();
+            if no_exception && (special_case || is_sentence_end) && w == ENDS[j] {
+                // bibliographic (2014). exception
+                let numeral_paren = (m > 1
+                    && ENDS[j] == ")"
+                    && (m == 3 || tokens[m - 2].has_space_before())
+                    && tokens[m - 1].word().as_str() == "."
+                    && numerals(tokens[m - 2].word().as_str())
+                    && !(stack.last().map_or(false, |(_, _, s)| *s == "(")))
+                    || (m > 0
+                        && ENDS[j] == ")"
+                        && numerals(tokens[m - 1].word().as_str())
+                        && !(stack.last().map_or(false, |(_, _, s)| *s == "(")));
+                if numeral_paren {
+                    break;
+                }
+                match stack.last() {
+                    None => {
+                        stack.push((m, false, ENDS[j]));
+                        break;
+                    }
+                    Some((_, _, s)) if *s == STARTS[j] => {
+                        stack.pop();
+                        break;
+                    }
+                    Some(_) => {
+                        // every es end symbol is unique in ENDS
+                        stack.push((m, false, ENDS[j]));
+                        break;
+                    }
+                }
+            }
+            // pure end symbol not in special position: nothing (kept for the
+            // ambiguous fallthrough — LT only handles the branches above)
+            break;
+        }
+    }
+    // symmetric odd stack (({"}) — flag only the middle symbol
+    let mut flagged: Vec<(usize, bool, &'static str)> = Vec::new();
+    if stack.len() > 2 && stack.len() % 2 == 1 {
+        let mut symmetric = true;
+        let n = stack.len();
+        for i in 0..n / 2 {
+            let s_start = stack[i].2;
+            let s_end = stack[n - 1 - i].2;
+            if STARTS.iter().position(|s| *s == s_start) != ENDS.iter().position(|s| *s == s_end) {
+                symmetric = false;
+                break;
+            }
+        }
+        if symmetric {
+            flagged.push(stack[stack.len() / 2]);
+        } else {
+            flagged.extend(stack.iter().cloned());
+        }
+    } else {
+        flagged.extend(stack.iter().cloned());
+    }
+    let ends_like_sentence = {
+        let t = text.trim_end();
+        t.ends_with('.') || t.ends_with('?') || t.ends_with('!')
+    };
+    let mut out: Vec<Suggestion> = Vec::new();
+    // dedup: a closing match right after its opener match removes it
+    let mut rule_match_stack: Vec<(usize, &'static str, bool)> = Vec::new(); // (out idx, symbol, is_open)
+    for (m, is_open, sym) in flagged {
+        if !is_open || ends_like_sentence {
+            // list-item suppression: a) / \nb)
+            let sb = tokens[m].span().start().byte;
+            if sym == ")" && sb >= 1 && sb + 1 < text.len() + 1 {
+                let ctx1 = &text[sb.saturating_sub(1)..sb + 1];
+                let bad1 = ctx1.len() == 2 && ctx1.chars().next().map_or(false, |c| c.is_ascii_alphabetic());
+                let bad2 = sb >= 2 && {
+                    let ctx2 = &text[sb - 2..sb + 1];
+                    ctx2.starts_with('\n')
+                        && ctx2.chars().nth(1).map_or(false, |c| c.is_ascii_alphabetic())
+                };
+                if bad1 || bad2 {
+                    continue;
+                }
+            }
+            // createMatch dedup
+            let end_idx = ENDS.iter().position(|s| *s == sym);
+            let mut removed = false;
+            if let Some(ei) = end_idx {
+                if let Some(&(idx, top_sym, _)) = rule_match_stack.last() {
+                    if top_sym == STARTS[ei] && idx < out.len() {
+                        out.remove(idx);
+                        rule_match_stack.pop();
+                        // pop indices above idx
+                        for e in rule_match_stack.iter_mut() {
+                            if e.0 > idx {
+                                e.0 -= 1;
+                            }
+                        }
+                        removed = true;
+                    }
+                }
+            }
+            if !removed {
+                let other = ENDS
+                    .iter()
+                    .position(|s| *s == sym)
+                    .map(|i| STARTS[i])
+                    .or_else(|| STARTS.iter().position(|s| *s == sym).map(|i| ENDS[i]))
+                    .unwrap_or(sym);
+                let repl = if is_open {
+                    vec![format!("{}{}", sym, other)]
+                } else {
+                    vec![format!("{}{}", other, sym)]
+                };
+                let start = tokens[m].span().start();
+                let end = tokens[m].span().end();
+                rule_match_stack.push((out.len(), sym, is_open));
+                out.push(Suggestion::new(
+                    cfg.bracket_id.to_string(),
+                    "Unpaired bracket.".to_string(),
+                    Span::new(start.byte..end.byte, start.char..end.char),
+                    repl,
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn generic_unpaired_quotes(sentence: &Sentence, cfg: &UnpairedCfg) -> Vec<Suggestion> {
+    const STARTS: [&str; 4] = ["\u{201c}", "\"", "'", "\u{2018}"]; // “ " ‘
+    const ENDS: [&str; 4] = ["\u{201d}", "\"", "'", "\u{2019}"]; //   ” " ’
+
+    let tokens: Vec<_> = sentence.iter().collect();
+    let text = sentence.text();
+    let is_inch_quote = text.contains('\u{201c}') || text.contains('"') && {
+        // .*\d".* over the raw sentence text
+        let bytes = text.as_bytes();
+        let mut prev_digit = false;
+        let mut hit = false;
+        for &b in bytes {
+            if b == b'"' && prev_digit {
+                hit = true;
+                break;
+            }
+            prev_digit = b.is_ascii_digit();
+        }
+        hit
+    };
+    let tagged = |i: usize| -> bool {
+        tokens[i]
+            .word()
+            .tags()
+            .iter()
+            .any(|t| matches!(t.pos().as_str(), "POS" | "NNP" | "_apostrophe_contraction_"))
+    };
+    // English overrides: tagged => NOT (not-apostrophe) => treated as an
+    // apostrophe; untagged => a regular quote symbol
+    let is_not_beginning_apostrophe = |i: usize| !tagged(i);
+    let is_not_ending_apostrophe = |i: usize| !tagged(i);
+    let punctuation_like = |w: &str| -> bool {
+        // [\p{Punct}…–—&&[^"'_]]
+        w.chars().all(|c| {
+            c.is_ascii_punctuation()
+                && c != '"'
+                && c != '\''
+                && c != '_'
+                || matches!(c, '…' | '–' | '—')
+        }) && !w.is_empty()
+    };
+    let is_not_quote = |i: usize, j: usize| -> bool {
+        // (a) standalone: (sentence start or whitespace before) AND
+        //     (last token or whitespace before the next one)
+        let before_ok = i == 0 || tokens[i].has_space_before();
+        let after_ok = i + 1 >= tokens.len() || tokens[i + 1].has_space_before();
+        if before_ok && after_ok {
+            return true;
+        }
+        // (b) punct-quote-punct chains for ambiguous symbols: ("'")
+        if ENDS[j] == STARTS[j]
+            && i + 1 < tokens.len()
+            && i > 0
+            && !tokens[i].has_space_before()
+            && !tokens[i + 1].has_space_before()
+            && punctuation_like(tokens[i - 1].word().as_str())
+            && tokens[i + 1].word().as_str() != "."
+            && punctuation_like(tokens[i + 1].word().as_str())
+        {
+            return true;
+        }
+        false
+    };
+
+    let punctuation_marks = |w: &str| matches!(w, "?" | "." | "!" | ",");
+    let mut out: Vec<Suggestion> = Vec::new();
+    // LT isStartSymbolbefore(tokens, i) — verbatim incl. its quirk that a
+    // same-string symbol token leads to the else-branch (return false)
+    let is_start_symbol_before = |w: &str, i: usize| -> bool {
+        let mut j: isize = i as isize - 1;
+        while j > 0 {
+            let wj = tokens[j as usize].word().as_str();
+            if w != wj && STARTS.contains(&wj) {
+                let jm = j as usize;
+                return tokens[jm - 1].has_space_before();
+            } else {
+                return false;
+            }
+        }
+        true
+    };
+    let mut openers: Vec<(usize, &'static str)> = Vec::new();
+    let mut last_apos: Option<&'static str> = None;
+    let mut was_inch = false;
+
+    let flag = |out: &mut Vec<Suggestion>, i: usize| {
+        let start = tokens[i].span().start();
+        let end = tokens[i].span().end();
+        out.push(Suggestion::new(
+            cfg.quote_id.to_string(),
+            "Unpaired quote.".to_string(),
+            Span::new(start.byte..end.byte, start.char..end.char),
+            Vec::new(),
+        ));
+    };
+    // removeAllOpenInnerQuotes: flag+drop openers strictly after `index`
+    let remove_inner =
+        |openers: &mut Vec<(usize, &'static str)>, out: &mut Vec<Suggestion>, index: isize| {
+            let mut i = openers.len() as isize - 1;
+            while i > index {
+                let ti = openers[i as usize].0;
+                flag(out, ti);
+                openers.remove(i as usize);
+                i -= 1;
+            }
+        };
+
+    for i in 0..tokens.len() {
+        let w = tokens[i].word().as_str();
+        let start_j = STARTS.iter().position(|s| *s == w);
+        let end_j = ENDS.iter().position(|s| *s == w);
+        let has_open_same = |sym: &str| openers.iter().any(|(_, s)| *s == sym);
+        let is_opener = start_j.map_or(false, |j| {
+            if is_not_quote(i, j) {
+                return false;
+            }
+            if ENDS.contains(&STARTS[j]) {
+                // ambiguous symbol (" or ') — opener iff glued to punct / after
+                // sentence start / whitespace / start-symbol-before (LT tail)
+                (i == 0)
+                    || tokens[i].has_space_before()
+                    || (i + 1 < tokens.len()
+                        && !tokens[i + 1].has_space_before()
+                        && ((!punctuation_marks(tokens[i + 1].word().as_str())
+                            && punctuation_like(tokens[i - 1].word().as_str()))
+                            || tokens[i - 1].word().as_str().ends_with('-')))
+                    || is_start_symbol_before(w, i)
+            } else {
+                // pure start symbol (\u{201c} / \u{2018}) always opens
+                true
+            }
+        });
+        let is_closer = end_j.map_or(false, |j| {
+            // LT: isNotQuote && isNotOpenSymbol -> not a closer.
+            // isNotOpenSymbol is only restrictive for ambiguous symbols.
+            let not_open_symbol =
+                !(ENDS[j] == STARTS[j] && has_open_same(ENDS[j]));
+            !(is_not_quote(i, j) && not_open_symbol)
+        });
+        if is_opener {
+            let j = start_j.unwrap();
+            if !is_not_beginning_apostrophe(i) {
+                last_apos = Some(STARTS[j]);
+                continue;
+            }
+            if STARTS[j] == "\"" {
+                was_inch = false;
+            }
+            if last_apos == Some(STARTS[j]) {
+                last_apos = None;
+            }
+            if let Some(pos) = openers.iter().position(|(_, s)| *s == STARTS[j]) {
+                remove_inner(&mut openers, &mut out, pos as isize - 1);
+            }
+            openers.push((i, STARTS[j]));
+        } else if is_closer {
+            let j = end_j.unwrap();
+            if !is_not_beginning_apostrophe(i) {
+                last_apos = Some(ENDS[j]);
+                continue;
+            }
+            let is_inch_symb = ENDS[j] == "\"";
+            let is_inch = is_inch_symb && is_inch_quote;
+            let start_symbol = STARTS[j];
+            if let Some(pos) = openers.iter().position(|(_, s)| *s == start_symbol) {
+                remove_inner(&mut openers, &mut out, pos as isize);
+                openers.remove(pos);
+                if last_apos == Some(start_symbol) {
+                    last_apos = None;
+                }
+                if is_inch {
+                    was_inch = true;
+                }
+            } else if is_not_ending_apostrophe(i) {
+                if !is_inch && (!is_inch_symb || !was_inch) {
+                    if last_apos != Some(ENDS[j]) {
+                        flag(&mut out, i);
+                    } else {
+                        last_apos = None;
+                    }
+                } else {
+                    was_inch = false;
+                }
+            }
+        }
+    }
+    remove_inner(&mut openers, &mut out, -1);
+    out
+}
+
 pub(crate) fn unpaired_brackets(sentence: &Sentence, lang: Option<&str>) -> Vec<Suggestion> {
     let cfg = match lang.map_or_else(|| None, |l| text_cfg(l)) {
         Some(c) => c,
@@ -2102,6 +2910,11 @@ pub(crate) fn unpaired_brackets(sentence: &Sentence, lang: Option<&str>) -> Vec<
         Some(u) => u,
         None => return Vec::new(),
     };
+    if lang == Some("es") {
+        // es uses SpanishUnpairedBracketsRule (GenericUnpairedBracketsRule
+        // subclass) for ALL symbols incl. quotes and guillemets
+        return generic_unpaired_brackets_es(sentence, &cfg);
+    }
 
     let tokens: Vec<_> = sentence.iter().collect();
     // byte gap between token i and i+1 is empty => glued
@@ -2143,7 +2956,11 @@ pub(crate) fn unpaired_brackets(sentence: &Sentence, lang: Option<&str>) -> Vec<
                     '(' if glue_open || !cfg.glued_only => stack.push((i, ')')),
                     '[' if glue_open || !cfg.glued_only => stack.push((i, ']')),
                     '{' if glue_open || !cfg.glued_only => stack.push((i, '}')),
-                    ')' | ']' | '}' if glue_close || !cfg.glued_only => {
+                    // LT's base GenericUnpairedBracketsRule pairs typographic
+                    // quotes too (gl “Bo día” must flag the unmatched opener)
+                    '\u{201c}' if glue_open || !cfg.glued_only => stack.push((i, '\u{201d}')),
+                    '\u{2018}' if glue_open || !cfg.glued_only => stack.push((i, '\u{2019}')),
+                    ')' | ']' | '}' | '\u{201d}' | '\u{2019}' if glue_close || !cfg.glued_only => {
                         // pop the matching opener; unmatched closer flags here
                         if let Some(p) = stack.iter().rposition(|(_, cl)| *cl == c) {
                             stack.remove(p);
@@ -2154,7 +2971,7 @@ pub(crate) fn unpaired_brackets(sentence: &Sentence, lang: Option<&str>) -> Vec<
                     _ => {}
                 }
             }
-            if cfg.quotes && c == '"' && (glue_either || !cfg.glued_only) {
+            if cfg.quotes && !cfg.lt_generic_quotes && c == '"' && (glue_either || !cfg.glued_only) {
                 match quote_open.take() {
                     Some(_) => {}
                     None => quote_open = Some(i),
@@ -2188,6 +3005,13 @@ pub(crate) fn unpaired_brackets(sentence: &Sentence, lang: Option<&str>) -> Vec<
             Span::new(start.byte..end.byte, start.char..end.char),
             Vec::new(),
         ));
+    }
+    if cfg.lt_generic_quotes {
+        // quotes handled by the GenericUnpairedQuotesRule replication;
+        // brackets/guillemets stay on the char-level path above
+        let mut quotes = generic_unpaired_quotes(sentence, &cfg);
+        quotes.extend(out);
+        return quotes;
     }
     if let Some(i) = quote_open {
         let start = tokens[i].span().start();

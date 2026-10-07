@@ -127,7 +127,15 @@ impl Matcher {
                         })
                 }
             },
-            either::Right(regex) => regex.is_match(input),
+            either::Right(regex) => {
+                if std::env::var("NLPRULE_DEBUG_ANTI").is_ok()
+                    && input == "day"
+                    && regex.as_str().contains("Day|DAY")
+                {
+                    eprintln!("ANTIMATCH regex={:?} input={:?} -> {}", regex.as_str(), input, regex.is_match(input));
+                }
+                regex.is_match(input)
+            }
         };
 
         if self.negate {

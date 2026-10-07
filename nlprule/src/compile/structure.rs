@@ -179,6 +179,111 @@ pub mod preprocess {
             .to_string()
     }
 
+    #[cfg(test)]
+    mod sanitize_tests {
+        use super::sanitize;
+        use super::super::expand_phrases;
+        use super::super::propagate_antipattern_case_sensitive;
+        use crate::compile::structure::{Suggestion, SuggestionPart};
+
+        #[test]
+        fn propagates_antipattern_case_sensitive() {
+            let src = "<rules><rule id=\"X\"><antipattern case_sensitive=\"yes\"><token regexp=\"yes\">Foo|FOO</token><token>Bar</token><token case_sensitive=\"no\">Baz</token><token/></antipattern><pattern><token>foo</token></pattern></rule></rules>";
+            let out = propagate_antipattern_case_sensitive(src);
+            println!("PROPAGATED_OUT={out}");
+            assert!(out.contains("<token regexp=\"yes\" case_sensitive=\"yes\">Foo|FOO</token>"), "regexp token got attr: {out}");
+            assert!(out.contains("<token case_sensitive=\"yes\">Bar</token>"), "plain token got attr: {out}");
+            assert!(out.contains("<token case_sensitive=\"no\">Baz</token>"), "own attr preserved: {out}");
+            assert!(out.contains("<token case_sensitive=\"yes\"/>"), "self-closing token handled: {out}");
+            assert!(!out.contains("<pattern><token case_sensitive"), "pattern outside antipattern untouched: {out}");
+        }
+
+        #[test]
+        fn preserves_trailing_space_in_suggestion_text() {
+            let src = "<rules><rule id=\"X\"><pattern><token>a</token></pattern>\
+                <message>Did you mean <suggestion>Hola, qué tal <match no=\"1\"/>?</suggestion>?</message>\
+                </rule></rules>";
+            let out = sanitize(src.as_bytes(), &["suggestion"]);
+            assert!(
+                out.contains("text=\"Hola, qué tal \""),
+                "trailing space inside <suggestion> must survive sanitize; got: {}",
+                out
+            );
+        }
+
+        #[test]
+        fn preserves_space_between_suggestion_elements() {
+            // whitespace-only run between two <match> elements inside a
+            // whitespace-sensitive tag must become <text text=" "/> and not
+            // be dropped (LT preserves it as a text node)
+            let src = "<rules><rule id=\"X\"><pattern><token>a</token><token>b</token></pattern>\
+                <message>Did you mean <suggestion><match no=\"1\"/> <match no=\"2\"/></suggestion>?</message>\
+                </rule></rules>";
+            let out = sanitize(src.as_bytes(), &["suggestion"]);
+            assert!(
+                out.contains("<text text=\" \""),
+                "inter-element space inside <suggestion> must survive sanitize; got: {}",
+                out
+            );
+        }
+
+        #[test]
+        fn expand_phrases_keeps_space_between_matches() {
+            // regression (E1): pass 2 of expand_phrases dropped Whitespace
+            // events wholesale, eating the semantic space between two
+            // <match> elements inside a <suggestion> (es HOLA_COMO_ESTAS
+            // emitted "cómoestás" instead of "cómo estás")
+            let src = "<rules>\
+<phrases><phrase id=\"P1\"><token inflected=\"yes\">hola</token></phrase></phrases>\
+<rule id=\"X\">\
+<pattern><phraseref idref=\"P1\"/><token>como</token></pattern>\
+<message>Did you mean <suggestion>Hola, ¿<match case_conversion=\"preserve\" no=\"1\" regexp_match=\"(?iu)c[oó]mo\" regexp_replace=\"cómo\"></match> <match case_conversion=\"alllower\" no=\"2\" regexp_match=\"est[aá]\" regexp_replace=\"está\"></match>?</suggestion>?</message>\
+</rule>\
+</rules>";
+            let out = expand_phrases(src);
+            assert!(
+                out.contains("</match> <match"),
+                "space between <match> elements inside <suggestion> must survive expand_phrases; got: {}",
+                out
+            );
+        }
+
+        #[test]
+        fn preserves_space_between_matches_mixed_content() {
+            // exact shape of HOLA_COMO_ESTAS variant 11 in es/grammar.xml:
+            // text, then two <match> elements separated by a single space
+            let src = "<rules><rule id=\"X\"><pattern><token>hola</token><token>como</token>\
+                <token>estas</token></pattern>\
+                <message>Did you mean <suggestion>Hola, ¿<match case_conversion=\"preserve\" no=\"2\" regexp_match=\"(?iu)c[oó]mo\" regexp_replace=\"cómo\"></match> <match case_conversion=\"alllower\" no=\"3\" regexp_match=\"(?iu)est[aá](i?s?n?)\" regexp_replace=\"está$1\"></match>?</suggestion>?</message>\
+                </rule></rules>";
+            let out = sanitize(src.as_bytes(), &["suggestion"]);
+            assert!(
+                out.contains("<text text=\" \""),
+                "space between two <match> elements in mixed content must survive sanitize; got: {}",
+                out
+            );
+        }
+
+        #[test]
+        fn suggestion_text_attr_keeps_trailing_space() {
+            // exact shape of a sanitized <suggestion>: text nodes become
+            // <text text="..."/> elements; the attribute must deserialize
+            // byte-exact (no trimming) into SuggestionPart::Text
+            let src = "<suggestion><text text=\"Hola, ¿cómo \" /><match no=\"4\" /><text text=\"?\" /></suggestion>";
+            let parsed: Suggestion = serde_xml_rs::de::from_str(src).expect("deserialize");
+            let texts: Vec<&str> = parsed
+                .parts
+                .iter()
+                .map(|p| match p {
+                    SuggestionPart::Text(t) => t.as_str(),
+                    SuggestionPart::Match(_) => "<match>",
+                })
+                .collect();
+            assert_eq!(texts, vec!["Hola, ¿cómo ", "<match>", "?"],
+                "Text part lost its trailing space through deserialization");
+        }
+    }
+
     pub fn extract_rules(mut xml: impl std::io::Read) -> Vec<(String, Option<Category>)> {
         let mut string = String::new();
         xml.read_to_string(&mut string)
@@ -210,6 +315,7 @@ pub mod preprocess {
                         name: parent.attribute("name").unwrap().to_owned(),
                         kind: parent.attribute("type").map(|x| x.to_owned()),
                         default: parent.attribute("default").map(|x| x.to_owned()),
+                        tags: parent.attribute("tags").map(|x| x.to_owned()),
                     })
                 } else {
                     None
@@ -237,6 +343,8 @@ pub struct Category {
     pub name: String,
     pub kind: Option<String>,
     pub default: Option<String>,
+    /// Rule metadata tag (LT 6.x, e.g. "picky") inherited by all its rules.
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -838,6 +946,99 @@ type DisambiguationRuleReading = (DisambiguationRule, Option<Group>, Option<Cate
 /// Remove whitespace-only `<antipattern>` elements (e.g. `<antipattern> </antipattern>`, 
 /// a stray space in some grammars). They sanitize to an empty `$value` which fails 
 /// deserialization, and an empty antipattern is a semantic no-op in LT too.
+/// serde-xml-rs 0.4 drops element-level attributes on `<antipattern>`
+/// elements (their content is a sequence of child elements; `<pattern
+/// case_sensitive="yes">` alone deserializes fine — probed with a minimal
+/// rule: pattern-level works, antipattern-level arrives as `None`). LT
+/// applies the antipattern-level `case_sensitive` to every child token
+/// without its own setting, so push the attribute down into
+/// `<token>`/`<and>`/`<or>` tags here, before sanitize.
+/// (267 uses in en's grammar.xml alone — the CAPITALIZATION Valentine's
+/// day rule was suppressed entirely: LT fires, the port never did.)
+fn propagate_antipattern_case_sensitive(xml: &str) -> String {
+    fn is_name_char(c: u8) -> bool {
+        c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.'
+    }
+    let mut out = String::with_capacity(xml.len() + 2048);
+    let mut rest = xml;
+    loop {
+        let Some(pos) = rest.find("<antipattern") else { break };
+        // must be the element itself, not a longer name
+        if rest.as_bytes().get(pos + 12).map_or(true, |&c| is_name_char(c)) {
+            out.push_str(&rest[..pos + 13]);
+            rest = &rest[pos + 13..];
+            continue;
+        }
+        out.push_str(&rest[..pos]);
+        let open_end = rest[pos..]
+            .find('>')
+            .map(|i| pos + i + 1)
+            .unwrap_or(rest.len());
+        if open_end > rest.len() {
+            break;
+        }
+        let open_tag = &rest[pos..open_end];
+        let block_end = rest[open_end..]
+            .find("</antipattern>")
+            .map(|i| open_end + i + "</antipattern>".len())
+            .unwrap_or(rest.len());
+        let value = ["yes", "no"]
+            .into_iter()
+            .find(|v| open_tag.contains(&format!("case_sensitive=\"{v}\"")));
+        let Some(value) = value else {
+            // note: rest[..pos] was already copied above — only the block itself
+            out.push_str(&rest[pos..block_end]);
+            rest = &rest[block_end..];
+            continue;
+        };
+        // push tokens inside the block with the attribute injected
+        let block = &rest[pos..block_end];
+        let mut block_out = String::with_capacity(block.len() + 64);
+        let mut inner = &block[open_end - pos..block_end - pos];
+        block_out.push_str(&block[..open_end - pos]);
+        while !inner.is_empty() {
+            let Some(i) = inner.find('<') else {
+                block_out.push_str(inner);
+                break;
+            };
+            let tag = &inner[i..];
+            let tag_end = tag.find('>').map(|x| x + 1).unwrap_or(tag.len());
+            let open = &tag[..tag_end];
+            let is_rewritable = [("token", 5usize), ("and", 3), ("or", 2)]
+                .into_iter()
+                .any(|(name, name_len)| {
+                    open.starts_with(&format!("<{name}"))
+                        && open
+                            .as_bytes()
+                            .get(1 + name_len)
+                            .map_or(true, |&c| {
+                                c == b' ' || c == b'>' || c == b'/' || c == b'\t' || c == b'\n'
+                            })
+                });
+            block_out.push_str(&inner[..i]);
+            if is_rewritable && !open.contains("case_sensitive=") {
+                let (core, close) = if open.ends_with("/>") {
+                    (&open[..open.len() - 2], "/>")
+                } else if open.ends_with('>') {
+                    (&open[..open.len() - 1], ">")
+                } else {
+                    (open, "")
+                };
+                block_out.push_str(core);
+                block_out.push_str(&format!(" case_sensitive=\"{value}\""));
+                block_out.push_str(close);
+            } else {
+                block_out.push_str(open);
+            }
+            inner = &tag[tag_end..];
+        }
+        out.push_str(&block_out);
+        rest = &rest[block_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn strip_empty_antipatterns(raw_xml: &str) -> String {
     let mut out = String::with_capacity(raw_xml.len());
     let mut rest = raw_xml;
@@ -1221,6 +1422,11 @@ fn expand_phrases(raw_xml: &str) -> String {
     let mut skip_depth = 0usize; // inside <phrases>
     let mut rule_depth: Option<usize> = None; // inside a <rule> being buffered
     let mut rule_buf = String::new();
+    // depth inside <suggestion>: whitespace-only text nodes there are
+    // semantically significant (LT keeps them as text nodes between
+    // suggestion children, e.g. the space between two <match> elements)
+    // and must survive this rewrite
+    let mut suggestion_depth = 0usize;
 
     for e in reader {
         match e {
@@ -1238,6 +1444,9 @@ fn expand_phrases(raw_xml: &str) -> String {
                 }
                 if skip_depth > 0 {
                     continue;
+                }
+                if local == "suggestion" {
+                    suggestion_depth += 1;
                 }
                 let depth_mark = rule_depth.is_some();
                 let mut el = format!("<{}", local);
@@ -1274,6 +1483,9 @@ fn expand_phrases(raw_xml: &str) -> String {
                     }
                     continue;
                 }
+                if local == "suggestion" {
+                    suggestion_depth = suggestion_depth.saturating_sub(1);
+                }
                 if let Some(d) = rule_depth.as_mut() {
                     *d -= 1;
                     if *d == 0 {
@@ -1302,6 +1514,19 @@ fn expand_phrases(raw_xml: &str) -> String {
                     out.push_str(&esc_text(&c));
                 }
             }
+            Ok(xml::reader::XmlEvent::Whitespace(w)) => {
+                // keep whitespace-only nodes inside <suggestion> (LT reads
+                // them as text nodes); drop them everywhere else — sanitize
+                // reindents the document anyway
+                if skip_depth == 0 && suggestion_depth > 0 {
+                    let escaped = esc_text(&w);
+                    if rule_depth.is_some() {
+                        rule_buf.push_str(&escaped);
+                    } else {
+                        out.push_str(&escaped);
+                    }
+                }
+            }
             Ok(_) => {}
             Err(_) => return raw_xml.to_string(),
         }
@@ -1325,6 +1550,7 @@ pub fn read_rules<P: AsRef<std::path::Path>>(
             .unwrap();
     }
     let raw_xml = strip_empty_antipatterns(&raw_xml);
+    let raw_xml = propagate_antipattern_case_sensitive(&raw_xml);
     let raw_xml = expand_phrases(&raw_xml);
     let regex_defs = extract_regex_rule_defs(&raw_xml);
 
@@ -1603,6 +1829,7 @@ pub fn extract_regex_rule_defs(raw_xml: &str) -> Vec<crate::rule::regex_rule::Re
         regexp: roxmltree::Node,
         source: String,
         enabled: bool,
+        picky: bool,
     ) -> Option<RegexRuleDef> {
         let pattern = regexp.text().unwrap_or_default().trim().to_string();
         if pattern.is_empty() {
@@ -1682,6 +1909,7 @@ pub fn extract_regex_rule_defs(raw_xml: &str) -> Vec<crate::rule::regex_rule::Re
             suggestions,
             message,
             enabled,
+            picky,
         })
     }
 
@@ -1693,6 +1921,10 @@ pub fn extract_regex_rule_defs(raw_xml: &str) -> Vec<crate::rule::regex_rule::Re
         .filter(|c| c.is_element() && c.tag_name().name() == "category")
     {
         let category_id = node.attribute("id").unwrap_or("MISC").to_string();
+        // LT 6.x: the category's default= and tags= (e.g. picky) apply to all
+        // rulegroups/rules inside it
+        let category_on = default_on(node);
+        let category_picky = has_picky(node);
 
         for group_or_rule in node
             .children()
@@ -1710,9 +1942,10 @@ pub fn extract_regex_rule_defs(raw_xml: &str) -> Vec<crate::rule::regex_rule::Re
                     Some(id) => id.to_string(),
                     None => continue,
                 };
-                let enabled = default_on(group_or_rule) && !has_picky(group_or_rule);
+                let enabled = category_on && default_on(group_or_rule) && !category_picky && !has_picky(group_or_rule);
+                let picky = (category_picky || has_picky(group_or_rule)) && category_on && default_on(group_or_rule);
                 let source = format!("{}/{}/{}", category_id, rule_id, 0);
-                if let Some(def) = def_from_rule(group_or_rule, regexp, source, enabled) {
+                if let Some(def) = def_from_rule(group_or_rule, regexp, source, enabled, picky) {
                     defs.push(def);
                 }
             } else {
@@ -1735,13 +1968,14 @@ pub fn extract_regex_rule_defs(raw_xml: &str) -> Vec<crate::rule::regex_rule::Re
                         None => continue,
                     };
                     let sub_id = child.attribute("id").map(|x| x.to_string());
-                    let enabled =
-                        default_on(child) && group_on && !group_picky && !has_picky(child);
+                    let on = default_on(child) && group_on && category_on;
+                    let picky = (group_picky || category_picky || has_picky(child)) && on;
+                    let enabled = on && !picky;
                     let source = match &sub_id {
                         Some(sub) => format!("{}/{}/{}", category_id, sub, 0),
                         None => format!("{}/{}/{}", category_id, group_id, idx),
                     };
-                    if let Some(def) = def_from_rule(child, regexp, source, enabled) {
+                    if let Some(def) = def_from_rule(child, regexp, source, enabled, picky) {
                         defs.push(def);
                     }
                 }

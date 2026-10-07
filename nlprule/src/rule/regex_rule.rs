@@ -20,6 +20,9 @@ pub struct RegexRuleDef {
     pub suggestions: Vec<Vec<RegexSugPart>>,
     pub message: String,
     pub enabled: bool,
+    /// LT `tags="picky"`: off at the default level, on in picky mode.
+    #[serde(default)]
+    pub picky: bool,
 }
 
 /// One part of a `<suggestion>` element.

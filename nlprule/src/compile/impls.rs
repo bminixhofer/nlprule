@@ -298,6 +298,12 @@ fn literal_alternation_set(
 
     // case-insensitive regexes were rewritten by `from_java_regex` into
     // single-char classes (e.g. `[wW][oO][rR][dD]`); undo that representation
+    // and record whether folding happened: a regex WITHOUT folded classes was
+    // compiled case-SENSITIVELY (case_sensitive="yes"), and its set must
+    // contain only the literal as written — adding the case variants would
+    // make `Bar` match "bar" through the set-membership fast path
+    // (probed: en CAPITALIZATION Valentine's day antipattern over-blocked)
+    let mut saw_folded_class = false;
     let lowercased: Option<Vec<String>> = inner
         .split('|')
         .map(|alt| {
@@ -313,6 +319,7 @@ fn literal_alternation_set(
                         if chars.next() != Some(']') || a.to_lowercase().next() != b.to_lowercase().next() {
                             return None;
                         }
+                        saw_folded_class = true;
                         word.push(a.to_lowercase().next()?);
                     }
                     ']' | '\\' | '.' | '^' | '$' | '?' | '*' | '+' | '(' | ')' | '{' | '}' => {
@@ -334,19 +341,30 @@ fn literal_alternation_set(
 
     let mut set = DefaultHashSet::default();
     for word in words {
-        // a case-insensitive literal matches the word in the casings that can
-        // occur in the word store: as-is, lowercase, capitalized and uppercase
-        for variant in [
-            word.clone(),
-            word.to_lowercase(),
-            capitalize(&word),
-            word.to_uppercase(),
-        ] {
-            // O(1) word store lookup
-            if let Some(id) = info.tagger().id_word(variant.into()).1 {
+        if saw_folded_class {
+            // a case-insensitive literal matches the word in the casings that
+            // can occur in the word store: as-is, lowercase, capitalized and
+            // uppercase
+            for variant in [
+                word.clone(),
+                word.to_lowercase(),
+                capitalize(&word),
+                word.to_uppercase(),
+            ] {
+                // O(1) word store lookup
+                if let Some(id) = info.tagger().id_word(variant.into()).1 {
+                    set.insert(id);
+                }
+            }
+        } else {
+            // case-sensitive literal: only the form as written
+            if let Some(id) = info.tagger().id_word(word.into()).1 {
                 set.insert(id);
             }
         }
+    }
+    if std::env::var("NLPRULE_DEBUG_SETS").is_ok() {
+        eprintln!("DEBUGSET literal_alternation set={:?}", set);
     }
 
     Some(set)
@@ -367,6 +385,9 @@ impl TextMatcher {
         let set = if matcher.graph_id().is_some() {
             None
         } else if let either::Right(regex) = &matcher.matcher {
+            if std::env::var("NLPRULE_DEBUG_SETS").is_ok() {
+                eprintln!("DEBUGSET matcher regex={:?}", regex.as_str());
+            }
             let mut hasher = DefaultHasher::default();
             regex.hash(&mut hasher);
             matcher.negate.hash(&mut hasher);
@@ -483,6 +504,11 @@ impl Rules {
                             .as_ref()
                             .and_then(|g| g.tags.as_deref())
                             .map(|x| x.split_whitespace().any(|t| t == "picky"))
+                            .unwrap_or(false)
+                        || category
+                            .tags
+                            .as_deref()
+                            .map(|x| x.split_whitespace().any(|t| t == "picky"))
                             .unwrap_or(false);
 
                     let category_on = match category.default.as_deref() {
@@ -514,7 +540,9 @@ impl Rules {
                                 rule.name = name;
                                 rule.category_name = category.name;
                                 rule.category_type = category.kind;
-                                rule.enabled = category_on && group_on && rule_on && !picky_off;
+                                let on = category_on && group_on && rule_on;
+                                rule.picky = picky_off && on;
+                                rule.enabled = on && !picky_off;
                                 Some(rule)
                             } else {
                                 None

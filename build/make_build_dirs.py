@@ -281,13 +281,17 @@ def simple_replace_rules(tables, lang=None):
             corrects = [c.strip() for c in correct.split("|") if c.strip()]
             if not wrongs or not corrects:
                 continue
-            suggestions = "|".join(escape_xml(c) for c in corrects)
+            # LT semantics: each alternative is its own <suggestion> element
+            # (the engine parses one replacement per element)
+            suggestions = " or ".join(
+                f"<suggestion>{escape_xml(c)}</suggestion>" for c in corrects
+            )
             for w in wrongs:
                 rid = f' id="{group}_{infix}{_simple_word_id(w)}"' if per_word else ""
                 rules.append(
                     f"<rule{rid}>\n"
                     f"<pattern>{_simple_pattern(w)}</pattern>\n"
-                    f"<message>Did you mean <suggestion>{suggestions}</suggestion>?</message>\n"
+                    f"<message>Did you mean {suggestions}?</message>\n"
                     "</rule>"
                 )
         if rules:
@@ -298,6 +302,16 @@ def simple_replace_rules(tables, lang=None):
                 + "\n</rulegroup>\n</category>"
             )
     return "\n".join(parts)
+
+MULTITOKEN_LISTS = {
+    "en": ["en/multiwords.txt"],
+    "de": ["de/multitoken-suggest.txt", "de/hunspell/spelling.txt"],
+    "fr": ["fr/multiwords.txt", "fr/hyphenated_words.txt"],
+    "es": ["es/multiwords.txt", "es/hyphenated_words.txt"],
+    "ca": ["ca/multiwords.txt", "ca/hyphenated_words.txt"],
+    "pt": ["pt/multiwords.txt", "pt/hyphenated_words.txt"],
+    "nl": ["nl/multiwords.txt"],
+}
 
 SPELLER_DICTS = {
     "ca": [("catalan-pos-dict.jar", "ca/ca-ES_spelling")],
@@ -672,19 +686,32 @@ def make_build_dir(lang, lt_dir, out_root, java, classpath, keep_going):
         canonicalize(dist_grammar if dist_grammar.exists() else grammar, grammar)
 
     # expand <phraseref idref="..."/> with the matching <phrase> body
+    # (comment-aware: commented-out rules keep their <phraseref> verbatim —
+    # splicing a phrase body (which may contain <!-- ... --> comments) into a
+    # comment region produces nested comments = illegal XML; hit on pt 6.6)
     if grammar.exists():
         content = grammar.read_text(encoding="utf-8", errors="replace")
         m = re.search(r"<phrases>(.*?)</phrases>", content, re.S)
         if m:
             defs = dict(re.findall(r'<phrase id="([^"]+)">(.*?)</phrase>', m.group(1), re.S))
-            content, n = re.subn(
-                r'<phraseref idref="([^"]+)"\s*/>\s*|<phraseref idref="([^"]+)">\s*</phraseref>',
-                lambda mm: defs.get(mm.group(1) or mm.group(2), "").strip(),
-                content,
-            )
-            if n:
+            total = 0
+            # split into (comment, live) segments; substitute only in live ones
+            segments = re.split(r"(<!--.*?-->)", content, flags=re.S)
+            for i, seg in enumerate(segments):
+                if i % 2 == 1:  # comment segment (capture group)
+                    segments[i] = seg
+                    continue
+                seg, n = re.subn(
+                    r'<phraseref idref="([^"]+)"\s*/>\s*|<phraseref idref="([^"]+)">\s*</phraseref>',
+                    lambda mm: defs.get(mm.group(1) or mm.group(2), "").strip(),
+                    seg,
+                )
+                segments[i] = seg
+                total += n
+            content = "".join(segments)
+            if total:
                 grammar.write_text(content, encoding="utf-8")
-                logging.info("%s: expanded %d phraserefs", lang, n)
+                logging.info("%s: expanded %d phraserefs", lang, total)
 
     # convert LT SimpleReplaceRule data tables into XML rules
     if grammar.exists():
