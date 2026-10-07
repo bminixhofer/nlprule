@@ -1,0 +1,24 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "SENT_END",
+        "\u305d\u306e\u4ed6",
+        "\u30d5\u30a3\u30e9\u30fc",
+        "\u526f\u8a5e",
+        "\u52a9\u52d5\u8a5e",
+        "\u52a9\u8a5e",
+        "\u52a9\u8a5e-\u9023\u4f53\u5316",
+        "\u52d5\u8a5e",
+        "\u52d5\u8a5e-\u81ea\u7acb",
+        "\u540d\u8a5e",
+        "\u540d\u8a5e-\u30b5\u5909\u63a5\u7d9a",
+        "\u5f62\u5bb9\u8a5e",
+        "\u611f\u52d5\u8a5e",
+        "\u63a5\u7d9a\u8a5e",
+        "\u63a5\u982d\u8a5e",
+        "\u672a\u77e5",
+        "\u8a18\u53f7"
+    ],
+    "retain_last": true
+}

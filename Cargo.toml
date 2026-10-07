@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "nlprule",
-    "build",
-    "python"
+    "build"
 ]
+exclude = ["python"]
 
 # nlprule is really slow without optimizations (esp. compiling binaries)
 [profile.dev]

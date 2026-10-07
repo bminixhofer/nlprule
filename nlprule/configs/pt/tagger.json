@@ -1,0 +1,27 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "PP1CP000",
+        "PP3CN000",
+        "SENT_END",
+        "SENT_START",
+        "SP000",
+        "UNKNOWN",
+        "VAIP3S0",
+        "VMIP1P0X",
+        "VMN0000X",
+        "Z0CN0",
+        "ZRCN0",
+        "_IS_URL",
+        "_PUNCT",
+        "_PUNCT_COMMA",
+        "_PUNCT_PERIOD",
+        "_QM_OPEN",
+        "_QUOT",
+        "_TRESPONTOS",
+        "_abrev_biblia",
+        "_english_ignore_"
+    ],
+    "retain_last": true
+}

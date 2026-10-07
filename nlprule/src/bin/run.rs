@@ -1,7 +1,7 @@
-use clap::Clap;
+use clap::Parser;
 use nlprule::{rules::Rules, tokenizer::Tokenizer};
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(
     version = "1.0",
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"

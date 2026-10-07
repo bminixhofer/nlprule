@@ -1,10 +1,10 @@
-use clap::Clap;
+use clap::Parser;
 use fs_err as fs;
 use nlprule::compile::{compile, Error};
 use std::io::BufWriter;
 use std::path::PathBuf;
 
-#[derive(clap::Clap)]
+#[derive(Parser)]
 #[clap(
     version = env!("CARGO_PKG_VERSION"),
     author = "Benjamin Minixhofer <bminixhofer@gmail.com>"

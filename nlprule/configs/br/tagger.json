@@ -1,0 +1,16 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "K e sp",
+        "SENT_START",
+        "UNKNOWN",
+        "X A_UNAN_DA_UNAN",
+        "X DA_LAVARET_EO",
+        "X EN_EM",
+        "X EN_UR",
+        "X KAOUT1",
+        "X KAOUT2"
+    ],
+    "retain_last": true
+}

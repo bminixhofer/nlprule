@@ -1,0 +1,18 @@
+# Same exclusions as .dockerignore, but keep the four rule binaries that
+# Dockerfile.service bakes into the service image (~225 MB, not the whole
+# 5.6 GB storage/ tree).
+storage/*
+!storage/en_tokenizer.bin
+!storage/en_rules.bin
+!storage/es_tokenizer.bin
+!storage/es_rules.bin
+!storage/ca_tokenizer.bin
+!storage/ca_rules.bin
+target
+bench
+examples
+python
+scripts
+binaries
+.git
+data2*

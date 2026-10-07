@@ -1,0 +1,11 @@
+services:
+  nlprule:
+    build: .
+    image: nlprule-all:latest
+    init: true
+    volumes:
+      # rule binaries (~5.6 GB for all languages) stay on the host
+      - ./storage:/storage:ro
+    # examples:
+    #   docker compose run -T nlprule en < sentences.txt
+    #   docker compose run -T nlprule dump-rules es

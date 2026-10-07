@@ -1,0 +1,10 @@
+{
+    "use_compound_split_heuristic": true,
+    "always_add_lower_tags": false,
+    "extra_tags": [
+        "PKT",
+        "SENT_END",
+        "SENT_START"
+    ],
+    "retain_last": true
+}

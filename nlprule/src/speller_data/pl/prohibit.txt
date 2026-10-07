@@ -1,0 +1,18 @@
+# words to be removed from hunspell dictionaries in all variants
+# This is used to correct dictionary errors
+#
+bezwątpienia
+# lowercase spelling "warszawa" is the name of an old car brand, but also the name of the capital of Poland (which should be capitalized and is much more common)
+warszawa
+polakach
+polakami
+polakom
+polaka
+polakiem
+polakowi
+polaku
+polaków
+polaki
+polak
+uni
+fer

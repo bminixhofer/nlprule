@@ -51,9 +51,14 @@ fn suggest_indices_are_relative_to_input_text() {
     assert_eq!(*suggestions[0].span().char(), 6..9);
     assert_eq!(*suggestions[0].span().byte(), 6..9);
 
-    assert_eq!(*suggestions[1].span().char(), 38..41);
+    // LT parity: the CURRENCY rule fires on "10€" (char span 27..30, the €
+    // being 3 bytes long in UTF-8).
+    assert_eq!(*suggestions[1].span().char(), 27..30);
+    assert_eq!(*suggestions[1].span().byte(), 27..32);
+
+    assert_eq!(*suggestions[2].span().char(), 38..41);
     assert_eq!(
-        *suggestions[1].span().byte(),
+        *suggestions[2].span().byte(),
         38 + '€'.len_utf8() - 1..41 + '€'.len_utf8() - 1
     );
 }

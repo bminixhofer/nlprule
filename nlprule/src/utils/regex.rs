@@ -50,6 +50,11 @@ impl Hash for Regex {
 }
 
 impl Regex {
+    /// Gets the pattern string.
+    pub fn as_str(&self) -> &str {
+        &self.regex_str
+    }
+
     /// Create a new regex from the pattern string.
     ///
     /// Note that the regex compilation happens on first use, which is why this method does not

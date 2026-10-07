@@ -1,0 +1,9 @@
+{
+    "use_compound_split_heuristic": false,
+    "always_add_lower_tags": true,
+    "extra_tags": [
+        "SENT_END",
+        "SENT_START"
+    ],
+    "retain_last": true
+}

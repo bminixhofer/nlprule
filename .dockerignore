@@ -1,0 +1,11 @@
+# Keep the build context small: the heavy trees are mounted at runtime,
+# never sent to the builder.
+storage
+target
+bench
+examples
+python
+scripts
+binaries
+.git
+data2*

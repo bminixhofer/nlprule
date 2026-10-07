@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+
+# Service image: the Rust workspace plus the rule binaries for the languages
+# the service serves, baked in (the plain Dockerfile keeps storage/ outside
+# the image; this variant is meant for hosts where there is no local
+# checkout to mount, e.g. a NAS). en+es+ca add ~305 MB; all 35 languages
+# would be ~5.6 GB.
+#
+#   docker build -f Dockerfile.service -t nlprule-service .
+#   docker run -d --name nlprule -p 8081:8080 --restart unless-stopped nlprule-service
+#
+# Endpoints: POST /check {"text": "...", "lang": "es"}, GET /languages, GET /health.
+FROM rust:1-bookworm AS builder
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY nlprule ./nlprule
+COPY build ./build
+RUN cargo build --release --features "compile bin zh ja"
+
+FROM debian:bookworm-slim AS service
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates python3 curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/compile \
+    /build/target/release/test \
+    /build/target/release/run \
+    /build/target/release/check_server \
+    /build/target/release/bench \
+    /build/target/release/debug_filters \
+    /build/target/release/test_disambiguation \
+    /build/target/release/opennlp_to_chunker \
+    /usr/local/bin/
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/http_server.py /opt/nlprule-http/http_server.py
+COPY storage/en_tokenizer.bin storage/en_rules.bin \
+    storage/es_tokenizer.bin storage/es_rules.bin \
+    storage/ca_tokenizer.bin storage/ca_rules.bin \
+    /storage/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENV NLPRULE_LANGS=en,es,ca
+EXPOSE 8080
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["http"]

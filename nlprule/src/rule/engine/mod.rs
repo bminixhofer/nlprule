@@ -7,10 +7,18 @@ pub mod composition;
 
 use composition::{Composition, GraphId, Group, MatchGraph, MatchSentence};
 
+/// An antipattern with an optional unification constraint (LT allows
+/// `<unify>` inside `<antipattern>`).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AntiPattern {
+    pub(crate) composition: Composition,
+    pub(crate) unification: Option<crate::rule::Unification>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TokenEngine {
     pub(crate) composition: Composition,
-    pub(crate) antipatterns: Vec<Composition>,
+    pub(crate) antipatterns: Vec<AntiPattern>,
 }
 
 impl TokenEngine {
@@ -21,7 +29,19 @@ impl TokenEngine {
             // TODO: cache / move to outer loop
             for i in 0..sentence.len() {
                 for antipattern in &self.antipatterns {
-                    if let Some(anti_graph) = antipattern.apply(sentence, i) {
+                    if let Some(anti_graph) = antipattern.composition.apply(sentence, i) {
+                        // an antipattern with a unification only blocks when
+                        // the unification is satisfied (e.g. "det and noun
+                        // actually agree" must not block the disagreement
+                        // rule). The composition returns only one alignment;
+                        // checking keep() on it mirrors LT closely enough.
+                        let unification_ok = antipattern
+                            .unification
+                            .as_ref()
+                            .map_or(true, |u| u.keep(&anti_graph, sentence));
+                        if !unification_ok {
+                            continue;
+                        }
                         let anti_start = anti_graph.by_index(0).span.char().start;
                         let anti_end = anti_graph
                             .by_index(anti_graph.groups().len() - 1)
@@ -34,6 +54,12 @@ impl TokenEngine {
 
                         if anti_start <= rule_end && rule_start <= anti_end {
                             blocked = true;
+                            if std::env::var("NLPRULE_DEBUG_ANTI").is_ok() {
+                                eprintln!(
+                                    "ANTIBLOCK anti=[{},{}] rule=[{},{}]",
+                                    anti_start, anti_end, rule_start, rule_end
+                                );
+                            }
                             break;
                         }
                     }

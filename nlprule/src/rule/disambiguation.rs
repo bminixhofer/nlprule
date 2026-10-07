@@ -12,7 +12,7 @@ pub struct PosFilter {
 }
 
 impl PosFilter {
-    fn is_word_data_match(&self, data: &WordData) -> bool {
+    pub(crate) fn is_word_data_match(&self, data: &WordData) -> bool {
         self.matcher.is_match(data.pos())
     }
 
@@ -22,6 +22,19 @@ impl PosFilter {
 
     fn remove(&self, data: &mut Word) {
         data.retain(|x| !self.is_word_data_match(x))
+    }
+
+    /// Like [PosFilter::and], but only readings that also satisfy the
+    /// optional element constraint are considered.
+    pub fn and_restricted(
+        filters: &[&Self],
+        data: &Word,
+        element: Option<&Self>,
+    ) -> bool {
+        data.tags().iter().any(|x| {
+            element.map_or(true, |e| e.is_word_data_match(x))
+                && filters.iter().all(|filter| filter.is_word_data_match(x))
+        })
     }
 
     pub fn and(filters: &[&Self], data: &Word) -> bool {
@@ -43,6 +56,9 @@ impl PosFilter {
 pub enum Disambiguation {
     Remove(Vec<either::Either<owned::WordData, PosFilter>>),
     Add(Vec<owned::WordData>),
+    /// `action="addchunk"`: add a chunk tag to each matched token
+    /// (mirrors `DisambiguationPatternRuleReplacer` ADDCHUNK).
+    AddChunk(Vec<String>),
     Replace(Vec<owned::WordData>),
     Filter(
         Vec<Option<either::Either<owned::WordData, PosFilter>>>,
@@ -50,6 +66,13 @@ pub enum Disambiguation {
     ),
     Unify(Vec<Vec<PosFilter>>, Vec<Option<PosFilter>>, Vec<bool>),
     Nop,
+    /// `action="immunize"`: mark matched tokens as immunized (skipped by the
+    /// text-level built-ins like LT's UPPERCASE_SENTENCE_START and speller).
+    /// Stored as the sentinel chunk `_immunized`.
+    Immunize,
+    /// `action="ignore_spelling"`: the speller must skip matched tokens.
+    /// Stored as the sentinel chunk `_ignore_spelling`.
+    IgnoreSpelling,
 }
 
 impl Disambiguation {
@@ -129,6 +152,15 @@ impl Disambiguation {
                     }
                 }
             }
+            Disambiguation::AddChunk(chunks) => {
+                for (group, chunk) in groups.into_iter().zip(chunks) {
+                    for token in group.into_iter() {
+                        if !token.chunks().contains(chunk) {
+                            token.chunks_mut().push(chunk.clone());
+                        }
+                    }
+                }
+            }
             Disambiguation::Replace(datas) => {
                 for (group, data) in groups.into_iter().zip(datas) {
                     for token in group.into_iter() {
@@ -201,6 +233,20 @@ impl Disambiguation {
                 }
             }
             Disambiguation::Nop => {}
+            Disambiguation::Immunize | Disambiguation::IgnoreSpelling => {
+                let sentinel = match self {
+                    Disambiguation::Immunize => "_immunized",
+                    Disambiguation::IgnoreSpelling => "_ignore_spelling",
+                    _ => unreachable!(),
+                };
+                for group in groups.into_iter() {
+                    for token in group.into_iter() {
+                        if !token.chunks().contains(&sentinel.to_string()) {
+                            token.chunks_mut().push(sentinel.to_string());
+                        }
+                    }
+                }
+            }
         }
     }
 }
